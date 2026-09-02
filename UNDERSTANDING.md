@@ -2,7 +2,9 @@ built in rust, and exposes a rust library for usage.
 
 space station is an observability tool that accepts records for a table within an organization. and then a carbon/silicon can create space-windows depending on the information being looked for.
 
-Org > Tables > Records
+Org > Tables (scemantic, not actual) > Records
+
+there is only one clickhouse table physcially, but it feels like writing to table because the backend does the logical seperation during querying. from here on, i'll assume that a table is real, but it is just a mirage created by the backend.
 
 i'll write pseudocode (in python style), to be implemented in rust eventually:
 event flow:
