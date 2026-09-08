@@ -46,14 +46,9 @@ function Login(p: { bound?: Me; requestedOrg?: string }) {
       <div class="landing-art" aria-hidden="true"><span>╭────────────╮</span><span>│  ◌  ◌  ◌  │</span><span>│    ◇      │</span><span>╰────────────╯</span></div>
       <h1>Space Station<span class="pixel-dot">·</span></h1>
       <p class="landing-lede">A calm home for your records, live views, and notifications.</p>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          location.assign(loginUrl(org(), destination()));
-        }}
-      >
-        <button class="primary" type="submit">Log in with Silicon IAM</button>
-      </form>
+      <a class="primary login-link" href={loginUrl(org(), destination())}>
+        Log in with Silicon IAM
+      </a>
       <p>
         <A href="/docs">Read the docs →</A>
       </p>
