@@ -10,14 +10,13 @@ import {
 } from "@solidjs/router";
 import {
   createSignal,
-  createMemo,
   onCleanup,
   Show,
   For,
   ErrorBoundary,
   type ParentProps,
 } from "solid-js";
-import { api, signedOut, type Me, type Org, type DevError } from "../lib/api";
+import { api, signedOut, type Me, type DevError } from "../lib/api";
 import { action, ErrorText, resource, Loading, when } from "./ui";
 import {
   Tables,
@@ -32,15 +31,9 @@ import {
 import "./style.css";
 export const loginUrl = (org: string, next: string) =>
   `/api/auth/login?org=${encodeURIComponent(org)}&next=${encodeURIComponent(next)}`;
-/**
- * Browser IAM currently issues an org-bound session. Keep that protocol detail out of the
- * landing page: the app chooses the requested org (or the default workspace) and IAM handles
- * the carbon sign-in. Once signed in, `/orgs` supplies every organization known to the mirror.
- */
-function Login(p: { bound?: Me; requestedOrg?: string }) {
-  const org = () => p.requestedOrg || p.bound?.org || "tos";
-  // On the landing route, return to the organization picker so `/orgs` can populate it.
-  const destination = () => p.requestedOrg ? `/o/${org()}/tables` : "/";
+// Each browser session is bound to the organization entered at sign-in.
+function Login(p: { requestedOrg?: string }) {
+  const [org, setOrg] = createSignal(p.requestedOrg || "");
   return (
     <main class="login landing">
       <div class="landing-art" aria-hidden="true">
@@ -51,33 +44,13 @@ function Login(p: { bound?: Me; requestedOrg?: string }) {
           <g class="station"><rect x="270" y="112" width="100" height="20" rx="3"/><rect x="270" y="388" width="100" height="20" rx="3"/><rect x="301" y="132" width="38" height="256" rx="5"/><path d="M301 184h38M301 336h38"/><rect class="panel" x="185" y="238" width="100" height="42" rx="4"/><rect class="panel" x="355" y="238" width="100" height="42" rx="4"/><path d="M285 259h16M339 259h16"/></g>
           <circle class="signal" cx="320" cy="260" r="242"/>
         </svg>
-        <span class="art-label">LIVE ORBITAL NETWORK · 01</span>
       </div>
       <h1>Space Station<span class="pixel-dot">·</span></h1>
       <p class="landing-lede">A calm home for your records, live views, and notifications.</p>
-      <a class="primary login-link" href={loginUrl(org(), destination())}>
-        Log in with Silicon IAM
-      </a>
-    </main>
-  );
-}
-function OrganizationPicker(p: { me: Me; orgs?: Org[] }) {
-  const choices = createMemo(() => {
-    const all = [{ id: p.me.org, name: p.me.org }, ...(p.orgs || [])];
-    return all.filter((item, index) => all.findIndex((candidate) => candidate.id === item.id) === index);
-  });
-  return (
-    <main class="org-picker">
-      <h1>Choose an organization</h1>
-      <p class="muted">Organizations available in Space Station.</p>
-      <div class="org-list">
-        <For each={choices()}>{(item) => (
-          <a class="org-choice" href={item.id === p.me.org ? `/o/${item.id}/tables` : loginUrl(item.id, `/o/${item.id}/tables`)}>
-            <strong>{item.name || item.id}</strong>
-            <span>{item.id}</span>
-          </a>
-        )}</For>
-      </div>
+      <form onSubmit={(e) => { e.preventDefault(); location.assign(loginUrl(org(), `/o/${org()}/tables`)); }}>
+        <label>Organization ID<input required pattern={"[a-z0-9_\\-]{3,50}"} value={org()} onInput={(e) => setOrg(e.currentTarget.value)} placeholder="e.g. tos" /></label>
+        <button class="primary login-link" type="submit">Log in with Silicon IAM</button>
+      </form>
     </main>
   );
 }
@@ -92,14 +65,6 @@ function Shell(p: ParentProps) {
     } catch (e) {
       if ((e as { status: number }).status === 401) return null;
       throw e;
-    }
-  }, undefined, publicPage);
-  const orgs = resource(async () => {
-    if (publicPage()) return [];
-    try {
-      return await api<Org[]>("/orgs");
-    } catch {
-      return [];
     }
   }, undefined, publicPage);
   const logout = action();
@@ -118,10 +83,6 @@ function Shell(p: ParentProps) {
   const org = () => loc.pathname.split("/")[2];
   const docs = publicPage;
   const [collapsed, setCollapsed] = createSignal(localStorage.getItem("ss-sidebar") === "collapsed");
-  const availableOrgs = createMemo(() => {
-    const values = [me.data()?.org, ...(orgs.data() || []).map((o) => o.id)].filter(Boolean) as string[];
-    return [...new Set(values)];
-  });
   const toggleSidebar = () => {
     const next = !collapsed();
     setCollapsed(next);
@@ -181,16 +142,15 @@ function Shell(p: ParentProps) {
                 {(m) => (
                   <Show
                     when={org()}
-                    fallback={<OrganizationPicker me={m()} orgs={orgs.data()} />}
+                    fallback={<Navigate href={`/o/${m().org}/tables`} />}
                   >
                     <Show
                       when={org() === m().org}
                       fallback={
                         <main>
                           <p>This page belongs to {org()}.</p>
-                          <a href={loginUrl(org(), loc.pathname)}>
-                            Switch to {org()}
-                          </a>
+                          <p>You are signed in to {m().org}. Sign out to use another organization.</p>
+                          <A href={`/o/${m().org}/tables`}>Return to {m().org}</A>
                         </main>
                       }
                     >
@@ -201,9 +161,7 @@ function Shell(p: ParentProps) {
                           </button>
                           <div class="org-switcher">
                             <span class="org-glyph">◎</span>
-                            <select aria-label="Switch organization" value={m().org} onChange={(e) => location.assign(loginUrl(e.currentTarget.value, loc.pathname))}>
-                              <For each={availableOrgs()}>{(id) => <option value={id}>{id === "carbon" ? "Carbon" : id}</option>}</For>
-                            </select>
+                            <strong>{m().org}</strong>
                           </div>
                           <div class="sidebar-caption">Flight deck</div>
                           <nav>
@@ -232,7 +190,6 @@ function Shell(p: ParentProps) {
                             <AccessToken root={`/orgs/${encodeURIComponent(m().org)}`} />
                           </details>
                           <div class="sidebar-caption">Reference</div>
-                          <A href="/">Switch organization</A>
                           <div class="sidebar-foot">
                             <span class="muted">Telemetry is flowing.</span>
                             <span class="muted">⌘ K to search</span>
