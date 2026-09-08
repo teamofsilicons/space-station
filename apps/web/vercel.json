@@ -1,0 +1,64 @@
+{
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://backend.spacestation.teamofsilicons.com/api/:path*"
+    },
+    {
+      "source": "/webhooks/api/",
+      "destination": "https://backend.spacestation.teamofsilicons.com/webhooks/api/"
+    },
+    {
+      "source": "/webhooks/api",
+      "destination": "https://backend.spacestation.teamofsilicons.com/webhooks/api"
+    },
+    {
+      "source": "/((?!api/|webhooks/|assets/|brand/|mission-control.js|install.sh|downloads/).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
+        }
+      ]
+    },
+    {
+      "source": "/api/:path*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "private, no-store"
+        }
+      ]
+    },
+    {
+      "source": "/webhooks/:path*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
+    }
+  ]
+}

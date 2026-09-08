@@ -1,0 +1,16 @@
+.local/
+target/
+node_modules/
+**/node_modules/
+.env
+.env.*
+**/.env
+**/.env.*
+.git/
+crates/
+infra/
+scripts/
+docs/
+packages/
+**/.next/
+**/dist/

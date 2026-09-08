@@ -1,0 +1,26 @@
+{
+  "name": "space-station-web",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 3000",
+    "build": "node scripts-build.mjs && tsc --noEmit && vite build",
+    "check": "tsc --noEmit",
+    "test": "tsx --test lib/*.test.ts",
+    "check-all": "npm run build && npm test"
+  },
+  "dependencies": {
+    "@solidjs/router": "^0.15.3",
+    "marked": "^18.0.11",
+    "solid-js": "^1.9.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0",
+    "vite-plugin-solid": "^2.11.10"
+  }
+}
