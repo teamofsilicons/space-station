@@ -421,7 +421,6 @@ export function WindowView() {
             </For>
             <A class="new-tab" href={`/o/${p.org}/windows`}>＋ New window</A>
           </div>
-          <Show when={!codeMode()}><AccessToken root={root} /></Show>
           <Show when={codeMode()} fallback={<>
             <Show when={w().version} fallback={<p class="empty">No live view yet. Use the prompt below to create a processor and renderer.</p>}>
               <Live org={p.org} window={w()} onVersionChanged={async () => { await Promise.all([win.reload(), versions.reload()]); }} />
@@ -505,7 +504,7 @@ function CodeEditor(p: { label: string; value: string; onInput: (value: string) 
   const highlighted = () => escaped().replace(/(\/\/[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b(?:const|let|var|return|export|default|function|async|await|if|else|new|true|false|null)\b)/g, '<span class="tok">$1</span>');
   return <label class="editor-label">{p.label}<div class="editor"><pre aria-hidden="true" innerHTML={highlighted() + "\n"} /><textarea required class="code" spellcheck={false} value={p.value} onInput={(e) => p.onInput(e.currentTarget.value)} /></div></label>;
 }
-function AccessToken(p: { root: string }) {
+export function AccessToken(p: { root: string }) {
   const token = resource(() =>
     api<{ token: string; last_used_at: string | null }>(
       p.root + "/access-token",

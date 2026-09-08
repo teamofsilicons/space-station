@@ -27,6 +27,7 @@ import {
   Settings,
   Docs,
   Inspirations,
+  AccessToken,
 } from "./pages";
 import "./style.css";
 export const loginUrl = (org: string, next: string) =>
@@ -223,6 +224,10 @@ function Shell(p: ParentProps) {
                               )}
                             </For>
                           </nav>
+                          <details class="sidebar-token">
+                            <summary>Access token</summary>
+                            <AccessToken root={`/orgs/${encodeURIComponent(m().org)}`} />
+                          </details>
                           <div class="sidebar-caption">Reference</div>
                           <A href="/">Switch organization</A>
                           <div class="sidebar-foot">
