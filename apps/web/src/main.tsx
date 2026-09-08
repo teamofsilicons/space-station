@@ -48,7 +48,7 @@ function Login(p: { requestedOrg?: string }) {
       <h1>Space Station<span class="pixel-dot">·</span></h1>
       <p class="landing-lede">A calm home for your records, live views, and notifications.</p>
       <form onSubmit={(e) => { e.preventDefault(); location.assign(loginUrl(org(), `/o/${org()}/tables`)); }}>
-        <label>Organization ID<input required pattern={"[a-z0-9_\\-]{3,50}"} value={org()} onInput={(e) => setOrg(e.currentTarget.value)} placeholder="e.g. tos" /></label>
+        <label>Organization ID <span class="muted">(signing in to {org() || "…"})</span><input required pattern={"[a-z0-9_\\-]{3,50}"} value={org()} onInput={(e) => setOrg(e.currentTarget.value)} placeholder="e.g. tos" /></label>
         <button class="primary login-link" type="submit">Log in with Silicon IAM</button>
       </form>
     </main>
@@ -103,7 +103,7 @@ function Shell(p: ParentProps) {
         <Show when={me.data()}>
           {(m) => (
             <>
-              <span class="actor">@{m().id}</span>
+              <span class="actor">@{m().id} · {m().org}</span>
               <button
                 disabled={logout.busy()}
                 onClick={() =>
