@@ -66,7 +66,8 @@ function Shell(p: ParentProps) {
       if ((e as { status: number }).status === 401) return null;
       throw e;
     }
-  }, undefined, publicPage);
+  // Solid disables resource fetching when the source is false; both page kinds must run.
+  }, undefined, () => publicPage() ? "public" : "session");
   const logout = action();
   const [debug, setDebug] = createSignal(false);
   const signout = () => me.reload();

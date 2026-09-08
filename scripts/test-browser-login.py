@@ -9,7 +9,9 @@ with sync_playwright() as p:
     origin = os.environ.get("SS_WEB_URL", "http://localhost:3000")
     page.route("**/api/me", lambda route: route.fulfill(status=401, json={"error": {"code": "unauthorized", "message": "Sign in"}}))
     page.route("**/api/auth/login?*", lambda route: route.fulfill(body="Login endpoint reached"))
-    page.goto(origin)
+    page.set_default_timeout(10000)
+    with page.expect_request("**/api/me"):
+        page.goto(origin)
     field = page.get_by_label("Organization ID")
     field.wait_for()
     assert field.input_value() == ""
@@ -27,5 +29,12 @@ with sync_playwright() as p:
     page.wait_for_url("**/o/my-org/tables")
     assert page.get_by_label("Switch organization").count() == 0
     assert page.get_by_text("Choose an organization", exact=True).count() == 0
+    page.goto(origin + "/o/my-org/tables")
+    page.locator(".workspace").wait_for()
+    page.get_by_role("link", name="Docs", exact=True).click()
+    page.wait_for_url("**/docs")
+    with page.expect_request("**/api/me"):
+        page.get_by_role("link", name="Space Station", exact=True).click()
+    page.locator(".workspace").wait_for()
     browser.close()
     print("PASS: explicit org validation, server navigation, and session-bound home")
