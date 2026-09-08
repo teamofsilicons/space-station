@@ -1077,6 +1077,12 @@ const documents = import.meta.glob("../docs/*.md", {
   import: "default",
   eager: true,
 }) as Record<string, string>;
+const documentBySlug = Object.fromEntries(
+  Object.entries(documents).map(([path, value]) => [
+    path.split("/").pop()!.replace(/\.md$/, ""),
+    value,
+  ]),
+) as Record<string, string>;
 const slugs = [
   "getting-started",
   "space-windows",
@@ -1090,7 +1096,7 @@ const slugs = [
 export function Docs() {
   const p = useParams<{ org: string; id: string; slug: string }>(),
     slug = () => p.slug || "getting-started",
-    md = () => documents[`../docs/${slug()}.md`];
+    md = () => documentBySlug[slug()] || documentBySlug["getting-started"];
   return (
     <div class="workspace docs">
       <aside>
@@ -1099,7 +1105,7 @@ export function Docs() {
           <For each={slugs}>
             {(s) => (
               <A activeClass="selected" href={"/docs/" + s}>
-                {/^#\s+(.+)$/m.exec(documents[`../docs/${s}.md`])?.[1] || s}
+                {/^#\s+(.+)$/m.exec(documentBySlug[s] || "")?.[1] || s}
               </A>
             )}
           </For>
