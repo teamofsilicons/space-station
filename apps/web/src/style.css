@@ -1,7 +1,7 @@
 @font-face { font-family: BDO; src: url('/brand/bdo-grotesk.woff2') format('woff2'); font-display: swap; }
 @font-face { font-family: Plex; src: url('/brand/plex-sans.woff2') format('woff2'); font-display: swap; }
 @font-face { font-family: PlexMono; src: url('/brand/plex-mono.woff2') format('woff2'); font-display: swap; }
-@font-face { font-family: GeistPixel; src: url('/brand/geist-pixel.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: GeistPixel; src: url('/brand/geist-pixel.woff2') format('woff2'); font-display: swap; }
 :root {
   font-family: BDO, Plex, system-ui, sans-serif;
   color: #1a1a1a;

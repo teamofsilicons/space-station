@@ -82,7 +82,10 @@ function OrganizationPicker(p: { me: Me; orgs?: Org[] }) {
 }
 function Shell(p: ParentProps) {
   const loc = useLocation();
+  const publicPage = () =>
+    loc.pathname.startsWith("/docs") || loc.pathname.startsWith("/inspirations");
   const me = resource(async () => {
+    if (publicPage()) return null;
     try {
       return await api<Me>("/me");
     } catch (e) {
@@ -91,6 +94,7 @@ function Shell(p: ParentProps) {
     }
   });
   const orgs = resource(async () => {
+    if (publicPage()) return [];
     try {
       return await api<Org[]>("/orgs");
     } catch {
@@ -111,7 +115,7 @@ function Shell(p: ParentProps) {
   window.addEventListener("keydown", keyboard);
   onCleanup(() => window.removeEventListener("keydown", keyboard));
   const org = () => loc.pathname.split("/")[2];
-  const docs = () => loc.pathname.startsWith("/docs") || loc.pathname.startsWith("/inspirations");
+  const docs = publicPage;
   const [collapsed, setCollapsed] = createSignal(localStorage.getItem("ss-sidebar") === "collapsed");
   const availableOrgs = createMemo(() => {
     const values = [me.data()?.org, ...(orgs.data() || []).map((o) => o.id)].filter(Boolean) as string[];
