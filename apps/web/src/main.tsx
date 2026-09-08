@@ -92,7 +92,7 @@ function Shell(p: ParentProps) {
       if ((e as { status: number }).status === 401) return null;
       throw e;
     }
-  });
+  }, undefined, publicPage);
   const orgs = resource(async () => {
     if (publicPage()) return [];
     try {
@@ -100,7 +100,7 @@ function Shell(p: ParentProps) {
     } catch {
       return [];
     }
-  });
+  }, undefined, publicPage);
   const logout = action();
   const [debug, setDebug] = createSignal(false);
   const signout = () => me.reload();
@@ -164,9 +164,7 @@ function Shell(p: ParentProps) {
           <Show
             when={!me.data.loading}
             fallback={
-              <main>
-                <Loading />
-              </main>
+              <Login requestedOrg={org()} />
             }
           >
             <Show
