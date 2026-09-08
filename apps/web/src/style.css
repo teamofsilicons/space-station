@@ -14,7 +14,7 @@
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100%; }
 body { margin: 0; font-size: 14px; line-height: 1.55; background: var(--rail); }
-body::before { content: ''; position: fixed; inset: 0; pointer-events: none; opacity: .22; background-image: radial-gradient(#989184 .6px, transparent .6px); background-size: 5px 5px; mask-image: linear-gradient(135deg, #000, transparent 44%); }
+body::before { content: ''; position: fixed; inset: 0; pointer-events: none; opacity: .14; background-image: radial-gradient(#989184 .6px, transparent .6px); background-size: 5px 5px; }
 a { color: var(--blue); text-decoration: none; } a:hover { text-decoration: underline; }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--paper); color: var(--ink); padding: 8px 12px; white-space: nowrap; transition: background .15s,border-color .15s,transform .15s; }
