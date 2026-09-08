@@ -1,0 +1,25 @@
+[package]
+name = "space-station-cli"
+description = "The `spacestation` command: a shell over the space-station crate — orgs, tables, space windows, notifications, keys, queries, daemon."
+version = "0.1.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+# The coverage test reads the package's source to check that every method has a command; it is a
+# test of this repository, not of the published crate.
+exclude = ["tests"]
+
+[[bin]]
+name = "spacestation"
+path = "src/main.rs"
+
+[dependencies]
+space-station.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+clap = { version = "4", features = ["derive", "env"] }
+# flock(2) for auth.json: std's File::lock is Rust 1.89, above the MSRV.
+libc = "0.2"

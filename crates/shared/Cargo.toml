@@ -1,0 +1,16 @@
+[package]
+name = "space-station-shared"
+description = "Limits, sanitizer, wire types and secret shapes shared by every Space Station crate."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+sha2.workspace = true

@@ -1,0 +1,14 @@
+{
+  "name": "@teamofsilicons/space-station",
+  "version": "0.1.0",
+  "description": "Space Station mission_control runtime (processor host, renderer bridge) and the space-station-dev local dev server.",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/teamofsilicons/space-station.git", "directory": "packages/space-station" },
+  "type": "commonjs",
+  "main": "mission-control.js",
+  "bin": { "space-station-dev": "bin/space-station-dev.js" },
+  "files": ["mission-control.js", "bin/", "README.md"],
+  "engines": { "node": ">=22.13" },
+  "scripts": { "test": "node --test 'test/*.test.js'" },
+  "dependencies": { "ws": "^8.21.3" }
+}

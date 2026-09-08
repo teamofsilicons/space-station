@@ -240,8 +240,16 @@ publish the libs.
 follow a sync approach when its for simple tasks, event/callback driven > async for complex. async otherwise.
 write test cases, mention what you're testing a test-group, and then at the end, give results.
 all tools you need are installed natively and feel free to install any package.
-aws cli 
+aws cli for hosting on aws
+namecheap cli for handing DNS (https://namecheap-cli.vercel.app/)
 
+# The Rust package & cli using that rust package are first hand client with an always running deamon if needed in the background. the UI will be a subset of the cli. make sure everything works via the CLI first, and then we'll make the UI. Everyone should be able to use the CLI/Rust Package (carbons, silicons, org, access keys, api keys, read, write, patch, delete, everything).
+
+For how this CLI is built, rust as the programming language, but can use anything under the hood that is needed. Maybe rust, or node, or shell, as and when the work comes. That is decided by the implementor based on the work. If something requirs a UI (like graph, live, video, images etc). for that the UI has an endpoint that can be viewed/used/downloaded and the cli gives the link to that.
+
+The primary Interface is the Rust Package. CLI is built using the Rust Package only and doesn't have any feature that the Rust package does not.
+
+if you need a local store for auth or something else, use ~/.{appname}/ dir
 
 # codebase thinking
 - writing code is not just about implementation, maintainability & elegance matter as much.

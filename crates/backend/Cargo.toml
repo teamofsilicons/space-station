@@ -1,0 +1,39 @@
+[package]
+name = "space-station-backend"
+description = "The Space Station server."
+version.workspace = true
+edition.workspace = true
+rust-version = "1.98"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+space-station-shared.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+axum = { version = "0.8", features = ["ws", "macros"] }
+tokio = { version = "1", features = ["full"] }
+sqlparser = { version = "0.62", features = ["visitor"] }
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "form", "rustls"] }
+http = "1"
+sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls-ring-webpki", "postgres", "uuid", "chrono", "json", "migrate"] }
+redis = { version = "1", features = ["tokio-comp", "connection-manager", "script"] }
+aes-gcm = "0.10"
+hmac = "0.13"
+url = "2"
+futures-util = "0.3"
+silicon-iam-client = "1.2.1"
+
+[dev-dependencies]
+space-station.workspace = true
+reqwest = { version = "0.13", default-features = false, features = ["cookies"] }
+tokio-tungstenite = "0.29"
+tempfile = "3"

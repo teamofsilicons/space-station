@@ -2,7 +2,9 @@ name: space-station
 services:
   clickhouse:
     image: clickhouse/clickhouse-server:25.8
-    ports: ["8123:8123", "9000:9000"]
+    # Keep the development databases reachable from this host only.  Binding to
+    # all interfaces would expose the default dev credentials on a LAN.
+    ports: ["127.0.0.1:8123:8123", "127.0.0.1:9000:9000"]
     ulimits: { nofile: { soft: 262144, hard: 262144 } }
     environment:
       CLICKHOUSE_USER: dev
@@ -16,7 +18,7 @@ services:
       retries: 20
   postgres:
     image: postgres:17
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5433:5432"]
     environment:
       POSTGRES_USER: dev
       POSTGRES_PASSWORD: dev
@@ -28,7 +30,7 @@ services:
       retries: 20
   redis:
     image: redis:7
-    ports: ["6379:6379"]
+    ports: ["127.0.0.1:6379:6379"]
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     volumes: ["redis:/data"]
 volumes:

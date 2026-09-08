@@ -1,0 +1,21 @@
+[package]
+name = "space-station"
+description = "The Space Station interface: record events, and manage orgs, tables, space windows, notifications and keys."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+
+[dependencies]
+space-station-shared.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+# flock(2): std's File::lock is Rust 1.89, above the MSRV.
+libc = "0.2"
+sysinfo = { version = "0.38", default-features = false, features = ["system", "disk"] }
+tungstenite = { version = "0.30", default-features = false, features = ["rustls-tls-webpki-roots", "handshake"] }
+ureq = { version = "3", default-features = false, features = ["json", "rustls"] }
