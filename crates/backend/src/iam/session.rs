@@ -258,20 +258,33 @@ async fn open(state: &AppState, slt: &str, requested_org: Option<&str>, cli: boo
         ),
         false => e.into(),
     })?;
-    let org = tokens.org.as_deref().or(requested_org).ok_or_else(|| ApiError::bad_request("org_required", "IAM did not select an organization"))?;
-    if let Err(e) = bound_to(&tokens, org) {
-        discard(state, &tokens).await;
-        return Err(e);
-    }
     // The freshly minted family is proved before it is stored; every refusal below discards it, so
     // a family this server will never use is not left alive at IAM.
-    let proof = match state.iam.introspect(&tokens.oat).await {
+    let mut proof = match state.iam.introspect(&tokens.oat).await {
         Ok(proof) => proof,
         Err(e) => {
             discard(state, &tokens).await;
             return Err(e.into());
         }
     };
+    if proof.authorization.is_none() {
+        if let Some(auth) = proof.authorizations.iter().find(|a| requested_org.is_none_or(|org| org == a.org)).cloned() {
+            proof.org = Some(auth.org.clone());
+            proof.membership_id = Some(auth.membership_id.clone());
+            proof.authorization = Some(auth);
+        }
+    }
+    let org = tokens
+        .org
+        .as_deref()
+        .or(requested_org)
+        .or_else(|| proof.authorization.as_ref().map(|a| a.org.as_str()))
+        .or_else(|| proof.authorizations.first().map(|a| a.org.as_str()))
+        .ok_or_else(|| ApiError::bad_request("org_required", "IAM did not select an organization"))?;
+    if let Err(e) = bound_to(&tokens, org) {
+        discard(state, &tokens).await;
+        return Err(e);
+    }
     if let Err(e) = agrees(&proof, org, proof.membership_id.as_deref()) {
         discard(state, &tokens).await;
         tracing::warn!("IAM: a token just minted for @{} bound to {org} introspects as {proof:?}", tokens.actor);
@@ -313,10 +326,7 @@ fn bound_to(tokens: &Tokens, org: &str) -> Result<(), ApiError> {
     match tokens.org.as_deref() {
         Some(bound) if bound == org => Ok(()),
         Some(bound) => Err(ApiError::bad_request("org_mismatch", format!("the login was bound to {bound}, not {org}"))),
-        None => Err(ApiError::bad_request(
-            "org_required",
-            "the login was not bound to an organization; start it with ?org= or `iam login --org`",
-        )),
+        None => Ok(()),
     }
 }
 
@@ -633,6 +643,7 @@ mod tests {
             org: org.map(str::to_owned),
             membership_id: membership.map(str::to_owned),
             authorization: auth,
+            authorizations: Vec::new(),
         }
     }
 
@@ -652,7 +663,7 @@ mod tests {
     fn a_session_is_bound_to_exactly_the_org_the_login_named() {
         assert!(bound_to(&tokens(Some("tos")), "tos").is_ok());
         assert_eq!(bound_to(&tokens(Some("acme")), "tos").unwrap_err().code, "org_mismatch");
-        assert_eq!(bound_to(&tokens(None), "tos").unwrap_err().code, "org_required");
+        assert!(bound_to(&tokens(None), "tos").is_ok());
     }
 
     #[test]

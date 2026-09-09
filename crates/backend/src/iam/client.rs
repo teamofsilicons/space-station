@@ -42,6 +42,7 @@ pub struct Introspection {
     pub org: Option<String>,
     pub membership_id: Option<String>,
     pub authorization: Option<Authorization>,
+    pub authorizations: Vec<Authorization>,
 }
 
 /// The membership the snapshot proves: who, in which org, at what version, with which tags.
@@ -163,6 +164,7 @@ impl Client {
             org: seen.org_id,
             membership_id: seen.membership_id.map(|id| id.to_string()),
             authorization: seen.authorization.map(authorization_of),
+            authorizations: seen.authorizations.unwrap_or_default().into_iter().map(authorization_of).collect(),
         })
     }
 
