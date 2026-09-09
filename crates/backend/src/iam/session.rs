@@ -183,6 +183,9 @@ async fn login(State(state): State<AppState>, Query(q): Query<HashMap<String, St
     let mut query = form_urlencoded::Serializer::new(String::new());
     query.append_pair("app_id", &state.cfg.iam_app_id);
     query.append_pair("redirect_uri", &callback_url(&state));
+    if let Some(org) = landing.org.as_deref() {
+        query.append_pair("org_id", org);
+    }
     let url = format!("{}/api/v1/login?{}", state.cfg.iam_url, query.finish());
     let location = HeaderValue::from_str(&url).map_err(|e| ApiError::internal("login_redirect", e))?;
     let sealed = crypto::seal(&state.cfg.key, &json!(landing).to_string());
