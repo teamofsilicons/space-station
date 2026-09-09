@@ -67,11 +67,15 @@ use uuid::Uuid;
 /// Where the daemon connects unless `$SPACE_STATION_URL` or `Builder::url` says otherwise.
 pub const DEFAULT_URL: &str = "https://backend.spacestation.teamofsilicons.com";
 
-/// `$SPACE_STATION_HOME`, else `~/.space-station`.
+/// `$SPACE_STATION_HOME`, else `$SILICON_HOME/.space-station`, else `~/.space-station`.
 pub fn default_home() -> PathBuf {
     match std::env::var_os("SPACE_STATION_HOME") {
         Some(home) => home.into(),
-        None => std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".space-station"),
+        None => std::env::var_os("SILICON_HOME")
+            .map(PathBuf::from)
+            .map(|home| home.join(".space-station"))
+            .or_else(|| std::env::var_os("HOME").map(PathBuf::from).map(|home| home.join(".space-station")))
+            .unwrap_or_else(|| PathBuf::from(".space-station")),
     }
 }
 

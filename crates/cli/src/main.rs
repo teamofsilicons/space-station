@@ -348,7 +348,7 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
     };
     match cmd {
         Cmd::Login { no_browser } => {
-            let org = bound(home, org)?;
+            let org = org.or_else(|| store::org(home)).unwrap_or_default();
             let auth = space_station::login(&url, &org, |link| {
                 if no_browser || !out::open(link) {
                     eprintln!("open this to sign in:\n{link}")

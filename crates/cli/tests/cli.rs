@@ -1,5 +1,5 @@
 //! The binary as a person runs it: a real process, a real HTTP responder on 127.0.0.1, a real
-//! `SPACE_STATION_HOME`. What is asserted is wiring, presentation and state — which route a
+//! `SPACE_STATION_HOME` (or `SILICON_HOME`). What is asserted is wiring, presentation and state — which route a
 //! command asks for, which stream each half of an answer lands on, what `auth.json` holds after
 //! each credential command, and that every capability the package has can be reached from the
 //! tree.
@@ -132,7 +132,7 @@ fn serve(handler: impl Fn(&str, &str, &str, &str) -> (u16, String) + Send + Sync
     url
 }
 
-/// A fresh `SPACE_STATION_HOME` for one test.
+/// A fresh `SPACE_STATION_HOME` (or `SILICON_HOME`) for one test.
 fn home(name: &str) -> PathBuf {
     let dir = env::temp_dir().join(format!("space-station-cli-{name}-{}", process::id()));
     let _ = fs::remove_dir_all(&dir);

@@ -29,11 +29,9 @@ import {
   AccessToken,
 } from "./pages";
 import "./style.css";
-export const loginUrl = (org: string, next: string) =>
-  `/api/auth/login?org=${encodeURIComponent(org)}&next=${encodeURIComponent(next)}`;
-// Each browser session is bound to the organization entered at sign-in.
-function Login(p: { requestedOrg?: string }) {
-  const [org, setOrg] = createSignal(p.requestedOrg || "");
+export const loginUrl = (next = "/") =>
+  `/api/auth/login?next=${encodeURIComponent(next)}`;
+function Login() {
   return (
     <main class="login landing">
       <div class="landing-art" aria-hidden="true">
@@ -46,11 +44,8 @@ function Login(p: { requestedOrg?: string }) {
         </svg>
       </div>
       <h1>Space Station<span class="pixel-dot">·</span></h1>
-      <p class="landing-lede">A calm home for your records, live views, and notifications.</p>
-      <form onSubmit={(e) => { e.preventDefault(); location.assign(loginUrl(org(), `/o/${org()}/tables`)); }}>
-        <label>Organization ID <span class="muted">(signing in to {org() || "…"})</span><input required pattern={"[a-z0-9_\\-]{3,50}"} value={org()} onInput={(e) => setOrg(e.currentTarget.value)} placeholder="e.g. tos" /></label>
-        <button class="primary login-link" type="submit">Log in with Silicon IAM</button>
-      </form>
+      <p class="landing-lede">Choose your organization in Silicon IAM to continue.</p>
+      <button class="primary login-link" type="button" onClick={() => location.assign(loginUrl())}>Log in with Silicon IAM</button>
     </main>
   );
 }
@@ -127,7 +122,7 @@ function Shell(p: ParentProps) {
           <Show
             when={!me.data.loading}
             fallback={
-              <Login requestedOrg={org()} />
+              <Login />
             }
           >
             <Show
@@ -139,7 +134,7 @@ function Shell(p: ParentProps) {
                 </main>
               }
             >
-              <Show when={me.data()} fallback={<Login requestedOrg={org()} />}>
+              <Show when={me.data()} fallback={<Login />}>
                 {(m) => (
                   <Show
                     when={org()}

@@ -114,7 +114,8 @@ pub fn login(url: &str, org: &str, visit: impl FnOnce(&str)) -> Result<Auth, Err
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let port = listener.local_addr()?.port();
     let nonce = Uuid::new_v4().simple().to_string();
-    visit(&format!("{origin}/api/auth/login?org={org}&cli={port}&state={nonce}"));
+    let scope = if org.is_empty() { String::new() } else { format!("org={org}&") };
+    visit(&format!("{origin}/api/auth/login?{scope}cli={port}&state={nonce}"));
     let (mut stream, _) = listener.accept()?;
     stream.set_read_timeout(Some(REDIRECT_TIMEOUT))?;
     let mut line = String::new();

@@ -81,7 +81,7 @@ impl Shared {
 }
 
 /// Where the daemon of `home` listens: `<home>/daemon.sock` when that fits a socket address, else
-/// `<temp dir>/space-station-<hash of home>.sock`, so a long `SPACE_STATION_HOME` costs nothing
+/// `<temp dir>/space-station-<hash of home>.sock`, so a long `SPACE_STATION_HOME` (or `SILICON_HOME`) costs nothing
 /// but the socket's location. Processes sharing a home share a temp dir, as one user's do.
 pub fn socket_path(home: &Path) -> PathBuf {
     let path = home.join("daemon.sock");

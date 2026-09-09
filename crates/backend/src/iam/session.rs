@@ -138,7 +138,7 @@ fn inconsistent() -> ApiError {
 /// the only reachable redirect target; `state` is the nonce that listener will check.
 #[derive(Debug, Serialize, Deserialize)]
 struct Landing {
-    org: String,
+    org: Option<String>,
     next: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     cli: Option<u16>,
@@ -149,9 +149,7 @@ struct Landing {
 impl Landing {
     /// The query as a landing, or the one clear reason it is not one.
     fn read(q: &HashMap<String, String>) -> Result<Landing, ApiError> {
-        let org = q.get("org").filter(|o| valid_org(o)).ok_or_else(|| {
-            ApiError::bad_request("org_required", "a login is bound to one organization: ?org=<3-50 of [a-z0-9_-]>")
-        })?;
+        let org = q.get("org").filter(|o| valid_org(o)).cloned();
         // A same-origin path that fits in a Location header; anything else lands on `/`.
         let path = |n: &&String| n.starts_with('/') && !n.starts_with("//") && n.len() <= 1024;
         let next = q.get("next").filter(path).filter(|n| n.bytes().all(|b| b.is_ascii_graphic()));
@@ -185,7 +183,6 @@ async fn login(State(state): State<AppState>, Query(q): Query<HashMap<String, St
     let mut query = form_urlencoded::Serializer::new(String::new());
     query.append_pair("app_id", &state.cfg.iam_app_id);
     query.append_pair("redirect_uri", &callback_url(&state));
-    query.append_pair("org_id", &landing.org);
     let url = format!("{}/api/v1/login?{}", state.cfg.iam_url, query.finish());
     let location = HeaderValue::from_str(&url).map_err(|e| ApiError::internal("login_redirect", e))?;
     let sealed = crypto::seal(&state.cfg.key, &json!(landing).to_string());
@@ -223,7 +220,7 @@ async fn callback(
         let listener = format!("http://127.0.0.1:{port}/?{}", query.finish());
         return Ok(([done], Redirect::to(&listener)).into_response());
     }
-    let id = open(&state, slt, &landing.org, false).await?;
+    let id = open(&state, slt, landing.org.as_deref(), false).await?;
     if let Some(previous) = cookie_value(&headers) {
         end(&state, &previous).await?;
     }
@@ -235,22 +232,22 @@ async fn callback(
 #[derive(Deserialize)]
 struct Exchange {
     slt: String,
-    org: String,
+    org: Option<String>,
 }
 
 /// A terminal hands over the slt it minted with the `iam` CLI and gets an `sscli-` bearer on a
 /// row of its own.
 async fn session(State(state): State<AppState>, Json(body): Json<Exchange>) -> Result<Json<Value>, ApiError> {
-    if !valid_org(&body.org) {
+    if body.org.as_deref().is_some_and(|o| !valid_org(o)) {
         return Err(invalid_org());
     }
-    Ok(Json(json!({"token": open(&state, &body.slt, &body.org, true).await?})))
+    Ok(Json(json!({"token": open(&state, &body.slt, body.org.as_deref(), true).await?})))
 }
 
 /// Exchanges `slt`, proves the membership and reads the snapshot once, and writes the row and the
 /// mirror in one transaction. The secret handed back is the cookie value, or an `sscli-` bearer
 /// when `cli`.
-async fn open(state: &AppState, slt: &str, org: &str, cli: bool) -> Result<String, ApiError> {
+async fn open(state: &AppState, slt: &str, requested_org: Option<&str>, cli: bool) -> Result<String, ApiError> {
     let tokens = state.iam.exchange(slt).await.map_err(|e| match e.is_invalid_grant() {
         true => ApiError::unauthorized(
             "invalid_slt",
@@ -258,6 +255,7 @@ async fn open(state: &AppState, slt: &str, org: &str, cli: bool) -> Result<Strin
         ),
         false => e.into(),
     })?;
+    let org = tokens.org.as_deref().or(requested_org).ok_or_else(|| ApiError::bad_request("org_required", "IAM did not select an organization"))?;
     if let Err(e) = bound_to(&tokens, org) {
         discard(state, &tokens).await;
         return Err(e);
@@ -680,11 +678,11 @@ mod tests {
     #[test]
     fn a_landing_needs_an_org_and_keeps_only_safe_values() {
         let q = |pairs: &[(&str, &str)]| pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
-        assert_eq!(Landing::read(&q(&[])).unwrap_err().code, "org_required");
-        assert_eq!(Landing::read(&q(&[("org", "Tos")])).unwrap_err().code, "org_required");
+        assert_eq!(Landing::read(&q(&[])).unwrap().org, None);
+        assert_eq!(Landing::read(&q(&[("org", "Tos")])).unwrap().org, None);
         let landing =
             Landing::read(&q(&[("org", "tos"), ("next", "//evil"), ("cli", "4242"), ("state", "n0nce")])).unwrap();
-        assert_eq!((landing.org.as_str(), landing.next.as_str()), ("tos", "/"), "a protocol-relative next is dropped");
+        assert_eq!((landing.org.as_deref(), landing.next.as_str()), (Some("tos"), "/"), "a protocol-relative next is dropped");
         assert_eq!(
             Landing::read(&q(&[("org", "tos"), ("next", "/o/名前")])).unwrap().next,
             "/",
