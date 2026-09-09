@@ -93,7 +93,7 @@ pub fn exchange(url: &str, slt: &str, org: &str) -> Result<Auth, Error> {
                    a credential is never handed over";
         return Err(Error::Local(why.into()));
     }
-    let body = json!({"slt": slt, "org": org});
+    let body = if org.is_empty() { json!({"slt": slt}) } else { json!({"slt": slt, "org": org}) };
     let minted: Minted = api::call(&api::agent(), &api::origin(url)?, "POST", "/auth/session", None, Some(&body))?;
     Ok(Auth::session(&minted.token))
 }

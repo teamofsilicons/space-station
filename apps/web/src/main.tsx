@@ -35,17 +35,13 @@ function Login() {
   return (
     <main class="login landing">
       <div class="landing-art" aria-hidden="true">
-        <svg viewBox="0 0 640 520" role="presentation">
-          <defs><radialGradient id="planet"><stop stop-color="#4b8dca"/><stop offset="1" stop-color="#173258"/></radialGradient><linearGradient id="panel"><stop stop-color="#b7e7ff"/><stop offset="1" stop-color="#3b72ad"/></linearGradient></defs>
-          <circle class="starfield" cx="320" cy="260" r="228"/><circle class="orbit" cx="320" cy="260" r="190"/><circle class="orbit faint" cx="320" cy="260" r="218"/>
-          <circle class="planet" cx="320" cy="260" r="102" fill="url(#planet)"/><path class="continent" d="M255 215c35-30 59-22 83-6l-13 28-35 8-15 32-28-18zm103 50 37 12 20 28-38 18-21-22z"/>
-          <g class="station"><rect x="270" y="112" width="100" height="20" rx="3"/><rect x="270" y="388" width="100" height="20" rx="3"/><rect x="301" y="132" width="38" height="256" rx="5"/><path d="M301 184h38M301 336h38"/><rect class="panel" x="185" y="238" width="100" height="42" rx="4"/><rect class="panel" x="355" y="238" width="100" height="42" rx="4"/><path d="M285 259h16M339 259h16"/></g>
-          <circle class="signal" cx="320" cy="260" r="242"/>
-        </svg>
+        <img src="/brand/iss-login.png" alt="" />
       </div>
-      <h1>Space Station<span class="pixel-dot">·</span></h1>
-      <p class="landing-lede">Choose your organization in Silicon IAM to continue.</p>
-      <button class="primary login-link" type="button" onClick={() => location.assign(loginUrl())}>Log in with Silicon IAM</button>
+      <div class="landing-copy">
+        <h1>Space Station<span class="pixel-dot">·</span></h1>
+        <p class="landing-lede">Choose your organization in Silicon IAM to continue.</p>
+        <button class="primary login-link" type="button" onClick={() => location.assign(loginUrl())}>Log in with Silicon IAM</button>
+      </div>
     </main>
   );
 }

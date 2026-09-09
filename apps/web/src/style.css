@@ -74,10 +74,16 @@ details { margin: 18px 0; } summary { cursor: pointer; font-weight: 500; } .live
 @media (max-width: 900px) { .paper { padding: 26px 22px 40px; } .paper::before { margin: -26px -22px 24px; } .paper > section, .paper > table, .paper > .table-scroll, .paper > .window-workbench { margin-left: -22px; margin-right: -22px; width: calc(100% + 44px); } .paper > .window-head { margin-left: -22px; margin-right: -22px; padding-left: 22px; padding-right: 22px; } .prose > article > pre, .prose > article > table { margin-left: -22px; margin-right: -22px; width: calc(100% + 44px); } .window-tabs { margin-inline: -22px; padding-inline: 16px; } .window-workbench { grid-template-columns: 1fr; } .code-panel { position: static; } .inspiration-grid { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 800px) { header { padding: 12px 16px; gap: 10px; flex-wrap: wrap; } .header-nav { order: 3; width: 100%; margin-left: 0; } .header-status { display: none; } .workspace { grid-template-columns: 1fr; height: auto; min-height: 0; padding: 0; gap: 0; } .sidebar { background: var(--rail); border-bottom: 1px solid var(--line); padding: 14px 16px; } .sidebar nav { flex-direction: row; overflow: auto; margin: 5px -6px; } .sidebar nav a { white-space: nowrap; } .sidebar-foot, .sidebar-caption { display: none; } .paper { height: auto; border-left: 0; border-right: 0; border-radius: 0; box-shadow: none; } .stats { grid-template-columns: repeat(2,1fr); } .stats > div:nth-child(2) { border-right: 0; } .stats > div:nth-child(-n+2) { border-bottom: 1px solid var(--line); } .landing { display: block; margin: 3vh 16px; } .landing-art { min-height: 210px; padding: 24px; } .landing h1, .landing-lede, .landing form, .landing > p:last-child { margin-left: 24px; margin-right: 24px; } .landing .primary { width: calc(100% - 48px); margin-left: 24px; margin-right: 24px; } .landing h1 { font-size: 34px; margin-top: 28px; } .inspiration-grid { grid-template-columns: 1fr; } td, th { padding: 12px 8px; } }
 
-/* Landing art is a proportional, live orbital diagram at every size. */
-.landing-art { min-height: 100%; height: 100%; aspect-ratio: auto; padding: 24px; display: grid; place-items: center; background: radial-gradient(circle at 50% 44%, #233f63, #101e36 72%); }
+/* Login: one balanced image panel and one centered action panel. */
+.landing { grid-template-columns: 1fr 1fr; min-height: 560px; }
+.landing-art { min-height: 0; height: auto; padding: 0; background: #182533; }
 .landing-art::before, .landing-art::after { display: none; }
-.landing-art svg { width: min(100%, 520px); height: min(100%, 520px); overflow: visible; }
+.landing-art img { width: 100%; height: 100%; display: block; object-fit: cover; filter: grayscale(.7) contrast(1.05); }
+.landing-copy { display: flex; flex-direction: column; justify-content: center; padding: 56px; }
+.landing-copy h1, .landing-copy .landing-lede, .landing-copy .primary { margin-left: 0; margin-right: 0; }
+.landing-copy h1 { margin-bottom: 12px; }
+.landing-copy .landing-lede { margin-bottom: 30px; }
+.landing-copy .primary { width: 100%; margin-bottom: 0; }
 .landing-art span.art-label { position: absolute; left: 24px; bottom: 20px; color: #8eb5d7; font: 10px PlexMono, monospace; letter-spacing: .12em; }
 .starfield { fill: url(#none); opacity: .14; stroke: #8fc9ec; stroke-width: 1; stroke-dasharray: 1 13; }
 .orbit { fill: none; stroke: #79c9ed; stroke-width: 1.4; opacity: .7; stroke-dasharray: 3 8; }
@@ -91,5 +97,5 @@ details { margin: 18px 0; } summary { cursor: pointer; font-weight: 500; } .live
 @keyframes station-drift { 50% { transform: rotate(3deg) translateY(-3px); } }
 @keyframes signal-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .station, .signal { animation: none; } }
-@media (min-width: 801px) { .landing { min-height: 560px; } }
+@media (max-width: 800px) { .landing { min-height: 0; } .landing-art { min-height: 260px; } .landing-copy { padding: 34px 24px 38px; } }
 .landing form .primary { width: 100%; margin: 20px 0 0; }
