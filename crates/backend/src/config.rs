@@ -23,6 +23,8 @@ pub struct Config {
     pub database_url: String,
     pub redis_url: String,
     pub iam_url: String,
+    /// Browser-facing IAM login endpoint; the API client still uses `iam_url`.
+    pub iam_auth_url: String,
     /// The canonical `{org}>{handle}` Application id, `tos>spacestation`.
     pub iam_app_id: String,
     pub iam_app_secret: String,
@@ -93,6 +95,10 @@ impl Config {
         if iam_test_key.as_deref().is_some_and(|k| k.len() != 32 || !k.bytes().all(|b| b.is_ascii_alphanumeric())) {
             return Err("SILICON_IAM_TEST_KEY must be the 32-character alphanumeric environment key".into());
         }
+        let iam_url = need("SILICON_IAM_URL")?;
+        let iam_auth_url = optional("SILICON_IAM_AUTH_URL")
+            .map(|url| format!("{}/login", url.trim_end_matches('/')))
+            .unwrap_or_else(|| format!("{}/api/v1/login", iam_url.trim_end_matches('/')));
         Ok(Config {
             bind: SocketAddr::from(([0, 0, 0, 0], port)),
             origin: origin.origin().ascii_serialization(),
@@ -102,7 +108,8 @@ impl Config {
             clickhouse_query_password: need("CLICKHOUSE_QUERY_PASSWORD")?,
             database_url: need("DATABASE_URL")?,
             redis_url: need("REDIS_URL")?,
-            iam_url: need("SILICON_IAM_URL")?.trim_end_matches('/').to_owned(),
+            iam_url: iam_url.trim_end_matches('/').to_owned(),
+            iam_auth_url,
             iam_app_id,
             iam_app_secret: need("SILICON_IAM_APP_SECRET")?,
             iam_webhook_secret,
@@ -179,6 +186,7 @@ mod tests {
         assert_eq!(cfg.bind.port(), 8080);
         assert_eq!(cfg.key[..3], [0x00, 0x11, 0x22]);
         assert_eq!(cfg.iam_url, "http://127.0.0.1:8099");
+        assert_eq!(cfg.iam_auth_url, "http://127.0.0.1:8099/api/v1/login");
         assert_eq!(cfg.iam_app_id, "tos>spacestation");
         assert!(cfg.iam_webhook_secret_previous.is_none() && cfg.iam_test_key.is_none());
         assert!(!cfg.allow_private_webhooks);

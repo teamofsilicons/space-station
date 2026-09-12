@@ -30,7 +30,7 @@ aes-gcm = "0.10"
 hmac = "0.13"
 url = "2"
 futures-util = "0.3"
-silicon-iam-client = { git = "https://github.com/teamofsilicons/silicon-iam.git", tag = "v1.4.0" }
+silicon-iam-client = { git = "https://github.com/teamofsilicons/silicon-iam.git", tag = "v1.4.1" }
 
 [dev-dependencies]
 space-station.workspace = true

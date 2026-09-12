@@ -276,12 +276,8 @@ The completed local v1 acceptance, manual user walkthroughs, startup commands an
 public-login dependency are recorded in [V1 readiness](docs/V1-READINESS.md).
 
 What is built is what `scripts/test.sh` covers, end to end against the local stack, and the
-identity path has also been run against Silicon IAM's own testing environment by hand, as a
-silicon and as a carbon from the terminal (the stub in `crates/backend/src/iam_stub.rs` is written
-from what that environment answered). What is not there: the browser login against the real IAM,
-because IAM's hosted login page currently answers 404 and its edge refuses loopback redirects
-(`docs/EXTERNAL-BUGS.md`); no AWS deployment, `infra/local` being the only environment; and the
-crate and the daemon are unix-only, since they use a unix socket and `flock`. Registering the Application with IAM is
+identity path has also been run against Silicon IAM's testing environment by hand. There is no AWS
+deployment yet; `infra/local` is the development environment. Registering the Application with IAM is
 in `docs/ARCHITECTURE.md`, "Identity", and in `docs/DEVELOPING.md`.
 
 [MIT](LICENSE).

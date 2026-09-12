@@ -65,16 +65,15 @@ slt=$(curl -s -X POST http://127.0.0.1:8099/api/v1/app-auth/short-lived-tokens \
 cargo run -p space-station-cli -- auth "$slt" --org tos   # or `auth -` with the token on stdin, or $SPACE_STATION_TOKEN
 ```
 
-The real `iam` CLI (1.2.1) speaks to the stub too: `iam --url http://127.0.0.1:8099 silicon-login
+The real `iam` CLI (1.5.0) speaks to the stub too: `iam --url http://127.0.0.1:8099 silicon-login
 --sid bot:tos --stk stk-0123456789abcdef0123456789abcdef --app-id 'tos>spacestation'` prints the
 same `{slt, expires_in: 120}` (set `SILICON_IAM_HOME` to a scratch directory, mode 0700, and
 `SILICON_IAM_AUTO_UPDATE=false` first, so it touches neither your own `~/.silicon-iam` nor its own
 binary). The slt is single-use and dies after two minutes; the `sat_` stays with the silicon and
 never reaches Space Station.
 
-Against the real IAM the browser row is currently closed — IAM's hosted login page answers a 404
-and its edge refuses loopback redirect URIs (`docs/EXTERNAL-BUGS.md`) — so a carbon takes the
-terminal path there too: `iam --test "$SILICON_IAM_TEST" login --email <you> --code 000000` once,
+Against the real IAM, the browser login uses its hosted consent page and lets the carbon choose
+organizations. For terminal checks, `iam --test "$SILICON_IAM_TEST" login --email <you> --code 000000` once,
 then `iam --test "$SILICON_IAM_TEST" login --app-id 'tos>spacestation' --org tos -o json` for an
 slt and `space-station auth <slt> --org tos`.
 

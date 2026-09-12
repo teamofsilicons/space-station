@@ -183,10 +183,9 @@ async fn login(State(state): State<AppState>, Query(q): Query<HashMap<String, St
     let mut query = form_urlencoded::Serializer::new(String::new());
     query.append_pair("app_id", &state.cfg.iam_app_id);
     query.append_pair("redirect_uri", &callback_url(&state));
-    if let Some(org) = landing.org.as_deref() {
-        query.append_pair("org_id", org);
-    }
-    let url = format!("{}/api/v1/login?{}", state.cfg.iam_url, query.finish());
+    // IAM owns consent and organization selection. The sealed `org` is only a local preference
+    // used after IAM returns the organizations the person chose to share.
+    let url = format!("{}?{}", state.cfg.iam_auth_url, query.finish());
     let location = HeaderValue::from_str(&url).map_err(|e| ApiError::internal("login_redirect", e))?;
     let sealed = crypto::seal(&state.cfg.key, &json!(landing).to_string());
     let cookie = set_cookie(&state, LOGIN_COOKIE, &sealed, "/api/auth", 600);
@@ -268,7 +267,8 @@ async fn open(state: &AppState, slt: &str, requested_org: Option<&str>, cli: boo
         }
     };
     if proof.authorization.is_none() {
-        if let Some(auth) = proof.authorizations.iter().find(|a| requested_org.is_none_or(|org| org == a.org)).cloned() {
+        if let Some(auth) = proof.authorizations.iter().find(|a| requested_org.is_none_or(|org| org == a.org)).cloned()
+        {
             proof.org = Some(auth.org.clone());
             proof.membership_id = Some(auth.membership_id.clone());
             proof.authorization = Some(auth);
@@ -309,8 +309,15 @@ async fn open(state: &AppState, slt: &str, requested_org: Option<&str>, cli: boo
     .bind(tags.as_ref().map(|t| Value::from(t.clone())))
     .execute(&mut *tx)
     .await?;
-    if let Some(auth) = &proof.authorization {
-        mirror(&mut tx, org, &tokens.actor, auth).await?;
+    let authorizations = proof.authorizations.clone();
+    if authorizations.is_empty() {
+        if let Some(auth) = &proof.authorization {
+            mirror(&mut tx, org, &tokens.actor, auth).await?;
+        }
+    } else {
+        for auth in &authorizations {
+            mirror(&mut tx, &auth.org, &tokens.actor, auth).await?;
+        }
     }
     tx.commit().await?;
     if proof.authorization.is_some() {
@@ -538,7 +545,7 @@ async fn recheck(state: &AppState, session: &mut Session) -> Result<(), ApiError
         }
     };
     if proof.active {
-        return finish(state, tx, current, proof, session).await;
+        return finish(state, tx, current, select_org(proof, &session.org), session).await;
     }
     // Inactive: refresh first (deletes the row on a real revocation), then re-prove the new token.
     let refreshed = match rotate(state, &mut tx, &current).await {
@@ -556,7 +563,20 @@ async fn recheck(state: &AppState, session: &mut Session) -> Result<(), ApiError
             return Err(e.into());
         }
     };
-    finish(state, tx, refreshed, proof, session).await
+    finish(state, tx, refreshed, select_org(proof, &session.org), session).await
+}
+
+/// An unscoped Application token reports one authorization per selected organization. Space
+/// Station keeps each request scoped to one org, so select that snapshot before the usual checks.
+fn select_org(mut proof: Introspection, org: &str) -> Introspection {
+    if proof.authorization.is_none() {
+        if let Some(auth) = proof.authorizations.iter().find(|a| a.org == org).cloned() {
+            proof.org = Some(auth.org.clone());
+            proof.membership_id = Some(auth.membership_id.clone());
+            proof.authorization = Some(auth);
+        }
+    }
+    proof
 }
 
 /// Applies a fresh introspection to the locked `proved` session and commits: on agreement it
@@ -569,6 +589,7 @@ async fn finish(
     proof: Introspection,
     session: &mut Session,
 ) -> Result<(), ApiError> {
+    let authorizations = proof.authorizations.clone();
     if agrees(&proof, &proved.org, proved.membership_id.as_deref()).is_err() {
         sqlx::query("DELETE FROM sessions WHERE id_hash = $1").bind(&proved.id_hash).execute(&mut *tx).await?;
         tx.commit().await?;
@@ -589,6 +610,9 @@ async fn finish(
         }
         None => None,
     };
+    for auth in &authorizations {
+        mirror(&mut tx, &auth.org, &proved.actor, auth).await?;
+    }
     sqlx::query("UPDATE sessions SET checked_at = now() WHERE id_hash = $1")
         .bind(&proved.id_hash)
         .execute(&mut *tx)
@@ -667,6 +691,15 @@ mod tests {
     }
 
     #[test]
+    fn an_unscoped_proof_selects_the_requested_authorization() {
+        let mut p = proof(true, None, None, None);
+        p.authorizations = vec![snapshot("tos", "m1", None), snapshot("acme", "m2", None)];
+        let selected = select_org(p, "acme");
+        assert_eq!(selected.org.as_deref(), Some("acme"));
+        assert_eq!(selected.membership_id.as_deref(), Some("m2"));
+    }
+
+    #[test]
     fn a_snapshot_must_agree_with_the_introspection_it_rode_in_on() {
         let auth = snapshot("tos", "m1", Some(vec!["ops".into()]));
         assert!(agrees(&proof(true, Some("tos"), Some("m1"), Some(auth)), "tos", Some("m1")).is_ok());
@@ -696,7 +729,11 @@ mod tests {
         assert_eq!(Landing::read(&q(&[("org", "Tos")])).unwrap().org, None);
         let landing =
             Landing::read(&q(&[("org", "tos"), ("next", "//evil"), ("cli", "4242"), ("state", "n0nce")])).unwrap();
-        assert_eq!((landing.org.as_deref(), landing.next.as_str()), (Some("tos"), "/"), "a protocol-relative next is dropped");
+        assert_eq!(
+            (landing.org.as_deref(), landing.next.as_str()),
+            (Some("tos"), "/"),
+            "a protocol-relative next is dropped"
+        );
         assert_eq!(
             Landing::read(&q(&[("org", "tos"), ("next", "/o/名前")])).unwrap().next,
             "/",

@@ -16,7 +16,7 @@ import {
   ErrorBoundary,
   type ParentProps,
 } from "solid-js";
-import { api, signedOut, type Me, type DevError } from "../lib/api";
+import { api, signedOut, type Me, type Org, type DevError } from "../lib/api";
 import { action, ErrorText, resource, Loading, when } from "./ui";
 import {
   Tables,
@@ -29,8 +29,8 @@ import {
   AccessToken,
 } from "./pages";
 import "./style.css";
-export const loginUrl = (next = "/") =>
-  `/api/auth/login?next=${encodeURIComponent(next)}`;
+export const loginUrl = (next = "/", org?: string) =>
+  `/api/auth/login?next=${encodeURIComponent(next)}${org ? `&org=${encodeURIComponent(org)}` : ""}`;
 function Login() {
   return (
     <main class="login landing">
@@ -58,6 +58,15 @@ function Shell(p: ParentProps) {
       throw e;
     }
   // Solid disables resource fetching when the source is false; both page kinds must run.
+  }, undefined, () => publicPage() ? "public" : "session");
+  const orgs = resource(async () => {
+    if (publicPage()) return [] as Org[];
+    try {
+      return await api<Org[]>("/orgs");
+    } catch (e) {
+      if ((e as { status: number }).status === 401) return [];
+      throw e;
+    }
   }, undefined, () => publicPage() ? "public" : "session");
   const logout = action();
   const [debug, setDebug] = createSignal(false);
@@ -153,8 +162,26 @@ function Shell(p: ParentProps) {
                           </button>
                           <div class="org-switcher">
                             <span class="org-glyph">◎</span>
-                            <strong>{m().org}</strong>
+                            <strong>Organizations</strong>
+                            <a class="org-add" href={loginUrl()} aria-label="Attach another organization">+</a>
                           </div>
+                          <nav class="org-list-nav" aria-label="Organizations">
+                            <For each={(() => {
+                              const rows = orgs.data() || [];
+                              return rows.some((o) => o.id === m().org)
+                                ? rows
+                                : [{ id: m().org, name: m().org }, ...rows];
+                            })()}>
+                              {(o) => (
+                                <a
+                                  href={loginUrl(`/o/${o.id}/tables`, o.id)}
+                                  class={o.id === m().org ? "selected" : ""}
+                                >
+                                  {o.name || o.id}
+                                </a>
+                              )}
+                            </For>
+                          </nav>
                           <div class="sidebar-caption">Flight deck</div>
                           <nav>
                             <For

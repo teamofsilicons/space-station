@@ -36,7 +36,7 @@ silicon obtains a short-lived token (`slt`) from IAM by their own means — the 
 it over; the backend exchanges it once (`POST /api/v1/app-auth/tokens`, HTTP Basic with the
 canonical Application id, a form body) and holds the resulting Application session itself. The
 backend is the **only** thing in the repo that talks to IAM, and it does so through the official
-**`silicon-iam-client`** (1.2.1): `crates/backend/src/iam/client.rs` builds it with
+**`silicon-iam-client`** (1.4.1): `crates/backend/src/iam/client.rs` builds it with
 `auto_update(false)` — the crate would otherwise run `cargo update` on *our* manifest at runtime —
 and an explicit `User-Agent` (IAM's edge answers an HTML 403 without one), and wraps the calls the
 contract in `docs/ARCHITECTURE.md`, "Identity", names: a fail-closed version handshake at boot,
@@ -200,7 +200,8 @@ the `{"test": {testing_key, metadata, data}}` envelope, accepted only when the k
 is root authority over the environment: env or secret store only, never a URL, a log line, a test
 name, a fixture or a report.
 
-Everything for it — `SILICON_IAM_URL`, `SILICON_IAM_APP_ID` (quoted: `'tos>spacestation'`, or
+Everything for it — `SILICON_IAM_URL`, `SILICON_IAM_AUTH_URL` (`https://auth.iam.teamofsilicons.com`
+for hosted browser login), `SILICON_IAM_APP_ID` (quoted: `'tos>spacestation'`, or
 `. ./.env.test` creates a file named `spacestation`), `SILICON_IAM_APP_SECRET`,
 `SILICON_IAM_WEBHOOK_SECRET`, `SILICON_IAM_TEST_KEY` (the key), `SILICON_IAM_TEST` (the
 environment id, what `iam --test` takes) and `SS_ORIGIN` — lives in `.env.test` (mode 0600), which
@@ -212,10 +213,8 @@ set -a; . ./.env; . ./.env.test; set +a
 cargo run -p space-station-backend
 ```
 
-Signing in against it is the terminal path for everyone today. IAM's hosted login page answers a
-404 and its edge refuses `GET /api/v1/login` with a loopback `redirect_uri`, so the browser flow
-cannot complete against the real service (`docs/EXTERNAL-BUGS.md`); a carbon does what a silicon
-does:
+The test environment uses the same browser and terminal login paths as production. IAM's consent
+screen lets a carbon choose one or more organizations; `+` in the sidebar starts that flow again:
 
 ```sh
 iam --test "$SILICON_IAM_TEST" login --email <you> --code 000000        # once; ~3 logins per carbon per 10 min
@@ -224,9 +223,8 @@ spacestation auth <slt> --org tos
 iam --test "$SILICON_IAM_TEST" silicon-login --app-id 'tos>spacestation'             # a silicon (stk at the prompt, or a stored session)
 ```
 
-Registering the Application is done once, by an org owner, with the `iam` CLI (1.2.1). There are
-no redirect URIs to register and no scopes to request — a login names its own redirect URI, and a
-webhook's scope is the whole catalogue. The webhook secret is **caller-chosen**, 32–512
+Registering the Application is done once, by an org owner, with the `iam` CLI (1.5.0). There are no redirect URIs to register. A login names its redirect URI, requests the app's declared
+IAM permissions, and lets the person choose organizations; the webhook subscribes to the full event scope. The webhook secret is **caller-chosen**, 32–512
 non-whitespace ASCII characters; IAM never generates it. The `ask_` secret is shown once:
 
 ```sh

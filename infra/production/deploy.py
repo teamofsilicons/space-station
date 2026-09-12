@@ -15,7 +15,7 @@ ips={i['InstanceId']:i['PrivateIpAddress'] for r in instances['Reservations'] fo
 if '--initialize' in sys.argv:
  def dotenv(p):return dict((k.strip(),v.strip().strip('\"\'')) for l in p.read_text().splitlines() if l.strip() and not l.lstrip().startswith('#') and '=' in l for k,v in [l.split('=',1)])
  iam=dotenv(ROOT/'.env.iam');pg=secrets.token_hex(32);ch=secrets.token_hex(32)
- api={'SS_ORIGIN':'https://spacestation.teamofsilicons.com','SS_COOKIE_DOMAIN':'spacestation.teamofsilicons.com','SS_KEY':secrets.token_hex(32),'PORT':'8080','RUST_LOG':'space_station_backend=info',
+ api={'SS_ORIGIN':'https://spacestation.teamofsilicons.com','SS_COOKIE_DOMAIN':'spacestation.teamofsilicons.com','SILICON_IAM_AUTH_URL':'https://auth.iam.teamofsilicons.com','SS_KEY':secrets.token_hex(32),'PORT':'8080','RUST_LOG':'space_station_backend=info',
  'DATABASE_URL':f'postgres://spacestation:{pg}@127.0.0.1/space_station','_POSTGRES_PASSWORD':pg,'REDIS_URL':'redis://127.0.0.1:6379',
  'CLICKHOUSE_URL':f'http://spacestation:{ch}@{ips[out["ClickhouseInstanceId"]]}:8123/space_station','CLICKHOUSE_QUERY_PASSWORD':secrets.token_hex(32)}
  for k in ['SILICON_IAM_URL','SILICON_IAM_APP_ID','SILICON_IAM_APP_SECRET','SILICON_IAM_WEBHOOK_SECRET']:api[k]=iam[k]

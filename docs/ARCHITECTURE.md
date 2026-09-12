@@ -97,14 +97,13 @@ Application, and the Application exchanges it. Three ways to obtain one, one way
 
 | who | how the slt is minted |
 |---|---|
-| a carbon in a browser | the backend redirects to `{IAM}/api/v1/login?app_id={APP}&redirect_uri={SS_ORIGIN}/api/auth/callback&org_id={org}`; IAM signs them in (OTP; `000000` in a testing environment) and 302s back with `?slt=` |
+| a carbon in a browser | the backend redirects to `{IAM_AUTH}/login?app_id={APP}&redirect_uri={SS_ORIGIN}/api/auth/callback`; IAM obtains consent and lets them select one or more organizations, then 302s back with `?slt=` |
 | a carbon in a terminal | `iam login --app-id {APP} --org {org}` prints it |
 | a silicon | `iam silicon-login --app-id {APP}` prints it — the only way a silicon can sign in to an Application |
 
-(The browser row is the contract, not today's reality: IAM's hosted login UI answers a 404 and its
-edge refuses `GET /api/v1/login` with a loopback `redirect_uri`, so against the real service a
-carbon currently signs in through the terminal rows; the stub serves the browser row locally. See
-`docs/EXTERNAL-BUGS.md`.)
+The hosted browser login uses `SILICON_IAM_AUTH_URL`; local IAM runtimes keep the `/api/v1/login`
+compatibility path when that variable is omitted. IAM's consent screen selects the organizations
+shared with this application, and the sidebar can start another consent flow with `+`.
 
 The backend spends it at `POST {IAM}/api/v1/app-auth/tokens` with HTTP Basic `{APP}:{ask_ secret}`,
 an `Idempotency-Key`, and a **form-encoded** body `app_id={APP}&slt={slt}` (JSON is refused with
@@ -217,7 +216,8 @@ answer `service: silicon-iam`, `selected_api_version: v1` and the header
 and switches the webhook receiver to the test envelope. The key is root authority over the
 environment: env or secret store only, never a URL, log, test name or fixture.
 
-Config: `SILICON_IAM_URL`, `SILICON_IAM_APP_ID` (canonical), `SILICON_IAM_APP_SECRET` (`ask_`, 47
+Config: `SILICON_IAM_URL`, optional `SILICON_IAM_AUTH_URL` (`https://auth.iam.teamofsilicons.com`
+for hosted browser login), `SILICON_IAM_APP_ID` (canonical), `SILICON_IAM_APP_SECRET` (`ask_`, 47
 chars), `SILICON_IAM_WEBHOOK_SECRET` (caller-chosen, 32–512 chars; we use `whs_` + 43),
 `SILICON_IAM_WEBHOOK_SECRET_PREVIOUS` (optional), `SILICON_IAM_TEST_KEY` (optional), `SS_KEY`,
 `SS_ORIGIN`, `CLICKHOUSE_URL` (admin), `CLICKHOUSE_QUERY_PASSWORD`, `DATABASE_URL`, `REDIS_URL`,
@@ -228,7 +228,9 @@ it). `Config::from_env` reads `./.env` underneath the real environment.
 Registering the Application (once, by an org owner with the `iam` CLI): `iam app create
 spacestation --name "Space Station" --base-url https://spacestation.teamofsilicons.com
 --webhook-url https://spacestation.teamofsilicons.com/webhooks/api/ --webhook-secret <whs_…>`.
-There are no redirect URIs to register and no scopes to request; a login names its redirect URI.
+There are no redirect URIs to register; a login names its redirect URI. The app requests
+`self.identity.read`, `self.profile.read`, `self.organizations.read`, `self.membership.read`, and
+`self.tags.read`, and subscribes to the full webhook event scope.
 The generated `ask_` secret is shown once. In a testing environment, `iam --test <env> app
 import 'tos>spacestation'` mirrors the production Application with a fresh test-only secret (quoted
 in a shell: `>` is a redirect).

@@ -2279,7 +2279,7 @@ dependencies = [
 [[package]]
 name = "silicon-iam-client"
 version = "1.4.0"
-source = "git+https://github.com/teamofsilicons/silicon-iam.git?tag=v1.4.0#34ec8a105afa1ac17ee7dac32e9e5288ff143207"
+source = "git+https://github.com/teamofsilicons/silicon-iam.git?tag=v1.4.1#e19d3c73a41325f1c80de5515d2d9e3528384de7"
 dependencies = [
  "hmac 0.12.1",
  "http",
