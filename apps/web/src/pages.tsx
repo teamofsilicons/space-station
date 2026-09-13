@@ -136,7 +136,7 @@ export function Tables() {
         </Show>
       </section>
       <Show
-        when={tables.data()}
+        when={tables.data()?.filter(t => Boolean(t.retired_at) === retired())}
         fallback={<Loading error={tables.data.error} />}
       >
         {(rows) => (

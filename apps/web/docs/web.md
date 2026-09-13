@@ -3,7 +3,7 @@
 Framework-agnostic browser telemetry for React, Solid, Next, vanilla JavaScript, and other web apps.
 
 ```sh
-npm install https://github.com/teamofsilicons/space-station/releases/download/v0.1.2/teamofsilicons-space-station-web-0.1.0.tgz
+npm install @teamofsilicons/space-station-web
 ```
 
 ```js

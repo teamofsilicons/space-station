@@ -113,8 +113,9 @@ export function TableView() {
         {(s) => (
           <>
             <p class="muted">
-              Snapshot taken {when(s().openedAt.toISOString())}. New records
-              will appear when you reopen this table.
+              Snapshot taken {when(s().openedAt.toISOString())}. {s().table.retired_at
+                ? "This table is retired. New records are blocked; its history remains available."
+                : "New records will appear when you reopen this table."}
             </p>
             <section class="stats">
               <div>
