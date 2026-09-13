@@ -26,6 +26,7 @@ jobs:
           cargo install cargo-zigbuild --locked
           cargo build -p space-station-cli --release --locked --target aarch64-apple-darwin --target x86_64-apple-darwin
           cargo zigbuild -p space-station-cli --release --locked --target aarch64-unknown-linux-musl --target x86_64-unknown-linux-musl
+          npm pack ./packages/space-station-web --pack-destination apps/web/public/downloads
           python3 scripts/package-cli-release.py
       - name: Sign checksums
         env:
@@ -50,6 +51,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             apps/web/public/downloads/spacestation-*.tar.gz \
+            apps/web/public/downloads/*.tgz \
             apps/web/public/downloads/SHA256SUMS \
             apps/web/public/downloads/SHA256SUMS.sig \
             --generate-notes --verify-tag

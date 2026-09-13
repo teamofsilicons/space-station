@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/shared", "crates/client", "crates/cli", "crates/backend"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -11,8 +11,8 @@ repository = "https://github.com/teamofsilicons/space-station"
 homepage = "https://github.com/teamofsilicons/space-station"
 
 [workspace.dependencies]
-space-station-shared = { path = "crates/shared", version = "0.1.0" }
-space-station = { path = "crates/client", version = "0.1.0" }
+space-station-shared = { path = "crates/shared", version = "0.1.1" }
+space-station = { path = "crates/client", version = "0.1.1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 uuid = { version = "1", features = ["v4", "v7", "serde"] }

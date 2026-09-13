@@ -23,5 +23,8 @@ for name, target in TARGETS.items():
         entry.mode = 0o755
         tar.addfile(entry, io.BytesIO(binary))
     checksums.append(f'{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n')
+# Include browser packages produced by the release workflow in the same signed manifest.
+for asset in sorted(OUT.glob('*.tgz')):
+    checksums.append(f'{hashlib.sha256(asset.read_bytes()).hexdigest()}  {asset.name}\n')
 (OUT / 'SHA256SUMS').write_text(''.join(checksums))
 (ROOT / 'apps/web/public/install.sh').write_bytes((ROOT / 'scripts/install.sh').read_bytes())

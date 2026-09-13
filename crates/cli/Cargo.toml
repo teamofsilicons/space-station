@@ -1,7 +1,7 @@
 [package]
 name = "space-station-cli"
 description = "The `spacestation` command: a shell over the space-station crate — orgs, tables, space windows, notifications, keys, queries, daemon."
-version = "0.1.1"
+version = "0.1.2"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
