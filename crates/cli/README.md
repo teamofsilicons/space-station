@@ -19,6 +19,10 @@ curl -fsSL https://spacestation.teamofsilicons.com/install.sh | sh && export PAT
 ```sh
 spacestation login --org tos                 # opens the browser, exchanges the returned short-lived token
 spacestation auth <slt> --org tos            # a short-lived token from the iam CLI, exchanged for a session
+spacestation login <slt> --org tos           # same exchange using the shared IAM-app grammar
+spacestation login status --json             # whether the stored session is accepted
+spacestation iam --json                      # app id, source, docs and crate metadata
+spacestation report-bug "short summary" --details "steps and observed output" --pr-ref owner/repo#123
 spacestation whoami                          # id, kind, org, tags
 spacestation orgs                            # the orgs you belong to
 spacestation logout
