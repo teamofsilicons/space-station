@@ -449,10 +449,11 @@ Redis: `staging` (list), `dead` (list), `flushing`, `dedup:*` (5 min), `lease:en
    by a FROM alias or `record`/`metadata` (`x IN (system.one)`);
 5. a trigger `where` is parsed with `Parser::parse_expr` and spliced into the AST, never as text.
 
-Visible tables = the org's tables whose access list matches the identity (one Postgres read,
-cached with the identity for 60 s); API keys and the notification engine see every table in the
-org. Notifications are checked at save time with the saver's identity (every table named must be
-visible) and run org-scoped without re-resolving anyone.
+Visible tables = the org's tables whose access list matches the identity, or every table when the
+active IAM membership is an owner or admin (one Postgres read, cached with the identity for 60 s);
+API keys and the notification engine see every table in the org. Notifications are checked at save
+time with the saver's identity (every table named must be visible) and run org-scoped without
+re-resolving anyone.
 
 `restrict` is `{table: {from?, to?}}`. The server fills a missing `to` with the table's watermark
 at query start **for every referenced table** and returns the effective bounds as `watermarks`.

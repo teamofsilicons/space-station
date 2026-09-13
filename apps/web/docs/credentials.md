@@ -70,8 +70,9 @@ Everyone is known by their IAM public id — `alice`, or `bot:tos` for a silicon
 `@alice` and `@bot:tos`. There are no display names in Space Station: the handle is the name.
 
 Access to tables, windows and notifications is decided by **access lists** — `@actor` ids and IAM
-**tag** names — checked against who you are in the org. Whoever creates something is on its list.
-Deleting something needs the same access as reading it.
+**tag** names — checked against who you are in the org. Org owners and admins can read every table
+in their org. Whoever creates something is on its list. Deleting something needs the same access
+as reading it.
 
 An access list is **matched, never validated.** An Application may ask IAM nothing about its
 directory, so Space Station cannot know whether the tag `tech` or the member `@bob` exists; it

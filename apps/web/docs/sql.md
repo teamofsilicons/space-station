@@ -10,7 +10,8 @@ You write `FROM orders`. There is no ClickHouse table called `orders`: every org
 one physical table, and the backend parses your query, checks every table reference and rewrites
 it to a sub-select scoped to your org and that table id. A row policy on the ClickHouse user
 enforces the org boundary a second time. You only ever see your org's tables, and only the ones
-your access lists let you see (API keys and the notification engine see the whole org).
+your access lists let you see unless you are an org owner or admin (API keys and the notification
+engine see the whole org).
 
 Queries run read-only (`readonly=1`, `allow_ddl=0`) with a 10 s limit, at most 100 000 rows /
 16 MB per result, and no access to system tables or logs.
@@ -123,7 +124,8 @@ missing `to` becomes that table's watermark at query start — which is what com
 - Anything that is not exactly one `SELECT` (with `WITH`, `UNION`, sub-selects and joins allowed).
 - `SETTINGS`, `FORMAT`, `INTO OUTFILE` — at any nesting level.
 - Table functions: `url()`, `remote()`, `file()`, `s3()`, `mysql()`, …
-- Qualified names (`db.table`), `system.*`, and any table your access lists do not include.
+- Qualified names (`db.table`), `system.*`, and any table your access lists do not include (unless
+  you are an org owner or admin).
 - Identifiers inside `IN (…)` that are not columns of the query (`x IN (system.one)`).
 
 A refused query is an error with a `code` — a dev error in a window, `dev_errors` for a
