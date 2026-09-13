@@ -10,7 +10,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 
-const DEFAULT_MANIFEST: &str = "https://spacestation.teamofsilicons.com/downloads/SHA256SUMS";
+const DEFAULT_MANIFEST: &str = "https://github.com/teamofsilicons/space-station/releases/latest/download/SHA256SUMS";
 const CHECK_EVERY: Duration = Duration::from_secs(60 * 60);
 const PUBLIC_KEY: &[u8] = include_bytes!("../update-public.pem");
 

@@ -243,7 +243,7 @@ that this would exceed the 104/108-byte cap on unix socket paths — a short
 | `SPACE_STATION_TOKEN` | — | the short-lived token for `auth`, instead of the argument |
 | `SPACE_STATION_API_KEY` | — | act as this `apikey-` key |
 | `SPACE_STATION_ACCESS_TOKEN` | — | act as this `spacewindow-` token |
-| `SPACE_STATION_UPDATE_URL` | hosted `SHA256SUMS` | signed update manifest URL; its detached `.sig` is verified before install |
+| `SPACE_STATION_UPDATE_URL` | GitHub Releases `latest/download/SHA256SUMS` | signed update manifest URL; its detached `.sig` is verified before install |
 | `SPACE_STATION_UPDATE` | enabled | set to `0` or `false` to opt out of hourly daemon updates |
 
 The CLI reads no `.env` file, never talks to IAM itself, and defaults to the public host: point

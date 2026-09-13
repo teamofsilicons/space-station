@@ -183,7 +183,7 @@ there is nothing to retry with here — and the message ends with how to sign in
 | `SPACE_STATION_API_KEY` | — | act as this `apikey-` key |
 | `SPACE_STATION_ACCESS_TOKEN` | — | act as this `spacewindow-` token |
 | `SPACE_STATION_TABLE_KEY` | — | the ingest key used by `record` |
-| `SPACE_STATION_UPDATE_URL` | hosted `SHA256SUMS` | signed update manifest URL; its detached `.sig` must verify |
+| `SPACE_STATION_UPDATE_URL` | GitHub Releases `latest/download/SHA256SUMS` | signed update manifest URL; its detached `.sig` must verify |
 | `SPACE_STATION_UPDATE` | enabled | set to `0` or `false` to opt out of hourly daemon updates |
 
 An empty variable is the same as an unset one. Nothing here reads a `.env` file or talks to IAM,

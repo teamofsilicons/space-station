@@ -34,10 +34,15 @@ jobs:
           test -n "$UPDATE_SIGNING_PRIVATE_KEY"
           umask 077
           printf '%s\n' "$UPDATE_SIGNING_PRIVATE_KEY" > signing-key.pem
-          # Ed25519 signs the bytes directly; macOS's system OpenSSL does not support -rawin.
-          openssl pkeyutl -sign -inkey signing-key.pem \
-            -in apps/web/public/downloads/SHA256SUMS \
-            -out apps/web/public/downloads/SHA256SUMS.sig
+          # Node's built-in Ed25519 support is available on every GitHub runner and
+          # avoids the platform-specific OpenSSL pkeyutl behavior.
+          node - <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const key = crypto.createPrivateKey(fs.readFileSync('signing-key.pem'));
+          const manifest = fs.readFileSync('apps/web/public/downloads/SHA256SUMS');
+          fs.writeFileSync('apps/web/public/downloads/SHA256SUMS.sig', crypto.sign(null, manifest, key));
+          NODE
           rm -f signing-key.pem
       - name: Publish GitHub release
         env:
