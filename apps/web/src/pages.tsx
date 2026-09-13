@@ -43,7 +43,7 @@ export function Tables() {
   const params = useParams();
   const root = base();
   const [retired, setRetired] = createSignal(false);
-  const tables = resource(() => api<Table[]>(root + "/tables?retired=" + retired()), 5000, retired);
+  const tables = resource(() => api<Table[]>(root + "/tables?retired=" + retired()), 5000, () => retired() ? "retired" : "active");
   const [period, setPeriod] = createSignal("5h");
   const overview = resource(
     () => api<Overview>(root + "/tables/overview?window=" + period() + "&retired=" + retired()),
