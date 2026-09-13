@@ -45,9 +45,12 @@ const { table, events } = await request.json();
 const key = allowed.get(table);
 if (!key || !Array.isArray(events)) return Response.json({ error: 'invalid telemetry table' }, { status: 400 });
 const ingest = toIngestBatch({ table, key, events });
-return fetch(`${process.env.SPACE_STATION_URL}/api/ingest`, {
+const response = await fetch(`${process.env.SPACE_STATION_URL}/api/ingest`, {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ingest),
 });
+const ack = await response.json();
+const rejected = (ack.rejected || []).filter((item) => item.code !== 'duplicate');
+return Response.json(ack, { status: response.ok && rejected.length === 0 ? 202 : 400 });
 ```
 
 The adapter preserves each event's stable `id` as `metadata.record_id`, so normal ingest deduplication also works across retries. Never expose table keys in browser code. The built-in browser sender continues to use `/api/web/telemetry` by default; change `endpoint` only when your host provides another same-origin route.
