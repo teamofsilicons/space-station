@@ -29,7 +29,7 @@ export async function openSnapshot(org: string, id: string): Promise<Snapshot> {
   const root = `/orgs/${encodeURIComponent(org)}`;
   const openedAt = new Date();
   const [tables, result] = await Promise.all([
-    api<Table[]>(`${root}/tables`),
+    api<Table[]>(`${root}/tables?retired=all`),
     api<Query<{ last: string; count: string }>>(`${root}/query`, "POST", {
       sql: `SELECT toString(max(cursor)) AS last, toString(count()) AS count FROM ${table}`,
     }),

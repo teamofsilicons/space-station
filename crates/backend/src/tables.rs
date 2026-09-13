@@ -51,8 +51,11 @@ async fn list(
 ) -> Result<Json<Vec<Value>>, ApiError> {
     auth.allow("tables")?;
     let org = auth.org();
-    let retired = q.get("retired").is_some_and(|v| matches!(v.as_str(), "1" | "true" | "yes"));
-    let predicate = if retired { "retired_at IS NOT NULL" } else { "retired_at IS NULL" };
+    let predicate = match q.get("retired").map(String::as_str) {
+        Some("1" | "true" | "yes") => "retired_at IS NOT NULL",
+        Some("all") => "TRUE",
+        _ => "retired_at IS NULL",
+    };
     let sql = format!("{SELECT} WHERE org = $1 AND {predicate} ORDER BY id");
     let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql)).bind(org).fetch_all(&state.store.pg).await?;
     let visible = auth.visible_tables(&state).await?;
@@ -254,8 +257,11 @@ async fn overview(
     let window = q.get("window").map_or("5h", String::as_str);
     let ms = WINDOWS.iter().find(|(w, _)| *w == window).map(|(_, ms)| *ms);
     let ms = ms.ok_or_else(|| ApiError::bad_request("invalid_window", "window is one of 1m 5m 15m 1h 5h 1d 7d 30d"))?;
-    let retired = q.get("retired").is_some_and(|v| matches!(v.as_str(), "1" | "true" | "yes"));
-    let predicate = if retired { "retired_at IS NOT NULL" } else { "retired_at IS NULL" };
+    let predicate = match q.get("retired").map(String::as_str) {
+        Some("1" | "true" | "yes") => "retired_at IS NOT NULL",
+        Some("all") => "TRUE",
+        _ => "retired_at IS NULL",
+    };
     let sql = format!("SELECT id FROM tables WHERE org = $1 AND {predicate} ORDER BY id");
     let ids: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(sql)).bind(org).fetch_all(&state.store.pg).await?;
     let ids: Vec<String> = match auth.visible_tables(&state).await? {

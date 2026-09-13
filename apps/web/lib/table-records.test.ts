@@ -33,7 +33,7 @@ test("opening captures a precise visible record boundary and table details, incl
     calls.push({ url, body: init?.body as string });
     return new Response(
       JSON.stringify(
-        url.endsWith("/tables")
+        url.includes("/tables?retired=all")
           ? [{ id: "orders", access: ["@alice"] }]
           : {
               rows: [{ last: count === "0" ? "0" : "9007199254740993", count }],

@@ -31,6 +31,7 @@ const TABLES: &[Col] = &[
     ("WATERMARK", "watermark"),
     ("CREATED_BY", "created_by"),
     ("ACCESS", "access"),
+    ("RETIRED_AT", "retired_at"),
 ];
 const WINDOWS: &[Col] =
     &[("ID", "id"), ("NAME", "name"), ("VERSION", "version.name"), ("CREATED_BY", "created_by"), ("ACCESS", "access")];
@@ -158,7 +159,14 @@ enum Cmd {
 #[derive(Subcommand)]
 enum Tables {
     /// Every table you may see, with its records and its watermark
-    Ls,
+    Ls {
+        /// Show retired tables instead of active tables
+        #[arg(long, conflicts_with = "all")]
+        retired: bool,
+        /// Show active and retired tables
+        #[arg(long)]
+        all: bool,
+    },
     /// One table
     Get { id: String },
     /// Create a table and print its key once
@@ -178,6 +186,10 @@ enum Tables {
     Rotate { id: String },
     /// Delete the table; its records go too
     Rm { id: String },
+    /// Stop accepting records and move the table to the retired list
+    Retire { id: String },
+    /// Reopen a retired table for ingest
+    Restore { id: String },
     /// Counts, the busiest tables and the ingest lag
     Overview {
         /// 1m 5m 15m 1h 5h 1d 7d 30d
@@ -536,7 +548,16 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
             eprintln!("working in {org}")
         }
 
-        Cmd::Tables(Tables::Ls) => out::rows(&space()?.tables()?, TABLES, as_json)?,
+        Cmd::Tables(Tables::Ls { retired, all }) => {
+            let tables = if all {
+                space()?.all_tables()?
+            } else if retired {
+                space()?.retired_tables()?
+            } else {
+                space()?.tables()?
+            };
+            out::rows(&tables, TABLES, as_json)?
+        }
         Cmd::Tables(Tables::Get { id }) => out::json(&space()?.table(&id)?)?,
         Cmd::Tables(Tables::Create { id, access }) => once("table key", &space()?.create_table(&id, &refs(&access))?),
         Cmd::Tables(Tables::Access { id, access }) => out::json(&space()?.set_table_access(&id, &refs(&access))?)?,
@@ -547,6 +568,14 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
         Cmd::Tables(Tables::Rm { id }) => {
             space()?.delete_table(&id)?;
             eprintln!("table {id} deleted; its records follow, on ClickHouse's own clock")
+        }
+        Cmd::Tables(Tables::Retire { id }) => {
+            space()?.retire_table(&id)?;
+            eprintln!("table {id} retired; existing records remain queryable")
+        }
+        Cmd::Tables(Tables::Restore { id }) => {
+            space()?.unretire_table(&id)?;
+            eprintln!("table {id} restored; its key accepts new records again")
         }
         Cmd::Tables(Tables::Overview { window }) => out::json(&space()?.overview(&window)?)?,
 

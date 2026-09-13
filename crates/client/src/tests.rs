@@ -330,10 +330,13 @@ fn tables_are_listed_created_rotated_reaccessed_deleted_and_summarised() {
     let listing = json!([row]);
     let (space, seen) = station(move |method, path, _| match (method, path) {
         ("GET", "/api/orgs/tos/tables") => ok(listing.clone()),
+        ("GET", "/api/orgs/tos/tables?retired=all") => ok(listing.clone()),
         ("POST", "/api/orgs/tos/tables") => (201, json!({"key": key}).to_string()),
         ("PUT", "/api/orgs/tos/tables/orders") => ok(row.clone()),
         ("POST", "/api/orgs/tos/tables/orders/rotate-key") => ok(json!({"key": key})),
         ("DELETE", "/api/orgs/tos/tables/orders") => (204, String::new()),
+        ("POST", "/api/orgs/tos/tables/orders/retire") => (204, String::new()),
+        ("POST", "/api/orgs/tos/tables/orders/unretire") => (204, String::new()),
         ("GET", "/api/orgs/tos/tables/overview?window=1h") => {
             ok(json!({"tables": 1, "records": 12, "top": [{"id": "orders", "records": 12}], "avg_lag_ms": 41.5}))
         }
@@ -346,6 +349,8 @@ fn tables_are_listed_created_rotated_reaccessed_deleted_and_summarised() {
     assert!(
         matches!(space.table("gone").unwrap_err(), Error::Api { status: 404, ref code, .. } if code == "not_found")
     );
+    space.retire_table("orders").unwrap();
+    space.unretire_table("orders").unwrap();
     assert_eq!(space.create_table("orders", &["@alice", "tech"]).unwrap().value, key);
     assert_eq!(body(&seen, 3), json!({"id": "orders", "access": ["@alice", "tech"]}));
     assert_eq!(space.set_table_access("orders", &["@alice"]).unwrap().id, "orders");

@@ -37,6 +37,8 @@ const COVERAGE: &[(&str, &[&str])] = &[
     ("set_table_access", &["tables", "access"]),
     ("rotate_table_key", &["tables", "rotate"]),
     ("delete_table", &["tables", "rm"]),
+    ("retire_table", &["tables", "retire"]),
+    ("unretire_table", &["tables", "restore"]),
     ("overview", &["tables", "overview"]),
     ("windows", &["windows", "ls"]),
     ("window", &["windows", "get"]),
@@ -366,7 +368,7 @@ fn a_list_is_columns_and_json_only_when_asked_and_that_json_is_one_line_in_a_pip
 fn the_tables_group_reaches_every_table_route() {
     let (url, seen) = station(vec![
         (
-            "GET /api/orgs/tos/tables",
+            "GET /api/orgs/tos/tables?retired=all",
             json!([{"id": "orders", "records": 1, "watermark": 1, "access": [],
                                              "created_by": "alice", "created_at": "t"}]),
         ),
@@ -377,6 +379,8 @@ fn the_tables_group_reaches_every_table_route() {
         ),
         ("POST /api/orgs/tos/tables/orders/rotate-key", json!({"key": "table-orders-1"})),
         ("DELETE /api/orgs/tos/tables/orders", Value::Null),
+        ("POST /api/orgs/tos/tables/orders/retire", Value::Null),
+        ("POST /api/orgs/tos/tables/orders/unretire", Value::Null),
         (
             "GET /api/orgs/tos/tables/overview?window=1h",
             json!({"tables": 1, "records": 9, "top": [], "avg_lag_ms": 4.5}),
@@ -394,15 +398,19 @@ fn the_tables_group_reaches_every_table_route() {
     assert!(ran(&["tables", "access", "orders", "--access", "@bob"]).out.contains("@bob"));
     assert_eq!(ran(&["tables", "rotate", "orders"]).out, "table-orders-1\n");
     assert!(ran(&["tables", "rm", "orders"]).err.contains("table orders deleted"));
+    assert!(ran(&["tables", "retire", "orders"]).err.contains("table orders retired"));
+    assert!(ran(&["tables", "restore", "orders"]).err.contains("table orders restored"));
     assert!(ran(&["tables", "overview", "--window", "1h"]).out.contains("\"avg_lag_ms\":4.5"));
 
     assert_eq!(
         calls(&seen),
         [
-            "GET /api/orgs/tos/tables",
+            "GET /api/orgs/tos/tables?retired=all",
             "PUT /api/orgs/tos/tables/orders {\"access\":[\"@bob\"]}",
             "POST /api/orgs/tos/tables/orders/rotate-key",
             "DELETE /api/orgs/tos/tables/orders",
+            "POST /api/orgs/tos/tables/orders/retire",
+            "POST /api/orgs/tos/tables/orders/unretire",
             "GET /api/orgs/tos/tables/overview?window=1h",
         ]
     );

@@ -47,6 +47,8 @@ pub struct Table {
     pub access: Vec<String>,
     pub created_by: String,
     pub created_at: String,
+    #[serde(default)]
+    pub retired_at: Option<String>,
 }
 
 /// The Tables tab in one value: how much is stored, what is busiest over the asked window, and

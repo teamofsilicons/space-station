@@ -145,12 +145,38 @@ impl Space {
     // ── tables ──────────────────────────────────────────────────────────────────────────────
 
     pub fn tables(&self) -> Result<Vec<Table>, Error> {
-        self.get(&self.at("/tables")?)
+        self.tables_query(None)
+    }
+
+    /// Retired tables remain readable for analytics, but are excluded from normal listings.
+    pub fn retired_tables(&self) -> Result<Vec<Table>, Error> {
+        self.tables_query(Some("true"))
+    }
+
+    /// All active and retired tables, for lookup and administrative tooling.
+    pub fn all_tables(&self) -> Result<Vec<Table>, Error> {
+        self.tables_query(Some("all"))
+    }
+
+    fn tables_query(&self, retired: Option<&str>) -> Result<Vec<Table>, Error> {
+        let path = match retired {
+            Some(value) => format!("/tables?retired={value}"),
+            None => "/tables".to_string(),
+        };
+        self.get(&self.at(&path)?)
     }
 
     /// One table. The server has no route for a single one: the list is the source, filtered.
     pub fn table(&self, id: &str) -> Result<Table, Error> {
-        self.tables()?.into_iter().find(|t| t.id == id).ok_or_else(|| missing("table", id))
+        self.all_tables()?.into_iter().find(|t| t.id == id).ok_or_else(|| missing("table", id))
+    }
+
+    pub fn retire_table(&self, id: &str) -> Result<(), Error> {
+        self.post(&self.at(&format!("/tables/{id}/retire"))?, None)
+    }
+
+    pub fn unretire_table(&self, id: &str) -> Result<(), Error> {
+        self.post(&self.at(&format!("/tables/{id}/unretire"))?, None)
     }
 
     /// Create a table. The key it answers with is shown exactly once, here.
