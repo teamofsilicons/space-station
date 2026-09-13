@@ -9,11 +9,12 @@ const REQUEST_MS = 10000;
 const RETRY = Symbol('space-station-retry');
 
 const clip = (value, max = MAX_TEXT) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+const fallbackUuid = () => `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`.replace(/[xy]/g, (c) => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3) | 8).toString(16); });
 const eventId = () => {
   try {
     if (typeof process !== 'undefined' && process.versions?.node && typeof require === 'function') return require('node:crypto').randomUUID();
-    return globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  } catch (_) { return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`; }
+    return globalThis.crypto?.randomUUID?.() || fallbackUuid();
+  } catch (_) { return fallbackUuid(); }
 };
 const finiteRate = (value) => Math.max(0, Math.min(1, Number.isFinite(Number(value)) ? Number(value) : 1));
 const cleanUrl = (value) => { try { const u = new URL(String(value), globalThis.location?.origin || 'http://localhost'); return `${u.origin}${u.pathname}`; } catch (_) { return undefined; } };
@@ -27,7 +28,7 @@ function browserName(ua) { if (/Edg\//i.test(ua)) return 'edge'; if (/Chrome\//i
 
 /** Adapt a browser batch for the normal server ingest contract. Keep the table key server-side. */
 function toIngestBatch({ table, key, events, batchId = eventId() }) {
-  if (!table || !key || !Array.isArray(events)) throw new TypeError('toIngestBatch({table, key, events}) requires a table, server-side key, and events array');
+  if (!table || !key || !Array.isArray(events) || events.length > MAX_BATCH) throw new TypeError('toIngestBatch({table, key, events}) requires a table, server-side key, and at most 40 events');
   return {
     batch_id: batchId,
     records: events.map((event) => ({
@@ -58,6 +59,7 @@ function createSpaceStationWeb(options = {}) {
   let retryTimer;
   let flushing;
   const ua = clip(nav?.userAgent || '');
+  const boundQueues = () => { while ([...queues.values()].reduce((n, q) => n + q.length, 0) > MAX_QUEUE) { const first = queues.keys().next().value; const q = queues.get(first); q?.shift(); if (!q?.length) queues.delete(first); } };
 
   function context() {
     const base = {
@@ -83,10 +85,7 @@ function createSpaceStationWeb(options = {}) {
     const list = queues.get(table) || [];
     list.push(event);
     queues.set(table, list);
-    while ([...queues.values()].reduce((n, q) => n + q.length, 0) > MAX_QUEUE) {
-      const first = queues.keys().next().value;
-      const q = queues.get(first); q?.shift(); if (!q?.length) queues.delete(first);
-    }
+    boundQueues();
     if (list.length >= MAX_BATCH) void flush(table);
     else if (!timer) timer = setTimeout(() => { timer = undefined; void flush(); }, FLUSH_MS);
   }
@@ -117,13 +116,14 @@ function createSpaceStationWeb(options = {}) {
         const events = queues.get(key); if (!events?.length) continue;
         queues.delete(key);
         for (let offset = 0; offset < events.length; offset += MAX_BATCH) {
+          if (!enabled || destroyed) { result.dropped += events.length - offset; break; }
           const batch = events.slice(offset, offset + MAX_BATCH);
           try { await send(key, batch); result.sent += batch.length; }
           catch (error) {
             result.failed += batch.length;
             const retry = batch.filter((event) => { event[RETRY] += 1; return event[RETRY] <= MAX_RETRIES; });
             result.dropped += batch.length - retry.length;
-            if (enabled && !destroyed && retry.length) queues.set(key, [...retry, ...(queues.get(key) || [])]);
+            if (enabled && !destroyed && retry.length) { queues.set(key, [...retry, ...(queues.get(key) || [])]); boundQueues(); }
           }
         }
       }

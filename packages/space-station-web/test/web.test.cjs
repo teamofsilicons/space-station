@@ -44,3 +44,17 @@ test('adapts stable browser IDs to normal ingest without exposing the key in rec
   assert.equal(batch.records[0].key, 'server-only');
   assert.equal(JSON.stringify(batch.records[0].record).includes('server-only'), false);
 });
+
+test('opting out during an in-flight flush drops remaining batches', async () => {
+  let resolve;
+  const pending = new Promise((done) => { resolve = done; });
+  const telemetry = createSpaceStationWeb({ eventsTable: 'events', fetch: async () => pending });
+  for (let i = 0; i < 41; i++) telemetry.track(`event_${i}`);
+  const flushing = telemetry.flush();
+  telemetry.setEnabled(false);
+  resolve({ ok: true, status: 202 });
+  const result = await flushing;
+  assert.equal(result.sent, 40);
+  assert.equal(result.dropped, 0);
+  assert.equal(result.queued, 0);
+});

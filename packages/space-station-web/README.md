@@ -7,6 +7,7 @@ npm install @teamofsilicons/space-station-web
 ```
 
 ```js
+// Run this in a client mount/effect (for example a client component useEffect/onMount), not while rendering SSR.
 import { createSpaceStationWeb } from '@teamofsilicons/space-station-web';
 
 const telemetry = createSpaceStationWeb({
@@ -16,7 +17,7 @@ const telemetry = createSpaceStationWeb({
 });
 
 telemetry.track('table_created', { table_kind: 'orders' });
-await telemetry.flush();
+// call telemetry.destroy() from the matching unmount cleanup.
 ```
 
 `analyticsTable` enables automatic page views, SPA navigation, errors, scroll depth, navigation timing, network outcomes, and coarse device/browser context. `eventsTable` is for explicit `track()` events. Either stream can be disabled by omitting its table. Automatic sampling is controlled with `sampleRate` (default `1`).
@@ -41,9 +42,15 @@ const allowed = new Map([
   ['spacestationfrontendanalytics', process.env.SS_ANALYTICS_KEY],
   ['spacestationfrontendevents', process.env.SS_EVENTS_KEY],
 ]);
-const { table, events } = await request.json();
+if (Number(request.headers.get('content-length') || 0) > 65536) return Response.json({ error: 'telemetry body too large' }, { status: 413 });
+const origin = new URL(request.url).origin;
+if (request.headers.get('origin') && request.headers.get('origin') !== origin) return Response.json({ error: 'cross-origin telemetry rejected' }, { status: 403 });
+let body;
+try { body = await request.json(); } catch (_) { return Response.json({ error: 'invalid telemetry JSON' }, { status: 400 }); }
+if (JSON.stringify(body).length > 65536) return Response.json({ error: 'telemetry body too large' }, { status: 413 });
+const { table, events } = body || {};
 const key = allowed.get(table);
-if (!key || !Array.isArray(events)) return Response.json({ error: 'invalid telemetry table' }, { status: 400 });
+if (!key || !Array.isArray(events) || events.length > 40) return Response.json({ error: 'invalid telemetry table or batch' }, { status: 400 });
 const ingest = toIngestBatch({ table, key, events });
 const response = await fetch(`${process.env.SPACE_STATION_URL}/api/ingest`, {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ingest),
