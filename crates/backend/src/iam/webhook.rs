@@ -72,6 +72,7 @@ pub struct Member {
     pub principal_id: Option<String>,
     pub status: String,
     pub tags: Option<Vec<String>>,
+    pub org_role: Option<String>,
     pub version: i64,
 }
 
@@ -217,6 +218,7 @@ fn member(row: &Value) -> Option<Member> {
         principal_id: text(&principal["principal_id"]),
         status: text(&membership["status"])?,
         tags: membership["tags"].as_array().map(|tags| tags.iter().filter_map(|t| text(&t["name"])).collect()),
+        org_role: text(&row["roles"]["org_role"]),
         version: membership["version"].as_i64()?,
     })
 }
@@ -320,12 +322,12 @@ fn warn_about(event: &Event, orphans: usize) {
 /// `org_uuid` and `principal_id` likewise. Shared by the webhook receiver and the login snapshot.
 pub async fn upsert(tx: &mut PgConnection, m: &Member) -> sqlx::Result<()> {
     sqlx::query(
-        "INSERT INTO iam_members (org, actor, membership_id, kind, status, tags, org_name, version, principal_id, org_uuid) \
-         VALUES ($1, $2, $3, $4, $5, COALESCE($6, '[]'::jsonb), $7, $8, $9, $10) \
+        "INSERT INTO iam_members (org, actor, membership_id, kind, status, tags, org_name, version, principal_id, org_uuid, org_role) \
+         VALUES ($1, $2, $3, $4, $5, COALESCE($6, '[]'::jsonb), $7, $8, $9, $10, COALESCE($11, 'member')) \
          ON CONFLICT (org, actor) DO UPDATE SET membership_id = EXCLUDED.membership_id, kind = EXCLUDED.kind, \
          status = EXCLUDED.status, tags = COALESCE($6, iam_members.tags), version = EXCLUDED.version, updated_at = now(), \
          org_name = COALESCE($7, iam_members.org_name), principal_id = COALESCE($9, iam_members.principal_id), \
-         org_uuid = COALESCE($10, iam_members.org_uuid) \
+         org_uuid = COALESCE($10, iam_members.org_uuid), org_role = COALESCE($11, iam_members.org_role) \
          WHERE iam_members.membership_id <> EXCLUDED.membership_id OR iam_members.version < EXCLUDED.version",
     )
     .bind(&m.org)
@@ -338,6 +340,7 @@ pub async fn upsert(tx: &mut PgConnection, m: &Member) -> sqlx::Result<()> {
     .bind(m.version)
     .bind(&m.principal_id)
     .bind(&m.org_uuid)
+    .bind(&m.org_role)
     .execute(&mut *tx)
     .await
     .map(drop)
@@ -488,6 +491,7 @@ mod tests {
             principal_id: Some("01a0702c-6520-77c1-9c5b-2ad0df6f4da4".into()),
             status: "active".into(),
             tags: Some(vec!["ops".into()]),
+            org_role: None,
             version: 4,
         }
     }

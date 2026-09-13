@@ -384,6 +384,7 @@ async fn mirror(tx: &mut PgConnection, org: &str, actor: &str, auth: &Authorizat
         principal_id: Some(auth.principal_id.clone()),
         status: "active".into(),
         tags: auth.tags.clone(),
+        org_role: auth.org_role.clone(),
         version: auth.membership_version,
     };
     iam::webhook::upsert(tx, &member).await
@@ -692,6 +693,7 @@ mod tests {
             org_uuid: "01a0-org".into(),
             membership_id: membership.into(),
             membership_version: 4,
+            org_role: None,
             tags,
         }
     }

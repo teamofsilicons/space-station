@@ -41,6 +41,11 @@ pub fn matches(identity: &Identity, list: &[String]) -> bool {
     })
 }
 
+/// IAM org owners and admins can inspect every table in their org.
+pub fn can_view_all(role: Option<&str>) -> bool {
+    matches!(role, Some("owner" | "admin"))
+}
+
 /// `list` with `@actor` appended when absent: the actor writing an access list stays on it, so
 /// no table, window or notification is ever left with a list nobody matches.
 pub fn with_actor(mut list: Vec<String>, actor: &str) -> Vec<String> {
@@ -80,12 +85,17 @@ pub async fn visible_tables(state: &AppState, identity: &Identity) -> Result<Vec
     {
         return Ok(tables.clone());
     }
+    let role: Option<String> = sqlx::query_scalar("SELECT org_role FROM iam_members WHERE org = $1 AND actor = $2 AND status = 'active'")
+        .bind(&identity.org)
+        .bind(&identity.id)
+        .fetch_optional(&state.store.pg)
+        .await?;
     let rows: Vec<(String, Value)> = sqlx::query_as("SELECT id, access FROM tables WHERE org = $1 ORDER BY id")
         .bind(&identity.org)
         .fetch_all(&state.store.pg)
         .await?;
     let tables: Vec<String> =
-        rows.into_iter().filter(|(_, access)| matches(identity, &list(access))).map(|(id, _)| id).collect();
+        rows.into_iter().filter(|(_, access)| can_view_all(role.as_deref()) || matches(identity, &list(access))).map(|(id, _)| id).collect();
     lock(&state.visible.0).insert(key, (tables.clone(), Instant::now()));
     Ok(tables)
 }
@@ -123,6 +133,14 @@ mod tests {
         assert!(!matches(&alice(), &strings(&["@bob", "ops", "Tech"])), "tags are case-sensitive");
         assert!(!matches(&alice(), &strings(&["webhook:alice", "alice"])));
         assert!(!matches(&alice(), &[]));
+    }
+
+    #[test]
+    fn only_owners_and_admins_see_every_table() {
+        assert!(can_view_all(Some("owner")));
+        assert!(can_view_all(Some("admin")));
+        assert!(!can_view_all(Some("member")));
+        assert!(!can_view_all(None));
     }
 
     #[test]

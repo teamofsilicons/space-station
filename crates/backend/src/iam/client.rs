@@ -56,6 +56,7 @@ pub struct Authorization {
     pub org_uuid: String,
     pub membership_id: String,
     pub membership_version: i64,
+    pub org_role: Option<String>,
     pub tags: Option<Vec<String>>,
 }
 
@@ -193,6 +194,7 @@ fn authorization_of(a: models::ApplicationAuthorization) -> Authorization {
         org_uuid: a.organization_id.to_string(),
         membership_id: a.membership_id.to_string(),
         membership_version: a.membership_version,
+        org_role: a.org_role,
         tags: a.tags.map(|tags| tags.into_iter().map(|t| t.name).collect()),
     }
 }
