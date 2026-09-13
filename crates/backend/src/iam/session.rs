@@ -288,6 +288,12 @@ async fn open(state: &AppState, slt: &str, requested_org: Option<&str>, cli: boo
         .or_else(|| proof.authorization.as_ref().map(|a| a.org.as_str()))
         .or_else(|| proof.authorizations.first().map(|a| a.org.as_str()))
         .ok_or_else(|| ApiError::bad_request("org_required", "IAM did not select an organization"))?;
+    if let (Some(bound), Some(requested)) = (tokens.org.as_deref(), requested_org)
+        && bound != requested
+    {
+        discard(state, &tokens).await;
+        return Err(ApiError::bad_request("org_mismatch", format!("the login was bound to {bound}, not {requested}")));
+    }
     if let Err(e) = bound_to(&tokens, org) {
         discard(state, &tokens).await;
         return Err(e);
