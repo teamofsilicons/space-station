@@ -3,11 +3,33 @@
   "version": "0.1.0",
   "description": "Framework-agnostic browser analytics and events for Space Station.",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/teamofsilicons/space-station.git", "directory": "packages/space-station-web" },
-  "type": "commonjs",
-  "main": "index.js",
-  "exports": { ".": { "require": "./index.js", "default": "./index.js" } },
-  "files": ["index.js", "README.md"],
-  "engines": { "node": ">=18" },
-  "scripts": { "test": "node --test 'test/*.test.js'" }
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/teamofsilicons/space-station.git",
+    "directory": "packages/space-station-web"
+  },
+  "type": "module",
+  "main": "index.cjs",
+  "module": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js",
+      "require": "./index.cjs",
+      "default": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.cjs",
+    "index.d.ts",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test 'test/*.test.cjs'"
+  }
 }

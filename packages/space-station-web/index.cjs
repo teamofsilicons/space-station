@@ -1,3 +1,5 @@
+'use strict';
+
 const MAX_TEXT = 160;
 const MAX_BATCH = 40;
 const FLUSH_MS = 1000;
@@ -148,5 +150,5 @@ function createSpaceStationWeb(options = {}) {
   };
 }
 
-export { createSpaceStationWeb };
-export default createSpaceStationWeb;
+module.exports = { createSpaceStationWeb };
+module.exports.default = createSpaceStationWeb;

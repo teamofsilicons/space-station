@@ -2,6 +2,7 @@
 // as `ApiError`. Also the response shapes the pages rely on and the two hooks every page uses.
 
 import type { NotificationDef } from "./notification-def";
+import { trackFrontendEvent } from "./telemetry";
 
 export class ApiError extends Error {
   constructor(
@@ -39,6 +40,9 @@ export async function api<T = void>(
       ? undefined
       : ((await res.json().catch(() => undefined)) as
           (T & Envelope) | undefined);
+  if (method !== "GET" && !path.startsWith("/web/telemetry")) {
+    trackFrontendEvent("api_mutation", { method, path, status: res.status });
+  }
   if (res.ok) return data as T;
   // Every backend error carries `{error}`; a bare status is the API proxy (or a proxy) answering for a backend that did not.
   const { code, message } = data?.error ?? {
@@ -80,6 +84,7 @@ export type Table = {
   access: string[];
   created_by: string;
   created_at: string;
+  retired_at: string | null;
 };
 export type Overview = {
   tables: number;

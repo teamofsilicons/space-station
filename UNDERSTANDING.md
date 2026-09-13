@@ -218,7 +218,11 @@ Access Token: carbons & silicons can write code that can call queries & notifica
 API Key: Programatically view tables & notifications on behalf of the organization and no carbon/silicon.
 
 Web:
-we have a web package that can be installed and used with solidjs, nextjs, reactjs, and even vanilla js with 2 modes: analytics & events. each one can take in
+we have a web package that can be installed and used with solidjs, nextjs, reactjs, and even vanilla js with 2 modes: analytics & events. each one can take in their own tables if they wish to.
+
+analytics are automatic. capture clicks, errors, time elapsed, scroll, networks, devices, browser, ip, location, etc etc.
+
+for events, give an easy way for the frontend to send events, and attach metadata to it.
 
 Implementation:
 we'll have ClickHouse for records, and a Postgres for all other things.

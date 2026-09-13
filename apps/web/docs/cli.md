@@ -142,6 +142,11 @@ Telemetry records should be self-contained and include at least `source`, `step`
 `event`, and a context object. The daemon adds the normal record and system metadata; no separate
 telemetry transport or privileged table path exists.
 
+The Space Station frontend uses two additional `tos` tables: `spacestationfrontendanalytics` for
+sampled automatic browser analytics and `spacestationfrontendevents` for explicit product events.
+The browser never receives their table keys; its authenticated session posts batches to the
+frontend collector. Install the reusable package with `npm i @teamofsilicons/space-station-web`.
+
 windows ls | get <id>                           a summary: id, name, access, current version and its author
         create <name> [--access a,b]            name under 20 characters
         edit <id> [--name n] [--access a,b]     rename, change who may open it, or both; prints the summary

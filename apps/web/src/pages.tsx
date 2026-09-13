@@ -42,12 +42,13 @@ const base = () =>
 export function Tables() {
   const params = useParams();
   const root = base();
-  const tables = resource(() => api<Table[]>(root + "/tables"), 5000);
+  const [retired, setRetired] = createSignal(false);
+  const tables = resource(() => api<Table[]>(root + "/tables?retired=" + retired()), 5000, retired);
   const [period, setPeriod] = createSignal("5h");
   const overview = resource(
-    () => api<Overview>(root + "/tables/overview?window=" + period()),
+    () => api<Overview>(root + "/tables/overview?window=" + period() + "&retired=" + retired()),
     5000,
-    period,
+    () => `${period()}:${retired()}`,
   );
   const [creating, setCreating] = createSignal(false),
     [id, setId] = createSignal(""),
@@ -61,11 +62,15 @@ export function Tables() {
   return (
     <>
       <div class="row">
-        <h1>Tables</h1>
-        <button class="primary right" onClick={() => setCreating(true)}>
-          New table
-        </button>
+        <h1>{retired() ? "Retired tables" : "Tables"}</h1>
+        <Show when={!retired()}>
+          <button class="primary right" onClick={() => setCreating(true)}>New table</button>
+        </Show>
       </div>
+      <nav class="tabs" aria-label="Table status">
+        <button class={!retired() ? "selected" : ""} onClick={() => setRetired(false)}>Active</button>
+        <button class={retired() ? "selected" : ""} onClick={() => setRetired(true)}>Retired</button>
+      </nav>
       <Show when={key()}>
         {(k) => (
           <section role="status">
@@ -138,7 +143,7 @@ export function Tables() {
             when={rows().length}
             fallback={
               <p class="empty">
-                No tables yet. Create a table, then send records with its key.
+                {retired() ? "No retired tables." : "No tables yet. Create a table, then send records with its key."}
               </p>
             }
           >
@@ -175,32 +180,21 @@ export function Tables() {
                         </td>
                         <td>@{t.created_by}</td>
                         <td>
-                          <button
-                            disabled={a.busy()}
-                            onClick={() => {
-                              if (
-                                confirm(
-                                  `Rotate the key for ${t.id}? The current key will stop working.`,
-                                )
-                              )
-                                a.run(async () =>
-                                  got(
-                                    t.id,
-                                    (
-                                      await api<{ key: string }>(
-                                        root +
-                                          "/tables/" +
-                                          t.id +
-                                          "/rotate-key",
-                                        "POST",
-                                      )
-                                    ).key,
-                                  ),
-                                );
-                            }}
-                          >
-                            Rotate key
-                          </button>
+                          <div class="button-row">
+                            <Show when={!retired()}>
+                              <button disabled={a.busy()} onClick={() => {
+                                if (confirm(`Rotate the key for ${t.id}? The current key will stop working.`))
+                                  a.run(async () => got(t.id, (await api<{ key: string }>(root + "/tables/" + t.id + "/rotate-key", "POST")).key));
+                              }}>Rotate key</button>
+                              <button disabled={a.busy()} onClick={() => {
+                                if (confirm(`Retire ${t.id}? Its key will stop accepting new records, while existing records remain queryable.`))
+                                  a.run(async () => { await api(root + "/tables/" + t.id + "/retire", "POST"); await tables.reload(); });
+                              }}>Retire</button>
+                            </Show>
+                            <Show when={retired()}>
+                              <button disabled={a.busy()} onClick={() => a.run(async () => { await api(root + "/tables/" + t.id + "/unretire", "POST"); await tables.reload(); })}>Restore</button>
+                            </Show>
+                          </div>
                         </td>
                       </tr>
                     )}

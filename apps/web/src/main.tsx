@@ -17,6 +17,7 @@ import {
   type ParentProps,
 } from "solid-js";
 import { api, signedOut, type Me, type Org, type DevError } from "../lib/api";
+import { trackFrontendEvent } from "../lib/telemetry";
 import { action, ErrorText, resource, Loading, when } from "./ui";
 import {
   Tables,
@@ -109,6 +110,7 @@ function Shell(p: ParentProps) {
                 disabled={logout.busy()}
                 onClick={() =>
                   logout.run(async () => {
+                    trackFrontendEvent("sign_out");
                     await api("/auth/logout", "POST");
                     location.assign("/");
                   })

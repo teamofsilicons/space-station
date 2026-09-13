@@ -10,8 +10,8 @@ npm install @teamofsilicons/space-station-web
 import { createSpaceStationWeb } from '@teamofsilicons/space-station-web';
 
 const telemetry = createSpaceStationWeb({
-  analyticsTable: 'frontend_analytics',
-  eventsTable: 'frontend_events',
+  analyticsTable: 'spacestationfrontendanalytics',
+  eventsTable: 'spacestationfrontendevents',
   endpoint: '/api/web/telemetry',
   sampleRate: 1,
 });

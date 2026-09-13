@@ -40,6 +40,10 @@ pub struct Config {
     pub allow_private_webhooks: bool,
     /// Ordinary `tos.spacestation` table key for backend self-telemetry. Missing disables it.
     pub telemetry_key: Option<String>,
+    /// Optional browser-facing tables. These are written through the authenticated frontend
+    /// collector; the keys never leave the backend.
+    pub frontend_analytics_key: Option<String>,
+    pub frontend_events_key: Option<String>,
     pub telemetry_home: PathBuf,
     pub telemetry_url: String,
 }
@@ -112,6 +116,20 @@ impl Config {
         } else {
             optional("SPACE_STATION_TELEMETRY_KEY")
         };
+        let frontend_analytics_key = if var("SPACE_STATION_TELEMETRY")
+            .is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "off" | "no"))
+        {
+            None
+        } else {
+            optional("SPACE_STATION_FRONTEND_ANALYTICS_KEY")
+        };
+        let frontend_events_key = if var("SPACE_STATION_TELEMETRY")
+            .is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "off" | "no"))
+        {
+            None
+        } else {
+            optional("SPACE_STATION_FRONTEND_EVENTS_KEY")
+        };
         let telemetry_home = optional("SILICON_HOME")
             .map(PathBuf::from)
             .map(|home| home.join(".space-station"))
@@ -140,6 +158,8 @@ impl Config {
             allow_private_webhooks: var("SS_ALLOW_PRIVATE_WEBHOOKS")
                 .is_some_and(|v| !matches!(v.as_str(), "" | "0" | "false")),
             telemetry_key,
+            frontend_analytics_key,
+            frontend_events_key,
             telemetry_home,
             telemetry_url,
         })

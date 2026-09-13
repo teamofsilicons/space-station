@@ -26,7 +26,9 @@ use crate::iam;
 use crate::sql::GuardError;
 use crate::store::{ChError, Lease, Store};
 use crate::telemetry::Telemetry;
-use crate::{access, dev_errors, ingest, live, notifications, query, tables, tokens, triggers, webhooks, windows};
+use crate::{
+    access, dev_errors, frontend, ingest, live, notifications, query, tables, tokens, triggers, webhooks, windows,
+};
 
 #[derive(Clone)]
 pub struct AppState(pub Arc<Inner>);
@@ -43,6 +45,7 @@ pub struct Inner {
     pub keys: ingest::Keys,
     pub visible: access::Cache,
     pub telemetry: Option<Telemetry>,
+    pub frontend: frontend::Collector,
 }
 
 impl Deref for AppState {
@@ -64,6 +67,7 @@ pub fn router(state: AppState) -> Router {
         .merge(webhooks::routes())
         .merge(windows::routes())
         .merge(dev_errors::routes())
+        .merge(frontend::routes())
         .merge(ingest::routes())
         .merge(live::routes())
         .merge(notifications::routes());

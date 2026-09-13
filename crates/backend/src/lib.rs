@@ -9,6 +9,7 @@ pub mod access;
 pub mod config;
 pub mod crypto;
 pub mod dev_errors;
+pub mod frontend;
 pub mod http;
 pub mod iam;
 pub mod iam_stub;
@@ -48,6 +49,7 @@ impl App {
         let store = store::Store::connect(&cfg).await?;
         let iam = iam::Client::connect(&cfg).await?;
         let telemetry = telemetry::Telemetry::from_config(&cfg)?;
+        let frontend = frontend::Collector::from_config(&cfg)?;
         let (stop_tx, stop) = watch::channel(false);
         let lease = store::Lease::start(store.redis.clone());
         let state = AppState(Arc::new(Inner {
@@ -61,6 +63,7 @@ impl App {
             keys: Default::default(),
             visible: Default::default(),
             telemetry: telemetry.clone(),
+            frontend,
         }));
         let listener = listen(state.cfg.bind).await?;
         let addr = listener.local_addr()?;

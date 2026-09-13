@@ -55,8 +55,10 @@ impl Keys {
         {
             return Ok(found.clone());
         }
-        let found =
-            sqlx::query_as("SELECT org, id FROM tables WHERE key_hash = $1").bind(&hash).fetch_optional(pg).await?;
+        let found = sqlx::query_as("SELECT org, id FROM tables WHERE key_hash = $1 AND retired_at IS NULL")
+            .bind(&hash)
+            .fetch_optional(pg)
+            .await?;
         let mut keys = lock(&self.0);
         if keys.len() > 10_000 {
             keys.retain(|_, (_, at)| at.elapsed() < CACHE_TTL);

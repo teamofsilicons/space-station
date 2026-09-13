@@ -26,6 +26,8 @@ pub fn routes() -> Router<AppState> {
         .route("/orgs/{org}/tables", get(list).post(create))
         .route("/orgs/{org}/tables/overview", get(overview))
         .route("/orgs/{org}/tables/{table}", put(update).delete(remove))
+        .route("/orgs/{org}/tables/{table}/retire", post(retire))
+        .route("/orgs/{org}/tables/{table}/unretire", post(unretire))
         .route("/orgs/{org}/tables/{table}/rotate-key", post(rotate))
 }
 
@@ -36,15 +38,22 @@ struct Row {
     access: Value,
     created_by: String,
     created_at: DateTime<Utc>,
+    retired_at: Option<DateTime<Utc>>,
 }
 
-const SELECT: &str = "SELECT id, key_hash, access, created_by, created_at FROM tables";
+const SELECT: &str = "SELECT id, key_hash, access, created_by, created_at, retired_at FROM tables";
 
 /// The org's tables, visible ones only, with counts and watermarks.
-async fn list(State(state): State<AppState>, auth: Auth) -> Result<Json<Vec<Value>>, ApiError> {
+async fn list(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<HashMap<String, String>>,
+) -> Result<Json<Vec<Value>>, ApiError> {
     auth.allow("tables")?;
     let org = auth.org();
-    let sql = format!("{SELECT} WHERE org = $1 ORDER BY id");
+    let retired = q.get("retired").is_some_and(|v| matches!(v.as_str(), "1" | "true" | "yes"));
+    let predicate = if retired { "retired_at IS NOT NULL" } else { "retired_at IS NULL" };
+    let sql = format!("{SELECT} WHERE org = $1 AND {predicate} ORDER BY id");
     let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql)).bind(org).fetch_all(&state.store.pg).await?;
     let visible = auth.visible_tables(&state).await?;
     let counts = counts(&state, org).await?;
@@ -56,7 +65,7 @@ async fn item(state: &AppState, org: &str, row: Row, counts: &HashMap<String, u6
     let watermark = state.store.watermarks.get(org, &row.id).await?;
     let records = counts.get(&row.id).copied().unwrap_or(0);
     Ok(json!({"id": row.id, "records": records, "watermark": watermark, "access": row.access,
-              "created_by": row.created_by, "created_at": row.created_at}))
+              "created_by": row.created_by, "created_at": row.created_at, "retired_at": row.retired_at}))
 }
 
 /// Records per table in the org, counted under the row policy.
@@ -136,6 +145,46 @@ async fn update(
     Ok(Json(item(&state, &me.org, Row { access, ..row }, &counts).await?))
 }
 
+async fn retire(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path((_, table)): Path<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    let me = auth.actor()?;
+    let row = mine(&state, me, &table).await?;
+    let result = sqlx::query("UPDATE tables SET retired_at = COALESCE(retired_at, now()) WHERE org = $1 AND id = $2")
+        .bind(&me.org)
+        .bind(&table)
+        .execute(&state.store.pg)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(ApiError::not_found("table"));
+    }
+    state.keys.forget(&row.key_hash);
+    access::forget(&state, &me.org);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn unretire(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path((_, table)): Path<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    let me = auth.actor()?;
+    let row = mine(&state, me, &table).await?;
+    let result = sqlx::query("UPDATE tables SET retired_at = NULL WHERE org = $1 AND id = $2")
+        .bind(&me.org)
+        .bind(&table)
+        .execute(&state.store.pg)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(ApiError::not_found("table"));
+    }
+    state.keys.forget(&row.key_hash);
+    access::forget(&state, &me.org);
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn rotate(
     State(state): State<AppState>,
     auth: Auth,
@@ -205,10 +254,10 @@ async fn overview(
     let window = q.get("window").map_or("5h", String::as_str);
     let ms = WINDOWS.iter().find(|(w, _)| *w == window).map(|(_, ms)| *ms);
     let ms = ms.ok_or_else(|| ApiError::bad_request("invalid_window", "window is one of 1m 5m 15m 1h 5h 1d 7d 30d"))?;
-    let ids: Vec<String> = sqlx::query_scalar("SELECT id FROM tables WHERE org = $1 ORDER BY id")
-        .bind(org)
-        .fetch_all(&state.store.pg)
-        .await?;
+    let retired = q.get("retired").is_some_and(|v| matches!(v.as_str(), "1" | "true" | "yes"));
+    let predicate = if retired { "retired_at IS NOT NULL" } else { "retired_at IS NULL" };
+    let sql = format!("SELECT id FROM tables WHERE org = $1 AND {predicate} ORDER BY id");
+    let ids: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(sql)).bind(org).fetch_all(&state.store.pg).await?;
     let ids: Vec<String> = match auth.visible_tables(&state).await? {
         Some(visible) => ids.into_iter().filter(|id| visible.contains(id)).collect(),
         None => ids,
