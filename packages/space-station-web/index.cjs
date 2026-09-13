@@ -105,7 +105,7 @@ function createSpaceStationWeb(options = {}) {
             result.failed += batch.length;
             const retry = batch.filter((event) => { event[RETRY] += 1; return event[RETRY] <= MAX_RETRIES; });
             result.dropped += batch.length - retry.length;
-            if (retry.length) queues.set(key, [...retry, ...(queues.get(key) || [])]);
+            if (enabled && !destroyed && retry.length) queues.set(key, [...retry, ...(queues.get(key) || [])]);
           }
         }
       }
@@ -125,6 +125,7 @@ function createSpaceStationWeb(options = {}) {
     on(win, 'unhandledrejection', () => analytics('error', { kind: 'unhandledrejection' }));
     let scrollTimer;
     on(win, 'scroll', () => { if (scrollTimer) return; scrollTimer = setTimeout(() => { scrollTimer = undefined; const height = Math.max(1, doc.documentElement?.scrollHeight || 1); analytics('scroll', { percent: Math.min(100, Math.round(((win.scrollY + win.innerHeight) / height) * 100)) }); }, 250); }, { passive: true });
+    cleanups.push(() => { if (scrollTimer) clearTimeout(scrollTimer); });
     const timing = () => { const entry = root.performance?.getEntriesByType?.('navigation')?.[0]; if (entry) analytics('timing', { dns_ms: entry.domainLookupEnd - entry.domainLookupStart, connect_ms: entry.connectEnd - entry.connectStart, response_ms: entry.responseEnd - entry.responseStart, dom_content_loaded_ms: entry.domContentLoadedEventEnd, load_ms: entry.loadEventEnd }); };
     if (doc.readyState === 'complete') timing(); else on(win, 'load', timing, { once: true });
     for (const method of ['pushState', 'replaceState']) { const original = win.history?.[method]; if (!original) continue; win.history[method] = function wrappedHistory() { const value = original.apply(this, arguments); page(); return value; }; cleanups.push(() => { if (win.history[method]) win.history[method] = original; }); }

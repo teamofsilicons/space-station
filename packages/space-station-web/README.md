@@ -10,8 +10,8 @@ npm install @teamofsilicons/space-station-web
 import { createSpaceStationWeb } from '@teamofsilicons/space-station-web';
 
 const telemetry = createSpaceStationWeb({
-  analyticsTable: 'spacestation-frontend-analytics',
-  eventsTable: 'spacestation-frontend-events',
+  analyticsTable: 'spacestationfrontendanalytics',
+  eventsTable: 'spacestationfrontendevents',
   endpoint: '/api/web/telemetry',
 });
 
@@ -28,3 +28,5 @@ Delivery is bounded: batches contain at most 40 events, the in-memory queue hold
 Set `enabled: false` initially or call `setEnabled(false)` to opt out and clear queued data. Call `destroy()` when the app is unmounted; it removes listeners, restores history/fetch hooks, cancels timers, and flushes what remains.
 
 The endpoint receives `POST {endpoint}` with `{ table, events }`. Authentication and authorization remain the host application's responsibility.
+
+Table IDs use the server's lowercase letters and digits grammar; the examples above follow it. Keep the `spacestation` prefix when creating shared Space Station tables.
