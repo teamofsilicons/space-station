@@ -108,7 +108,7 @@ function createSpaceStationWeb(options = {}) {
     let timeout;
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined;
     try {
-      const request = transport(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ table, events }), ...(controller ? { signal: controller.signal } : {}) });
+      const request = transport(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ table, events }), keepalive: true, ...(controller ? { signal: controller.signal } : {}) });
       const response = await Promise.race([request, new Promise((_, reject) => { timeout = setTimeout(() => { controller?.abort(); reject(new Error('telemetry request timed out')); }, REQUEST_MS); })]);
       if (!response?.ok) throw new Error(`telemetry endpoint returned HTTP ${response?.status ?? 'unknown'}`);
     } finally { if (timeout) clearTimeout(timeout); }
@@ -145,6 +145,12 @@ function createSpaceStationWeb(options = {}) {
   if (win && analyticsTable) {
     const page = () => analytics('page_view');
     page();
+    let activeSince = Date.now();
+    let leftPage = false;
+    const leave = () => { if (leftPage) return; leftPage = true; analytics('page_exit', { elapsed_ms: Math.max(0, Date.now() - activeSince) }); void flush(); };
+    const resume = () => { if (!leftPage) return; leftPage = false; activeSince = Date.now(); };
+    on(doc, 'visibilitychange', () => doc.visibilityState === 'hidden' ? leave() : resume());
+    on(win, 'pagehide', leave);
     on(doc, 'click', (event) => { const target = event.target?.closest?.('*') || event.target; analytics('click', { tag: target?.tagName?.toLowerCase(), role: target?.getAttribute?.('role') || undefined, marker: clip(target?.getAttribute?.('data-spacestation-event')) || undefined }); }, { passive: true });
     on(win, 'error', (event) => analytics('error', { kind: 'runtime', message: clip(event.message), source: cleanUrl(event.filename), line: event.lineno, column: event.colno }));
     on(win, 'unhandledrejection', () => analytics('error', { kind: 'unhandledrejection' }));
