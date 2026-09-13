@@ -1085,6 +1085,7 @@ const documentBySlug = Object.fromEntries(
 ) as Record<string, string>;
 const slugs = [
   "getting-started",
+  "web",
   "space-windows",
   "sql",
   "notifications",

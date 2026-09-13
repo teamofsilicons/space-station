@@ -1,0 +1,75 @@
+# Browser analytics and events
+
+Framework-agnostic browser telemetry for React, Solid, Next, vanilla JavaScript, and other web apps.
+
+```sh
+npm install https://github.com/teamofsilicons/space-station/releases/download/v0.1.2/teamofsilicons-space-station-web-0.1.0.tgz
+```
+
+```js
+// Run this in a client mount/effect (for example a client component useEffect/onMount), not while rendering SSR.
+import { createSpaceStationWeb } from '@teamofsilicons/space-station-web';
+
+const telemetry = createSpaceStationWeb({
+  analyticsTable: 'spacestationfrontendanalytics',
+  eventsTable: 'spacestationfrontendevents',
+  endpoint: '/api/web/telemetry',
+});
+
+telemetry.track('table_created', { table_kind: 'orders' });
+// call telemetry.destroy() from the matching unmount cleanup.
+```
+
+`analyticsTable` enables automatic page views, SPA navigation, errors, scroll depth, navigation timing, network outcomes, and coarse device/browser context. `eventsTable` is for explicit `track()` events. Either stream can be disabled by omitting its table. Automatic sampling is controlled with `sampleRate` (default `1`).
+
+The package never adds credentials or an authorization header. Automatic click records contain only the element tag, ARIA role, and an optional explicit `data-spacestation-event` marker; input contents, text, IDs, URLs with queries, and hashes are excluded. Event data is bounded and non-serializable or oversized values are replaced with a diagnostic marker.
+
+Delivery is bounded: batches contain at most 40 events, the in-memory queue holds at most 200, and a failed batch is retried at most twice. `flush()` resolves with `{sent, failed, dropped, queued}` instead of rejecting, so telemetry cannot create an unhandled-rejection loop. Failed sends are retried after five seconds while data remains queued.
+
+Set `enabled: false` initially or call `setEnabled(false)` to opt out and clear queued data. Call `destroy()` when the app is unmounted; it removes listeners, restores history/fetch hooks, cancels timers, and flushes what remains.
+
+The endpoint receives `POST {endpoint}` with `{ table, events }`. Authentication and authorization remain the host application's responsibility.
+
+Table IDs use the server's lowercase letters and digits grammar; the examples above follow it. Keep the `spacestation` prefix when creating shared Space Station tables.
+
+Use the same setup in React, Solid, Next, or vanilla JavaScript. In a Next/Solid server route (or any small same-origin proxy), keep the table keys in server environment variables, allowlist the incoming table name, and translate the request to normal ingest:
+
+```js
+import { toIngestBatch } from '@teamofsilicons/space-station-web';
+
+// POST /api/web/telemetry: body is { table, events }
+const allowed = new Map([
+  ['spacestationfrontendanalytics', process.env.SS_ANALYTICS_KEY],
+  ['spacestationfrontendevents', process.env.SS_EVENTS_KEY],
+]);
+if (Number(request.headers.get('content-length') || 0) > 65536) return Response.json({ error: 'telemetry body too large' }, { status: 413 });
+const origin = new URL(request.url).origin;
+if (request.headers.get('origin') && request.headers.get('origin') !== origin) return Response.json({ error: 'cross-origin telemetry rejected' }, { status: 403 });
+let body;
+try { body = await request.json(); } catch (_) { return Response.json({ error: 'invalid telemetry JSON' }, { status: 400 }); }
+if (JSON.stringify(body).length > 65536) return Response.json({ error: 'telemetry body too large' }, { status: 413 });
+const { table, events } = body || {};
+const key = allowed.get(table);
+if (!key || !Array.isArray(events) || events.length > 40) return Response.json({ error: 'invalid telemetry table or batch' }, { status: 400 });
+const ingest = toIngestBatch({ table, key, events });
+const response = await fetch(`${process.env.SPACE_STATION_URL}/api/ingest`, {
+  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ingest),
+});
+const ack = await response.json();
+const rejected = (ack.rejected || []).filter((item) => item.code !== 'duplicate');
+return Response.json(ack, { status: response.ok && rejected.length === 0 ? 202 : 400 });
+```
+
+The adapter preserves each event's stable `id` as `metadata.record_id`, so normal ingest deduplication also works across retries. Never expose table keys in browser code. The built-in browser sender continues to use `/api/web/telemetry` by default; change `endpoint` only when your host provides another same-origin route.
+
+## Space Station's own frontend
+
+The `tos` organization owns these ordinary tables:
+
+- `spacestation`: backend and daemon diagnostics.
+- `spacestationfrontendanalytics`: automatic browser analytics.
+- `spacestationfrontendevents`: explicit actions such as table creation, retirement, restoration, and window changes.
+
+In **Settings → Telemetry**, turn off frontend analytics and events for this browser. The preference persists across reloads. The server's `SPACE_STATION_TELEMETRY=0` setting disables its collectors. Public pages can record analytics without signing in; a verified session adds actor attribution when available. Client-reported data is labeled; forwarded IP and location headers are observations, not identity proof. The package does not request precise device location.
+
+The built-in collector validates the complete batch, limits it to 40 events, accepts only configured tables, and acknowledges after Redis staging. Stable IDs reuse normal five-minute deduplication. Retiring a configured table stops its writes and preserves historical queries.

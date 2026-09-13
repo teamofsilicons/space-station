@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Upload source and run native builds through SSM. Local AWS credentials are never copied."""
-import json,pathlib,subprocess,secrets,tarfile,sys
+import argparse,json,pathlib,subprocess,secrets,tarfile,sys
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--initialize", action="store_true", help="Initialize a new production installation; refuses existing secrets")
+args=parser.parse_args()
 ROOT=pathlib.Path(__file__).resolve().parents[2]
 def aws(*args):
  p=subprocess.run(['aws',*args,'--region','us-east-1','--output','json'],text=True,capture_output=True)
@@ -12,7 +15,7 @@ if stack['StackStatus'] not in {'CREATE_COMPLETE', 'UPDATE_COMPLETE'}:
 out={x['OutputKey']:x['OutputValue'] for x in stack['Outputs']}
 instances=aws('ec2','describe-instances','--instance-ids',out['ApiInstanceId'],out['ClickhouseInstanceId'])
 ips={i['InstanceId']:i['PrivateIpAddress'] for r in instances['Reservations'] for i in r['Instances']}
-if '--initialize' in sys.argv:
+if args.initialize:
  def dotenv(p):return dict((k.strip(),v.strip().strip('\"\'')) for l in p.read_text().splitlines() if l.strip() and not l.lstrip().startswith('#') and '=' in l for k,v in [l.split('=',1)])
  iam=dotenv(ROOT/'.env.iam');pg=secrets.token_hex(32);ch=secrets.token_hex(32)
  api={'SS_ORIGIN':'https://spacestation.teamofsilicons.com','SS_COOKIE_DOMAIN':'spacestation.teamofsilicons.com','SILICON_IAM_AUTH_URL':'https://auth.iam.teamofsilicons.com','SS_KEY':secrets.token_hex(32),'PORT':'8080','RUST_LOG':'space_station_backend=info',

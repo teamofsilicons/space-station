@@ -182,6 +182,21 @@ errors                                          what went wrong server-side for 
 daemon [run | status]                           the ingest daemon: foreground (the default), or is one running
 ```
 
+## Retiring tables
+
+```sh
+spacestation tables retire orders
+spacestation tables ls --retired --json
+spacestation tables ls --all --json
+spacestation tables get orders --json
+spacestation query "SELECT * FROM orders LIMIT 10"
+spacestation tables restore orders
+```
+
+Retirement blocks ingestion through the table's key and hides the table from the default list.
+It preserves history, access rules and window references; the web app lists it under **Retired**.
+Restoration re-enables writes. Already accepted records can finish flushing after retirement.
+
 ## Deleting
 
 `tables rm`, `windows rm` and `notifications rm` need the same access as reading the thing, and

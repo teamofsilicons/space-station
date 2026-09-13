@@ -12,12 +12,15 @@ Everything here is available three ways, and they are the same thing seen from d
 the [Rust package](/docs/rust) is the interface, the [CLI](/docs/cli) is a command tree over it,
 and this app is a subset of that.
 
-For this v1 checkout, start everything with `python3 scripts/dev.py start` from the repository
-root, then open `http://localhost:3000`. Choose organization `tos` and Alice on the local IAM
-page. This local environment uses fixture identities; it does not sign you into real IAM.
-The backend needs Rust 1.98+, Node 22.13+, Docker, and `psql` on your PATH.
-Export `SPACE_STATION_URL=http://localhost:8080`, then use `target/main/debug/spacestation` in place of `spacestation`
-below (or the binary path printed by the launcher when `CARGO_TARGET_DIR` is set).
+Install the CLI and its background daemon on macOS or Linux:
+
+```sh
+curl -fsSL https://spacestation.teamofsilicons.com/install.sh | sh
+```
+
+Open a new terminal, then follow the commands below. For a web project, start with
+[Browser analytics and events](/docs/web). For local development and the IAM test environment,
+see [the development guide](https://github.com/teamofsilicons/space-station/blob/main/docs/DEVELOPING.md).
 
 ## 1. Create a table
 
@@ -46,6 +49,12 @@ list. Tags come with the login itself — IAM reports them when Space Station ve
 **matched, never validated**: Space Station cannot ask IAM whether `tech` or `@bob` exist, so a
 mistyped entry is accepted and simply grants nobody anything. Check spelling and case (`tech`,
 not `Tech`) when someone who should see a table does not.
+
+Use `spacestation tables retire orders` to stop writes and move the table behind **Retired**.
+Its records remain queryable and existing Space Windows keep their references. Use
+`spacestation tables ls --retired` to find it, or `tables restore orders` to accept records again.
+The same key works after restoration unless it was rotated. The ID remains reserved while retired.
+Records already accepted before retirement may still finish flushing.
 
 `spacestation tables rm orders` deletes the table **and its records**. The row goes at once —
 the key stops working and the id is free to reuse — and the records are removed by a background
