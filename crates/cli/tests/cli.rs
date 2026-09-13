@@ -32,6 +32,8 @@ const COVERAGE: &[(&str, &[&str])] = &[
     ("me", &["whoami"]),
     ("app_url", &["login"]),
     ("tables", &["tables", "ls"]),
+    ("retired_tables", &["tables", "ls", "--retired"]),
+    ("all_tables", &["tables", "ls", "--all"]),
     ("table", &["tables", "get"]),
     ("create_table", &["tables", "create"]),
     ("set_table_access", &["tables", "access"]),
@@ -354,8 +356,8 @@ fn a_list_is_columns_and_json_only_when_asked_and_that_json_is_one_line_in_a_pip
     signed_in(&home, Some("tos"));
 
     let columns = run(&home, &url, &[], &["tables", "ls"]);
-    assert_eq!(columns.out.lines().next().unwrap(), "ID      RECORDS  WATERMARK  CREATED_BY  ACCESS");
-    assert_eq!(columns.out.lines().nth(1).unwrap(), "orders  12       130        alice       @a,tech");
+    assert_eq!(columns.out.lines().next().unwrap(), "ID      RECORDS  WATERMARK  CREATED_BY  ACCESS   RETIRED_AT");
+    assert_eq!(columns.out.lines().nth(1).unwrap(), "orders  12       130        alice       @a,tech  -");
 
     let scripted = run(&home, &url, &[], &["tables", "ls", "--json"]);
     assert_eq!(scripted.out.lines().count(), 1, "a pipe gets one compact line: {}", scripted.out);
