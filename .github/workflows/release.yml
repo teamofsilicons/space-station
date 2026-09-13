@@ -52,6 +52,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             apps/web/public/downloads/spacestation-*.tar.gz \
             apps/web/public/downloads/*.tgz \
+            apps/web/public/install.sh \
             apps/web/public/downloads/SHA256SUMS \
             apps/web/public/downloads/SHA256SUMS.sig \
             --generate-notes --verify-tag
