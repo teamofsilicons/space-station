@@ -11,5 +11,8 @@ crates/
 infra/
 scripts/
 packages/
+!packages/
+!packages/space-station-web/
+!packages/space-station-web/**
 **/.next/
 **/dist/
