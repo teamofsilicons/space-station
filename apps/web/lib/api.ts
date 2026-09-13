@@ -40,7 +40,7 @@ export async function api<T = void>(
       ? undefined
       : ((await res.json().catch(() => undefined)) as
           (T & Envelope) | undefined);
-  if (method !== "GET" && !path.startsWith("/web/telemetry")) {
+  if (method !== "GET" && !path.endsWith("/query") && !path.startsWith("/web/telemetry")) {
     trackFrontendEvent("api_mutation", { method, path, status: res.status });
   }
   if (res.ok) return data as T;
