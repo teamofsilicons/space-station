@@ -12,6 +12,7 @@ mod out;
 mod store;
 #[cfg(test)]
 mod tests;
+mod updater;
 
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -680,7 +681,10 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
             }
         }
         Cmd::Daemon { cmd } => match cmd.unwrap_or(Daemon::Run) {
-            Daemon::Run => daemon::run(daemon::Config { home: home.to_path_buf(), url: url.clone() })?,
+            Daemon::Run => {
+                updater::spawn(home.to_path_buf());
+                daemon::run(daemon::Config { home: home.to_path_buf(), url: url.clone() })?
+            }
             Daemon::Status => out::json(&daemon::status(home)?)?,
         },
     }

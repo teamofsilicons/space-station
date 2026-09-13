@@ -23,3 +23,9 @@ serde_json.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
 # flock(2) for auth.json: std's File::lock is Rust 1.89, above the MSRV.
 libc = "0.2"
+base64 = "0.22"
+ed25519-dalek = "2"
+flate2 = "1"
+sha2.workspace = true
+tar = "0.4"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
