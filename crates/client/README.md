@@ -27,6 +27,23 @@ not panics: `SpaceClient::builder(key).on_error(|e| …).build()` receives every
 default prints to stderr). `.url(..)` and `.home(..)` override `$SPACE_STATION_URL`
 (`https://backend.spacestation.teamofsilicons.com`) and `$SPACE_STATION_HOME` (`~/.space-station`).
 
+### Space Station telemetry
+
+Provision the ordinary `tos.spacestation` table once and keep its one-time key in
+`SPACE_STATION_TELEMETRY_KEY` or `<SILICON_HOME>/.space-station/telemetry.key`. Then use the same
+daemon and spool for context-rich events:
+
+```rust
+use space_station::Telemetry;
+
+if let Some(telemetry) = Telemetry::from_env()? {
+    telemetry.record("daemon", "ship", Some(0.5), "batch_sent", serde_json::json!({"count": 12}));
+}
+```
+
+Set `SPACE_STATION_TELEMETRY=0` to opt out. Missing telemetry configuration is treated as
+disabled so an application never fails to start because observability is unavailable.
+
 ## Managing
 
 ```rust

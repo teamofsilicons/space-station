@@ -40,6 +40,7 @@ mod auth;
 pub mod daemon;
 mod record;
 mod spool;
+pub mod telemetry;
 #[cfg(test)]
 mod tests;
 mod types;
@@ -50,6 +51,7 @@ pub use space_station_shared as shared;
 pub use api::Space;
 pub use auth::{Auth, exchange, login};
 pub use record::{Builder, SpaceClient};
+pub use telemetry::Telemetry;
 pub use types::{
     AccessToken, ApiKey, Bounds, DaemonStatus, Def, DevError, Event, Identity, Key, Kind, Notification, Org, Overview,
     Restrict, Rows, StateMetadata, Table, TestRun, TopTable, Trigger, Version, Webhook, Window, WindowState,
@@ -67,16 +69,14 @@ use uuid::Uuid;
 /// Where the daemon connects unless `$SPACE_STATION_URL` or `Builder::url` says otherwise.
 pub const DEFAULT_URL: &str = "https://backend.spacestation.teamofsilicons.com";
 
-/// `$SPACE_STATION_HOME`, else `$SILICON_HOME/.space-station`, else `~/.space-station`.
+/// `$SILICON_HOME/.space-station`, else `$SPACE_STATION_HOME`, else `~/.space-station`.
 pub fn default_home() -> PathBuf {
-    match std::env::var_os("SPACE_STATION_HOME") {
-        Some(home) => home.into(),
-        None => std::env::var_os("SILICON_HOME")
-            .map(PathBuf::from)
-            .map(|home| home.join(".space-station"))
-            .or_else(|| std::env::var_os("HOME").map(PathBuf::from).map(|home| home.join(".space-station")))
-            .unwrap_or_else(|| PathBuf::from(".space-station")),
-    }
+    std::env::var_os("SILICON_HOME")
+        .map(PathBuf::from)
+        .map(|home| home.join(".space-station"))
+        .or_else(|| std::env::var_os("SPACE_STATION_HOME").map(PathBuf::from))
+        .or_else(|| std::env::var_os("HOME").map(PathBuf::from).map(|home| home.join(".space-station")))
+        .unwrap_or_else(|| PathBuf::from(".space-station"))
 }
 
 /// `$SPACE_STATION_URL`, else `DEFAULT_URL`.
