@@ -9,7 +9,12 @@ const REQUEST_MS = 10000;
 const RETRY = Symbol('space-station-retry');
 
 const clip = (value, max = MAX_TEXT) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
-const eventId = () => { try { return globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`; } catch (_) { return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`; } };
+const eventId = () => {
+  try {
+    if (typeof process !== 'undefined' && process.versions?.node && typeof require === 'function') return require('node:crypto').randomUUID();
+    return globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  } catch (_) { return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`; }
+};
 const finiteRate = (value) => Math.max(0, Math.min(1, Number.isFinite(Number(value)) ? Number(value) : 1));
 const cleanUrl = (value) => { try { const u = new URL(String(value), globalThis.location?.origin || 'http://localhost'); return `${u.origin}${u.pathname}`; } catch (_) { return undefined; } };
 function jsonValue(value, max = 8192) {
