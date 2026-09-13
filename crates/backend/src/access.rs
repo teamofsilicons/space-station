@@ -85,17 +85,21 @@ pub async fn visible_tables(state: &AppState, identity: &Identity) -> Result<Vec
     {
         return Ok(tables.clone());
     }
-    let role: Option<String> = sqlx::query_scalar("SELECT org_role FROM iam_members WHERE org = $1 AND actor = $2 AND status = 'active'")
-        .bind(&identity.org)
-        .bind(&identity.id)
-        .fetch_optional(&state.store.pg)
-        .await?;
+    let role: Option<String> =
+        sqlx::query_scalar("SELECT org_role FROM iam_members WHERE org = $1 AND actor = $2 AND status = 'active'")
+            .bind(&identity.org)
+            .bind(&identity.id)
+            .fetch_optional(&state.store.pg)
+            .await?;
     let rows: Vec<(String, Value)> = sqlx::query_as("SELECT id, access FROM tables WHERE org = $1 ORDER BY id")
         .bind(&identity.org)
         .fetch_all(&state.store.pg)
         .await?;
-    let tables: Vec<String> =
-        rows.into_iter().filter(|(_, access)| can_view_all(role.as_deref()) || matches(identity, &list(access))).map(|(id, _)| id).collect();
+    let tables: Vec<String> = rows
+        .into_iter()
+        .filter(|(_, access)| can_view_all(role.as_deref()) || matches(identity, &list(access)))
+        .map(|(id, _)| id)
+        .collect();
     lock(&state.visible.0).insert(key, (tables.clone(), Instant::now()));
     Ok(tables)
 }

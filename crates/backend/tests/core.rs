@@ -795,6 +795,12 @@ async fn the_whole_station_end_to_end() {
     assert_eq!(deliver(&api, "/webhooks/api/", WEBHOOK_SECRET, now, &untagged).await, 204, "the registered form");
     assert_eq!(bot_api.ok(Method::GET, &format!("{orgs}/me"), None).await["tags"], json!([]));
     assert_eq!(ids(&bot_api.ok(Method::GET, &format!("{orgs}/tables"), None).await), Vec::<&str>::new());
+
+    // Owners can inspect tables created by another member even when the table access list does
+    // not name them.
+    bot_api.ok(Method::POST, &format!("{orgs}/tables"), Some(json!({"id": "botprivate"}))).await;
+    assert!(ids(&api.ok(Method::GET, &format!("{orgs}/tables"), None).await).contains(&"botprivate"));
+
     // The refusals: a forged body, a wrong secret, an old timestamp, a body that is not an event.
     let forged = webhooks::sign(WEBHOOK_SECRET, now, b"tampered");
     let res = api
