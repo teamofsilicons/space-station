@@ -614,6 +614,33 @@ async fn the_whole_station_end_to_end() {
     assert_eq!(xs, [5.0], "restrict from the watermark returns exactly the new row");
     assert!(delta["watermarks"]["orders"].as_u64().unwrap() > watermark);
 
+    // Retiring closes the ingest key immediately, while its records remain queryable and its
+    // definition stays available in the retired/all administrative views.
+    assert_eq!(api.post(&format!("{orgs}/tables/orders/retire"), json!({})).await.0, StatusCode::NO_CONTENT);
+    assert!(api.ok(Method::GET, &format!("{orgs}/tables"), None).await.as_array().unwrap().is_empty());
+    assert_eq!(
+        api.ok(Method::GET, &format!("{orgs}/tables?retired=true"), None).await[0]["retired_at"].is_string(),
+        true
+    );
+    assert_eq!(api.ok(Method::GET, &format!("{orgs}/tables?retired=all"), None).await.as_array().unwrap().len(), 1);
+    let retained = api.query(&org, "SELECT count() AS n FROM orders", json!({})).await;
+    assert!(retained["rows"][0]["n"].as_str().unwrap().parse::<u64>().unwrap() >= 5);
+    let refused_id = Uuid::new_v4();
+    let mut retired_ingest = ws(&format!("ws://127.0.0.1:{port}/api/ws/ingest"), &[]).await;
+    let refused_batch = Batch { batch_id: Uuid::new_v4(), records: vec![entry(&key_orders, refused_id)] };
+    send(&mut retired_ingest, serde_json::to_value(&refused_batch).unwrap()).await;
+    let refused = next_text(&mut retired_ingest).await;
+    assert_eq!(refused["rejected"][0]["code"], "unauthorized");
+    retired_ingest.close(None).await.unwrap();
+
+    assert_eq!(api.post(&format!("{orgs}/tables/orders/unretire"), json!({})).await.0, StatusCode::NO_CONTENT);
+    let restored_id = Uuid::new_v4();
+    let mut restored_ingest = ws(&format!("ws://127.0.0.1:{port}/api/ws/ingest"), &[]).await;
+    let restored_batch = Batch { batch_id: Uuid::new_v4(), records: vec![entry(&key_orders, restored_id)] };
+    send(&mut restored_ingest, serde_json::to_value(&restored_batch).unwrap()).await;
+    assert_eq!(next_text(&mut restored_ingest).await["status"], "ok");
+    restored_ingest.close(None).await.unwrap();
+
     // Windows: versions with the secret check, state with the version rule, is_live.
     let window = api.ok(Method::POST, &format!("{orgs}/windows"), Some(json!({"name": "Orders"}))).await;
     let id = window["id"].as_str().unwrap().to_owned();
