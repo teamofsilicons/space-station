@@ -18,6 +18,7 @@ import {
 } from "../lib/api";
 import { agentPrompt } from "../lib/agent-prompt";
 import { parseDefinition, testSummary } from "../lib/notification-def";
+import { frontendTelemetryEnabled, setFrontendTelemetryEnabled, trackFrontendEvent } from "../lib/telemetry";
 import {
   loadRuntime,
   type Host,
@@ -188,11 +189,11 @@ export function Tables() {
                               }}>Rotate key</button>
                               <button disabled={a.busy()} onClick={() => {
                                 if (confirm(`Retire ${t.id}? Its key will stop accepting new records, while existing records remain queryable.`))
-                                  a.run(async () => { await api(root + "/tables/" + t.id + "/retire", "POST"); await tables.reload(); });
+                                  a.run(async () => { await api(root + "/tables/" + t.id + "/retire", "POST"); trackFrontendEvent("table_retired", { table: t.id }); await tables.reload(); });
                               }}>Retire</button>
                             </Show>
                             <Show when={retired()}>
-                              <button disabled={a.busy()} onClick={() => a.run(async () => { await api(root + "/tables/" + t.id + "/unretire", "POST"); await tables.reload(); })}>Restore</button>
+                              <button disabled={a.busy()} onClick={() => a.run(async () => { await api(root + "/tables/" + t.id + "/unretire", "POST"); trackFrontendEvent("table_restored", { table: t.id }); await tables.reload(); })}>Restore</button>
                             </Show>
                           </div>
                         </td>
@@ -214,14 +215,9 @@ export function Tables() {
               a.run(async () => {
                 if (!TABLE_ID.test(id()))
                   throw Error("Use 1–50 lowercase letters and digits.");
-                got(
-                  id(),
-                  (
-                    await api<{ key: string }>(root + "/tables", "POST", {
-                      id: id(),
-                    })
-                  ).key,
-                );
+                const table = id();
+                got(table, (await api<{ key: string }>(root + "/tables", "POST", { id: table })).key);
+                trackFrontendEvent("table_created", { table });
                 setId("");
               });
             }}
@@ -302,6 +298,7 @@ export function Windows() {
                             await api(root + "/windows/" + w.id, "PUT", {
                               access,
                             });
+                            trackFrontendEvent("window_access_updated", { window: w.id });
                             await rows.reload();
                           }}
                         />
@@ -325,6 +322,7 @@ export function Windows() {
                   name: name().trim(),
                   access: list(access()),
                 });
+                trackFrontendEvent("window_created", { window: w.id });
                 nav(`/o/${p.org}/windows/${w.id}`);
               });
             }}
@@ -884,9 +882,18 @@ function NotificationEditor(p: {
 }
 export function Settings() {
   const root = base();
+  const [telemetry, setTelemetry] = createSignal(frontendTelemetryEnabled());
   return (
     <>
       <h1>Settings</h1>
+      <section>
+        <h2>Frontend telemetry</h2>
+        <p class="muted">Optional analytics helps diagnose the Space Station interface. Explicit product events remain available to the app when this is enabled.</p>
+        <label>
+          <input type="checkbox" checked={telemetry()} onChange={(e) => { const enabled = e.currentTarget.checked; setTelemetry(enabled); setFrontendTelemetryEnabled(enabled); trackFrontendEvent("frontend_telemetry_setting_changed", { enabled }); }} />
+          Allow frontend analytics
+        </label>
+      </section>
       <Webhooks root={root} />
       <Keys root={root} />
     </>
