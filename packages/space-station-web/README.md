@@ -30,3 +30,24 @@ Set `enabled: false` initially or call `setEnabled(false)` to opt out and clear 
 The endpoint receives `POST {endpoint}` with `{ table, events }`. Authentication and authorization remain the host application's responsibility.
 
 Table IDs use the server's lowercase letters and digits grammar; the examples above follow it. Keep the `spacestation` prefix when creating shared Space Station tables.
+
+Use the same setup in React, Solid, Next, or vanilla JavaScript. In a Next/Solid server route (or any small same-origin proxy), keep the table keys in server environment variables, allowlist the incoming table name, and translate the request to normal ingest:
+
+```js
+import { toIngestBatch } from '@teamofsilicons/space-station-web';
+
+// POST /api/web/telemetry: body is { table, events }
+const allowed = new Map([
+  ['spacestationfrontendanalytics', process.env.SS_ANALYTICS_KEY],
+  ['spacestationfrontendevents', process.env.SS_EVENTS_KEY],
+]);
+const { table, events } = await request.json();
+const key = allowed.get(table);
+if (!key || !Array.isArray(events)) return Response.json({ error: 'invalid telemetry table' }, { status: 400 });
+const ingest = toIngestBatch({ table, key, events });
+return fetch(`${process.env.SPACE_STATION_URL}/api/ingest`, {
+  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ingest),
+});
+```
+
+The adapter preserves each event's stable `id` as `metadata.record_id`, so normal ingest deduplication also works across retries. Never expose table keys in browser code. The built-in browser sender continues to use `/api/web/telemetry` by default; change `endpoint` only when your host provides another same-origin route.

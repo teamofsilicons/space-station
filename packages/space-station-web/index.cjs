@@ -20,6 +20,19 @@ function jsonValue(value, max = 8192) {
 }
 function browserName(ua) { if (/Edg\//i.test(ua)) return 'edge'; if (/Chrome\//i.test(ua)) return 'chrome'; if (/Firefox\//i.test(ua)) return 'firefox'; if (/Safari\//i.test(ua)) return 'safari'; return 'unknown'; }
 
+/** Adapt a browser batch for the normal server ingest contract. Keep the table key server-side. */
+function toIngestBatch({ table, key, events, batchId = eventId() }) {
+  if (!table || !key || !Array.isArray(events)) throw new TypeError('toIngestBatch({table, key, events}) requires a table, server-side key, and events array');
+  return {
+    batch_id: batchId,
+    records: events.map((event) => ({
+      key,
+      metadata: { record_id: event.id || eventId(), table_id: table, event_ts_ms: Date.parse(event.metadata?.occurred_at) || Date.now() },
+      record: { type: event.type, data: event.data, metadata: event.metadata },
+    })),
+  };
+}
+
 /** Create a framework-agnostic browser analytics and events sender. */
 function createSpaceStationWeb(options = {}) {
   const root = typeof globalThis === 'undefined' ? {} : globalThis;
@@ -135,4 +148,4 @@ function createSpaceStationWeb(options = {}) {
   return { track, flush, setEnabled, isEnabled: () => enabled, analytics: (name, data, metadata) => analytics(name, data, metadata), destroy: async () => { if (destroyed) return; destroyed = true; cleanups.splice(0).forEach((cleanup) => cleanup()); if (timer) clearTimeout(timer); if (retryTimer) clearTimeout(retryTimer); await flush(); } };
 }
 
-module.exports = { createSpaceStationWeb, default: createSpaceStationWeb };
+module.exports = { createSpaceStationWeb, toIngestBatch, default: createSpaceStationWeb };

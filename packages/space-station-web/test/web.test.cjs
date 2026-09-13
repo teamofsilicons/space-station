@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createSpaceStationWeb } = require('../');
+const { createSpaceStationWeb, toIngestBatch } = require('../');
 
 test('tracks events into the configured table and sends a batch', async () => {
   const requests = [];
@@ -37,3 +37,10 @@ test('opt-out drops queued data and analytics sample rate zero drops automatic r
   assert.equal(requests.length, 0);
 });
 
+test('adapts stable browser IDs to normal ingest without exposing the key in records', () => {
+  const batch = toIngestBatch({ table: 'spacestationevents', key: 'server-only', batchId: 'batch-1', events: [{ id: 'event-1', type: 'created', data: { ok: true }, metadata: { occurred_at: '2026-01-01T00:00:00Z' } }] });
+  assert.equal(batch.batch_id, 'batch-1');
+  assert.equal(batch.records[0].metadata.record_id, 'event-1');
+  assert.equal(batch.records[0].key, 'server-only');
+  assert.equal(JSON.stringify(batch.records[0].record).includes('server-only'), false);
+});
