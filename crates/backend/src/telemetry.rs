@@ -27,14 +27,14 @@ impl Telemetry {
         self.0.record(source, step, None, event, context);
     }
 
-    pub fn request(&self, method: &str, path: &str, status: u16, started: Instant) {
-        let event = if status >= 500 { "request_error" } else { "request_completed" };
+    pub fn request(&self, trace_id: Uuid, method: &str, path: &str, status: u16, started: Instant) {
+        let event = if status >= 400 { "request_error" } else { "request_completed" };
         self.record(
             "backend",
             "http",
             event,
             json!({
-                "trace_id": Uuid::new_v4(),
+                "trace_id": trace_id,
                 "method": method,
                 "path": path,
                 "status": status,
