@@ -217,6 +217,8 @@ Auth Token: what allows carbons and silicons to do things they are allowed to
 Access Token: carbons & silicons can write code that can call queries & notifications on their behalf via mission control to either get data locally, or to build notifications and space windows.
 API Key: Programatically view tables & notifications on behalf of the organization and no carbon/silicon.
 
+Web:
+we have a web package that can be installed and used with solidjs, nextjs, reactjs, and even vanilla js with 2 modes: analytics & events. each one can take in
 
 Implementation:
 we'll have ClickHouse for records, and a Postgres for all other things.

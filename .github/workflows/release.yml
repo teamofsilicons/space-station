@@ -1,0 +1,48 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # The existing packaging script cross-builds Linux with zig and both Darwin targets
+    # from macOS, so keep the release job on the supported host.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl,x86_64-unknown-linux-musl
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+      - name: Build release archives
+        run: |
+          cargo install cargo-zigbuild --locked
+          cargo build -p space-station-cli --release --locked --target aarch64-apple-darwin --target x86_64-apple-darwin
+          cargo zigbuild -p space-station-cli --release --locked --target aarch64-unknown-linux-musl --target x86_64-unknown-linux-musl
+          python3 scripts/package-cli-release.py
+      - name: Sign checksums
+        env:
+          UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY }}
+        run: |
+          test -n "$UPDATE_SIGNING_PRIVATE_KEY"
+          umask 077
+          printf '%s\n' "$UPDATE_SIGNING_PRIVATE_KEY" > signing-key.pem
+          openssl pkeyutl -sign -inkey signing-key.pem -rawin \
+            -in apps/web/public/downloads/SHA256SUMS \
+            -out apps/web/public/downloads/SHA256SUMS.sig
+          rm -f signing-key.pem
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            apps/web/public/downloads/spacestation-*.tar.gz \
+            apps/web/public/downloads/SHA256SUMS \
+            apps/web/public/downloads/SHA256SUMS.sig \
+            --generate-notes --verify-tag

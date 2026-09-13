@@ -172,13 +172,15 @@ there is nothing to retry with here — and the message ends with how to sign in
 | variable | default | meaning |
 |---|---|---|
 | `SPACE_STATION_URL` | `https://backend.spacestation.teamofsilicons.com` | the Space Station origin (`/api` is appended) |
-| `SPACE_STATION_HOME` | — | explicit home override |
 | `SILICON_HOME` | `$SILICON_HOME/.space-station` | base for this app's `auth.json`, runtime, spool and daemon socket |
+| `SPACE_STATION_HOME` | — | compatibility alias, used when `SILICON_HOME` is unset |
 | `SPACE_STATION_ORG` | — | the org to work in, under `--org` and over the one stored |
 | `SPACE_STATION_TOKEN` | — | the short-lived token `auth` exchanges, when it is not an argument |
 | `SPACE_STATION_API_KEY` | — | act as this `apikey-` key |
 | `SPACE_STATION_ACCESS_TOKEN` | — | act as this `spacewindow-` token |
 | `SPACE_STATION_TABLE_KEY` | — | the ingest key used by `record` |
+| `SPACE_STATION_UPDATE_URL` | hosted `SHA256SUMS` | signed update manifest URL; its detached `.sig` must verify |
+| `SPACE_STATION_UPDATE` | enabled | set to `0` or `false` to opt out of hourly daemon updates |
 
 An empty variable is the same as an unset one. Nothing here reads a `.env` file or talks to IAM,
 so a local stack is one variable:

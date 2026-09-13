@@ -81,8 +81,9 @@ enum Cmd {
         /// Print the link instead of opening it
         #[arg(long)]
         no_browser: bool,
-        #[command(subcommand)]
-        cmd: Option<LoginCmd>,
+        /// Report authentication state; `login status` is normalized to this flag before parsing.
+        #[arg(long)]
+        status: bool,
     },
     /// Sign in with a short-lived token from `iam login --app-id 'tos>spacestation' --org <org>` or
     /// `iam silicon-login --app-id 'tos>spacestation'`; never prompts
@@ -152,12 +153,6 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<Daemon>,
     },
-}
-
-#[derive(Subcommand)]
-enum LoginCmd {
-    /// Report whether the locally stored session is present and still accepted by Space Station
-    Status,
 }
 
 #[derive(Subcommand)]
@@ -318,7 +313,13 @@ enum Acting {
 }
 
 fn main() {
-    let mut cli = Cli::parse();
+    let mut args: Vec<_> = env::args_os().collect();
+    if let Some(i) = args.iter().position(|arg| arg == "login") {
+        if args.get(i + 1).is_some_and(|arg| arg == "status") {
+            args[i + 1] = "--status".into();
+        }
+    }
+    let mut cli = Cli::parse_from(args);
     cli.org = setting(cli.org, "SPACE_STATION_ORG");
     cli.api_key = setting(cli.api_key, "SPACE_STATION_API_KEY");
     cli.access_token = setting(cli.access_token, "SPACE_STATION_ACCESS_TOKEN");
@@ -423,8 +424,8 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
         })
     };
     match cmd {
-        Cmd::Login { token, no_browser, cmd } => {
-            if matches!(cmd, Some(LoginCmd::Status)) {
+        Cmd::Login { token, no_browser, status } => {
+            if status {
                 return login_status(home, &url, org, as_json);
             }
             if let Some(token) = token {
@@ -433,6 +434,11 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
                 return signed_in(home, &url, space_station::exchange(&url, &slt, &org)?, org);
             }
             let org = org.or_else(|| store::org(home)).unwrap_or_default();
+            if org.is_empty() {
+                return Err(Error::Local(
+                    "no org: pass --org, set $SPACE_STATION_ORG, or sign in once with an org".into(),
+                ));
+            }
             let auth = space_station::login(&url, &org, |link| {
                 if no_browser || !out::open(link) {
                     eprintln!("open this to sign in:\n{link}")

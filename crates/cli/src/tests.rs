@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::time::Duration;
 use std::{fs, thread};
 
-use serde_json::{Value, json};
 use clap::Parser;
+use serde_json::{Value, json};
 use space_station::{Auth, Error};
 
 use crate::store::{self, Stored};
@@ -143,8 +143,8 @@ fn the_lock_serialises_concurrent_updates_so_none_is_lost() {
 
 #[test]
 fn universal_contract_commands_parse_without_prompting() {
-    let cli = crate::Cli::try_parse_from(["spacestation", "login", "status", "--json"]).unwrap();
-    assert!(matches!(cli.cmd, crate::Cmd::Login { cmd: Some(crate::LoginCmd::Status), .. }));
+    let cli = crate::Cli::try_parse_from(["spacestation", "login", "--status", "--json"]).unwrap();
+    assert!(matches!(cli.cmd, crate::Cmd::Login { status: true, .. }));
     let cli = crate::Cli::try_parse_from(["spacestation", "login", "oac_test", "--org", "tos"]).unwrap();
     assert!(matches!(cli.cmd, crate::Cmd::Login { token: Some(token), .. } if token == "oac_test"));
     assert_eq!(crate::percent_encode("a bug/#1"), "a%20bug%2F%231");

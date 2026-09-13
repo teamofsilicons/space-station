@@ -129,6 +129,19 @@ tables ls                                       every table you may see, with it
        rm <id>                                  the table and its records
        overview [--window 5h]                   1m 5m 15m 1h 5h 1d 7d 30d
 
+The `tos` organization owns Space Station's own telemetry table like any other table. Provision
+it once with the normal command, store the one-time key in the deployment secret store, and send
+events through the same `record`/daemon path:
+
+```sh
+spacestation --org tos tables create spacestation > spacestation.table-key
+chmod 600 spacestation.table-key
+```
+
+Telemetry records should be self-contained and include at least `source`, `step`, `progress`,
+`event`, and a context object. The daemon adds the normal record and system metadata; no separate
+telemetry transport or privileged table path exists.
+
 windows ls | get <id>                           a summary: id, name, access, current version and its author
         create <name> [--access a,b]            name under 20 characters
         edit <id> [--name n] [--access a,b]     rename, change who may open it, or both; prints the summary
@@ -209,7 +222,7 @@ in-process. Run it explicitly when you would rather it outlive your app — unde
 container's entrypoint. Then it is this process, not the app, that hears the server's per-record
 rejections (`unauthorized` after a key rotation, `size_exceeded`, `invalid`): they are printed
 here and counted in `daemon status`, and the app's `on_error` never sees them. `daemon status`
-also prints the socket path: `<home>/daemon.sock`, or — when `SPACE_STATION_HOME` is so deep
+also prints the socket path: `<home>/daemon.sock`, or — when the configured home is so deep
 that this would exceed the 104/108-byte cap on unix socket paths — a short
 `space-station-<hash>.sock` in the system temp directory instead. See
 [Getting started](/docs/getting-started).
@@ -219,11 +232,14 @@ that this would exceed the 104/108-byte cap on unix socket paths — a short
 | variable | default | meaning |
 |---|---|---|
 | `SPACE_STATION_URL` | `https://backend.spacestation.teamofsilicons.com` | the Space Station origin (`/api` is appended) |
-| `SPACE_STATION_HOME` | `~/.space-station` | where `auth.json`, the runtime, the spool, the daemon lock and — unless the path is too long — the socket live (`daemon status` says where) |
+| `SILICON_HOME` | `~/.silicon/.space-station` | base directory for this app's `auth.json`, runtime, spool, daemon lock and socket |
+| `SPACE_STATION_HOME` | — | compatibility override used only when `SILICON_HOME` is unset |
 | `SPACE_STATION_ORG` | — | the org to work in, under `--org` and over the one stored with the credential |
 | `SPACE_STATION_TOKEN` | — | the short-lived token for `auth`, instead of the argument |
 | `SPACE_STATION_API_KEY` | — | act as this `apikey-` key |
 | `SPACE_STATION_ACCESS_TOKEN` | — | act as this `spacewindow-` token |
+| `SPACE_STATION_UPDATE_URL` | hosted `SHA256SUMS` | signed update manifest URL; its detached `.sig` is verified before install |
+| `SPACE_STATION_UPDATE` | enabled | set to `0` or `false` to opt out of hourly daemon updates |
 
 The CLI reads no `.env` file, never talks to IAM itself, and defaults to the public host: point
 it at a local stack explicitly.

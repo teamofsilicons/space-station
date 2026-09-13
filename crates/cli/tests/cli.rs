@@ -161,6 +161,7 @@ fn run(home: &Path, url: &str, env: &[(&str, &str)], args: &[&str]) -> Ran {
     let done = Command::new(BIN)
         .args(args)
         .env_remove("SPACE_STATION_ORG")
+        .env_remove("SILICON_HOME")
         .env_remove("SPACE_STATION_API_KEY")
         .env_remove("SPACE_STATION_ACCESS_TOKEN")
         .env_remove("SPACE_STATION_TOKEN")
