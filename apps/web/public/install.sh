@@ -54,7 +54,16 @@ EOF
     base=${SPACE_STATION_DOWNLOAD_URL:-https://github.com/teamofsilicons/space-station/releases/latest/download}
     root="$HOME/.local/share/spacestation"
     bin="$HOME/.local/bin"
-    silicon_home=${SILICON_HOME:-${SPACE_STATION_HOME:-$HOME/.silicon}}
+    if [ -n "${SILICON_HOME:-}" ]; then
+        home_env_name=SILICON_HOME
+        silicon_home=$SILICON_HOME
+    elif [ -n "${SPACE_STATION_HOME:-}" ]; then
+        home_env_name=SPACE_STATION_HOME
+        silicon_home=$SPACE_STATION_HOME
+    else
+        home_env_name=SILICON_HOME
+        silicon_home=$HOME/.silicon
+    fi
     case ${SPACE_STATION_UPDATE:-} in
         0|false|FALSE|False) update_setting=0 ;;
         *) update_setting=1 ;;
@@ -138,7 +147,7 @@ EOF
                     printf '<string>%s</string>\n' "$(xml "$bin/spacestation")"
                     printf '%s\n' '<string>daemon</string>' '<string>run</string>'
                     printf '%s\n' '</array><key>EnvironmentVariables</key><dict>'
-                    printf '<key>SILICON_HOME</key><string>%s</string>\n' "$(xml "$silicon_home")"
+                    printf '<key>%s</key><string>%s</string>\n' "$home_env_name" "$(xml "$silicon_home")"
                     printf '%s\n' "<key>SPACE_STATION_UPDATE</key><string>$update_setting</string>"
                     printf '%s\n' '</dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/></dict></plist>'
                 } > "$plist"
@@ -154,14 +163,15 @@ EOF
                 }
                 units="$HOME/.config/systemd/user"
                 mkdir -p "$units"
+                systemd_quote() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\\\"/g; s/%/%%/g')"; }
                 cat > "$units/spacestation.service" <<EOF
 [Unit]
 Description=Space Station ingest daemon
 After=default.target
 
 [Service]
-ExecStart=$bin/spacestation daemon run
-Environment=SILICON_HOME=$silicon_home
+ExecStart=$(systemd_quote "$bin/spacestation") daemon run
+Environment=$home_env_name=$(systemd_quote "$silicon_home")
 Environment=SPACE_STATION_UPDATE=$update_setting
 Restart=always
 RestartSec=5
