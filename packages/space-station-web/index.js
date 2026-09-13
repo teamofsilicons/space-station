@@ -32,7 +32,7 @@ function toIngestBatch({ table, key, events, batchId = eventId() }) {
     records: events.map((event) => ({
       key,
       metadata: { record_id: event.id || eventId(), table_id: table, event_ts_ms: Date.parse(event.metadata?.occurred_at) || Date.now() },
-      record: { type: event.type, data: event.data, metadata: event.metadata },
+      record: { type: event.type, data: event.data, metadata: event.metadata || {} },
     })),
   };
 }
