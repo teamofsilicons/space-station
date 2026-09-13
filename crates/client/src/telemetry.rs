@@ -5,7 +5,8 @@
 //! module has no privileged backend path and uses the same daemon and spool as every other app.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::Serialize;
 
@@ -28,11 +29,25 @@ pub struct Telemetry {
 impl Telemetry {
     /// Build a sender from the key created for `tos`/`spacestation`.
     pub fn new(table_key: &str) -> Result<Self, Error> {
+        Self::with_options(table_key, default_home(), crate::default_url())
+    }
+
+    /// Build with an embedding service's daemon home and backend URL.
+    pub fn with_options(table_key: &str, home: impl Into<PathBuf>, url: impl Into<String>) -> Result<Self, Error> {
         let table = crate::shared::secrets::parse_table_key(table_key).ok_or(Error::InvalidKey)?;
         if table != TABLE {
             return Err(Error::Local(format!("telemetry requires the {ORG}.{TABLE} table key, got {table}")));
         }
-        Ok(Self { client: SpaceClient::new(table_key)? })
+        // Telemetry must never hold up the command or print a transport failure. The ordinary
+        // client keeps a five-second delivery window for application records; diagnostics can
+        // safely remain in the local spool when the station is unavailable.
+        let client = SpaceClient::builder(table_key)
+            .home(home)
+            .url(url)
+            .flush_timeout(Duration::from_millis(100))
+            .on_error(|_| {})
+            .build()?;
+        Ok(Self { client })
     }
 
     /// Load the key from [`KEY_ENV`] or `<home>/telemetry.key`.  Missing configuration disables

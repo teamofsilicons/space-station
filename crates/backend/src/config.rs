@@ -4,9 +4,11 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use url::Url;
+
+const DEFAULT_TELEMETRY_URL: &str = "http://127.0.0.1:8080";
 
 #[derive(Clone)]
 pub struct Config {
@@ -36,6 +38,10 @@ pub struct Config {
     /// and expected inside every webhook's `test` envelope. Root authority — never logged.
     pub iam_test_key: Option<String>,
     pub allow_private_webhooks: bool,
+    /// Ordinary `tos.spacestation` table key for backend self-telemetry. Missing disables it.
+    pub telemetry_key: Option<String>,
+    pub telemetry_home: PathBuf,
+    pub telemetry_url: String,
 }
 
 impl Config {
@@ -99,6 +105,22 @@ impl Config {
         let iam_auth_url = optional("SILICON_IAM_AUTH_URL")
             .map(|url| format!("{}/login", url.trim_end_matches('/')))
             .unwrap_or_else(|| format!("{}/api/v1/login", iam_url.trim_end_matches('/')));
+        let telemetry_key = if var("SPACE_STATION_TELEMETRY")
+            .is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "off" | "no"))
+        {
+            None
+        } else {
+            optional("SPACE_STATION_TELEMETRY_KEY")
+        };
+        let telemetry_home = optional("SILICON_HOME")
+            .map(PathBuf::from)
+            .map(|home| home.join(".space-station"))
+            .or_else(|| optional("SPACE_STATION_HOME").map(PathBuf::from))
+            .or_else(|| optional("HOME").map(|home| PathBuf::from(home).join(".space-station")))
+            .unwrap_or_else(|| PathBuf::from(".space-station"));
+        let telemetry_url = optional("SPACE_STATION_TELEMETRY_URL")
+            .or_else(|| optional("SPACE_STATION_URL"))
+            .unwrap_or_else(|| DEFAULT_TELEMETRY_URL.to_owned());
         Ok(Config {
             bind: SocketAddr::from(([0, 0, 0, 0], port)),
             origin: origin.origin().ascii_serialization(),
@@ -117,6 +139,9 @@ impl Config {
             iam_test_key,
             allow_private_webhooks: var("SS_ALLOW_PRIVATE_WEBHOOKS")
                 .is_some_and(|v| !matches!(v.as_str(), "" | "0" | "false")),
+            telemetry_key,
+            telemetry_home,
+            telemetry_url,
         })
     }
 }
@@ -190,6 +215,22 @@ mod tests {
         assert_eq!(cfg.iam_app_id, "tos>spacestation");
         assert!(cfg.iam_webhook_secret_previous.is_none() && cfg.iam_test_key.is_none());
         assert!(!cfg.allow_private_webhooks);
+        assert!(cfg.telemetry_key.is_none());
+        assert_eq!(cfg.telemetry_url, DEFAULT_TELEMETRY_URL);
+    }
+
+    #[test]
+    fn telemetry_configuration_is_opt_in_by_key_and_can_be_disabled() {
+        let mut map = full();
+        map.insert("SPACE_STATION_TELEMETRY_KEY", "table-spacestation-0123456789abcdef0123456789abcdef");
+        map.insert("SPACE_STATION_TELEMETRY_URL", "http://127.0.0.1:9999");
+        map.insert("SILICON_HOME", "/tmp/silicon");
+        let cfg = from(&map).unwrap();
+        assert_eq!(cfg.telemetry_key.as_deref(), Some("table-spacestation-0123456789abcdef0123456789abcdef"));
+        assert_eq!(cfg.telemetry_home, PathBuf::from("/tmp/silicon/.space-station"));
+        assert_eq!(cfg.telemetry_url, "http://127.0.0.1:9999");
+        map.insert("SPACE_STATION_TELEMETRY", "0");
+        assert!(from(&map).unwrap().telemetry_key.is_none());
     }
 
     #[test]

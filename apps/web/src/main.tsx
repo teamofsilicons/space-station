@@ -210,7 +210,7 @@ function Shell(p: ParentProps) {
                           </details>
                           <div class="sidebar-caption">Reference</div>
                           <div class="sidebar-foot">
-                            <span class="muted">Telemetry is flowing.</span>
+                            <span class="muted">Space Station</span>
                             <span class="muted">⌘ K to search</span>
                           </div>
                           <button

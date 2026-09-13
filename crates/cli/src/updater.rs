@@ -61,12 +61,29 @@ fn fetch(url: &str) -> Result<Vec<u8>, String> {
 }
 
 fn verify_signature(manifest: &[u8], encoded: &[u8]) -> Result<(), String> {
-    let key_text = std::str::from_utf8(PUBLIC_KEY).map_err(|e| format!("embedded update key: {e}"))?;
+    let key = parse_public_key(PUBLIC_KEY)?;
+    verify_with_key(manifest, encoded, &key)
+}
+
+fn parse_public_key(pem: &[u8]) -> Result<VerifyingKey, String> {
+    let key_text = std::str::from_utf8(pem).map_err(|e| format!("update key is not UTF-8: {e}"))?;
     let body = key_text.lines().filter(|line| !line.starts_with("---")).collect::<String>();
     let key =
         base64::engine::general_purpose::STANDARD.decode(body).map_err(|e| format!("embedded update key: {e}"))?;
-    let key: [u8; 32] = key.try_into().map_err(|_| "embedded update key is not Ed25519".to_string())?;
-    let key = VerifyingKey::from_bytes(&key).map_err(|e| format!("embedded update key: {e}"))?;
+    let key: [u8; 32] = match key.as_slice() {
+        raw if raw.len() == 32 => raw.try_into().expect("length checked"),
+        // Ed25519 SubjectPublicKeyInfo (the format emitted by `openssl pkey -pubout`).
+        der if der.len() == 44
+            && der[..12] == [0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00] =>
+        {
+            der[12..].try_into().expect("length checked")
+        }
+        _ => return Err("update key is not an Ed25519 raw key or SubjectPublicKeyInfo".into()),
+    };
+    VerifyingKey::from_bytes(&key).map_err(|e| format!("update key is not Ed25519: {e}"))
+}
+
+fn verify_with_key(manifest: &[u8], encoded: &[u8], key: &VerifyingKey) -> Result<(), String> {
     let text = std::str::from_utf8(encoded).ok().map(str::trim).unwrap_or("");
     let sig = if encoded.len() == 64 {
         Signature::from_bytes(encoded.try_into().expect("length checked"))
@@ -143,10 +160,32 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
     #[test]
     fn finds_checksums_and_platform_asset() {
         let sums = b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  spacestation-linux-x64.tar.gz\n";
         assert_eq!(checksum(sums, "spacestation-linux-x64.tar.gz"), Some("a".repeat(64)));
         assert!(asset_name().is_some());
+    }
+
+    #[test]
+    fn verifies_a_detached_signature_round_trip() {
+        let signing = SigningKey::from_bytes(&[7; 32]);
+        let pem = format!(
+            "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n",
+            base64::engine::general_purpose::STANDARD.encode(signing.verifying_key().to_bytes())
+        );
+        let key = parse_public_key(pem.as_bytes()).unwrap();
+        let manifest = b"signed checksums\n";
+        let signature = signing.sign(manifest);
+        verify_with_key(manifest, &signature.to_bytes(), &key).unwrap();
+        assert!(verify_with_key(b"tampered", &signature.to_bytes(), &key).is_err());
+    }
+
+    #[test]
+    fn parses_the_embedded_openssl_public_key() {
+        let key = parse_public_key(PUBLIC_KEY).unwrap();
+        let signature = hex_decode("a8a337b3a02e2d32332193e683fb1afcb278be68b18bcf02ab3988e4671f35c0bfa520f0a1e34e949e38ab718a2f6b568b17d253e15ccd802150fc73eaf97003").unwrap();
+        verify_with_key(b"release checksum bytes\n", &signature, &key).unwrap();
     }
 }

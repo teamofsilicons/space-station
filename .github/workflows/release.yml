@@ -34,7 +34,8 @@ jobs:
           test -n "$UPDATE_SIGNING_PRIVATE_KEY"
           umask 077
           printf '%s\n' "$UPDATE_SIGNING_PRIVATE_KEY" > signing-key.pem
-          openssl pkeyutl -sign -inkey signing-key.pem -rawin \
+          # Ed25519 signs the bytes directly; macOS's system OpenSSL does not support -rawin.
+          openssl pkeyutl -sign -inkey signing-key.pem \
             -in apps/web/public/downloads/SHA256SUMS \
             -out apps/web/public/downloads/SHA256SUMS.sig
           rm -f signing-key.pem

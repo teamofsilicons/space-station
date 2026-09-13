@@ -10,17 +10,21 @@ use std::sync::Arc;
 use axum::Router;
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{FromRequest, FromRequestParts, State};
+use axum::http::Request;
 use axum::http::StatusCode;
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::Serialize;
 use serde_json::json;
+use std::time::Instant;
 use tokio::sync::watch;
 
 use crate::config::Config;
 use crate::iam;
 use crate::sql::GuardError;
 use crate::store::{ChError, Lease, Store};
+use crate::telemetry::Telemetry;
 use crate::{access, dev_errors, ingest, live, notifications, query, tables, tokens, triggers, webhooks, windows};
 
 #[derive(Clone)]
@@ -37,6 +41,7 @@ pub struct Inner {
     pub hub: live::Hub,
     pub keys: ingest::Keys,
     pub visible: access::Cache,
+    pub telemetry: Option<Telemetry>,
 }
 
 impl Deref for AppState {
@@ -69,7 +74,22 @@ pub fn router(state: AppState) -> Router {
         .merge(iam::webhook::routes_at("/webhooks/api/"))
         .merge(iam::webhook::routes_at("/webhooks/api"))
         .fallback(async || ApiError::not_found("route"))
+        .layer(middleware::from_fn_with_state(state.clone(), observe))
         .with_state(state)
+}
+
+/// Records only safe request facts. Health and ingest are excluded: health is polled frequently,
+/// and recording ingest outcomes through the same path would recurse into telemetry.
+async fn observe(State(state): State<AppState>, req: Request<axum::body::Body>, next: Next) -> Response {
+    let path = req.uri().path().to_owned();
+    let skip = path == "/api/health" || path == "/api/ws/ingest" || path.starts_with("/webhooks/api");
+    let method = req.method().to_string();
+    let started = Instant::now();
+    let response = next.run(req).await;
+    if !skip && let Some(telemetry) = &state.telemetry {
+        telemetry.request(&method, &path, response.status().as_u16(), started);
+    }
+    response
 }
 
 /// Readiness checks the stores used by real requests. Failures reveal no connection details,

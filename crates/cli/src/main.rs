@@ -16,11 +16,11 @@ mod updater;
 
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::{env, fs, process};
+use std::{env, fs, process, time::Instant};
 
 use clap::{Parser, Subcommand};
 use serde_json::Value;
-use space_station::{Auth, Def, Error, Key, Space, SpaceClient, WindowOutput, daemon};
+use space_station::{Auth, Def, Error, Key, Space, SpaceClient, Telemetry, WindowOutput, daemon};
 
 use out::Col;
 use store::Stored;
@@ -338,7 +338,29 @@ fn main() {
         (_, None, None) => Acting::Stored,
     };
     let home = space_station::default_home();
-    if let Err(e) = run(cli, &home) {
+    let command = command_name(&cli.cmd);
+    let started = Instant::now();
+    let telemetry = Telemetry::from_env().ok().flatten();
+    let result = run(cli, &home);
+    if let Some(telemetry) = telemetry {
+        let (outcome, error_code) = match &result {
+            Ok(()) => ("ok", None),
+            Err(e) => ("error", Some(out::code(e))),
+        };
+        telemetry.record(
+            "cli",
+            command,
+            None,
+            "command_finished",
+            serde_json::json!({
+                "command": command,
+                "outcome": outcome,
+                "duration_ms": started.elapsed().as_millis(),
+                "error_code": error_code,
+            }),
+        );
+    }
+    if let Err(e) = result {
         let refused = match (acting, &e) {
             (Acting::Stored, Error::Api { status: 401, .. }) if store::expire(&home).is_ok() => out::EXPIRED,
             (Acting::ApiKey, _) => out::KEY_REFUSED,
@@ -347,6 +369,30 @@ fn main() {
         };
         eprintln!("{}", out::fail(&e, refused));
         process::exit(1);
+    }
+}
+
+fn command_name(cmd: &Cmd) -> &'static str {
+    match cmd {
+        Cmd::Login { .. } => "login",
+        Cmd::Auth { .. } => "auth",
+        Cmd::Logout => "logout",
+        Cmd::Whoami => "whoami",
+        Cmd::Orgs => "orgs",
+        Cmd::Use { .. } => "use",
+        Cmd::Tables(_) => "tables",
+        Cmd::Windows(_) => "windows",
+        Cmd::Notifications(_) => "notifications",
+        Cmd::Webhooks(_) => "webhooks",
+        Cmd::Webhook(_) => "webhook",
+        Cmd::Keys(_) => "keys",
+        Cmd::Token(_) => "token",
+        Cmd::Query { .. } => "query",
+        Cmd::Record { .. } => "record",
+        Cmd::Errors => "errors",
+        Cmd::Iam => "iam",
+        Cmd::Bug { .. } => "bug",
+        Cmd::Daemon { .. } => "daemon",
     }
 }
 
