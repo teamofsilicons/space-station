@@ -44,6 +44,10 @@ const WEBHOOKS: &[Col] = &[("ID", "id"), ("URL", "url"), ("CREATED_BY", "created
 const KEYS: &[Col] =
     &[("ID", "id"), ("SCOPES", "scopes"), ("CREATED_BY", "created_by"), ("LAST_USED_AT", "last_used_at")];
 const ORGS: &[Col] = &[("ID", "id"), ("NAME", "name")];
+const APP_ID: &str = "tos>spacestation";
+const REPOSITORY: &str = "https://github.com/teamofsilicons/space-station";
+const DOCS: &str = "https://spacestation.teamofsilicons.com/docs/cli";
+const CRATE: &str = "https://crates.io/crates/space-station";
 
 /// The globals that also come from the environment are read by hand, not through clap's `env`:
 /// clap counts a value it took from a variable as given and then draws it into every usage line
@@ -69,11 +73,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Sign in through the browser: opens IAM, keeps the session Space Station redirects back, bound to --org
+    /// Sign in through IAM, either with a short-lived token or through the browser.
     Login {
+        /// The short-lived token minted by `iam login --app-id`; `-` reads it from stdin.
+        token: Option<String>,
         /// Print the link instead of opening it
         #[arg(long)]
         no_browser: bool,
+        #[command(subcommand)]
+        cmd: Option<LoginCmd>,
     },
     /// Sign in with a short-lived token from `iam login --app-id 'tos>spacestation' --org <org>` or
     /// `iam silicon-login --app-id 'tos>spacestation'`; never prompts
@@ -124,11 +132,31 @@ enum Cmd {
     },
     /// What went wrong server-side for this org
     Errors,
+    /// Identify this IAM application and link its source, docs and Rust package
+    Iam,
+    /// Open a pre-filled GitHub issue with a reproducible bug report; --pr-ref may link a fix
+    #[command(alias = "report-bug", alias = "bug-report")]
+    Bug {
+        /// A concise description of the failure
+        summary: String,
+        /// Reproduction details, expected behavior and actual behavior; `-` reads stdin
+        #[arg(long, default_value = "")]
+        details: String,
+        /// Optional pull request URL or owner/repo#number containing a fix
+        #[arg(long, alias = "pr")]
+        pr_ref: Option<String>,
+    },
     /// The ingest daemon: run (the default), status
     Daemon {
         #[command(subcommand)]
         cmd: Option<Daemon>,
     },
+}
+
+#[derive(Subcommand)]
+enum LoginCmd {
+    /// Report whether the locally stored session is present and still accepted by Space Station
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -326,6 +354,53 @@ fn setting(flag: Option<String>, var: &str) -> Option<String> {
     flag.or_else(|| env::var(var).ok()).filter(|v| !v.trim().is_empty())
 }
 
+fn login_status(home: &Path, url: &str, org: Option<String>, _as_json: bool) -> Result<(), Error> {
+    let stored = match store::load(home) {
+        Ok(stored) => stored,
+        Err(_) => {
+            out::json(&serde_json::json!({"authenticated": false}))?;
+            return Ok(());
+        }
+    };
+    let org = org.or(stored.org.clone());
+    let Some(org) = org else {
+        out::json(&serde_json::json!({"authenticated": false, "reason": "no_org"}))?;
+        return Ok(());
+    };
+    match Space::new(url, stored.auth)?.org(org.clone()).me() {
+        Ok(identity) => out::json(&serde_json::json!({
+            "authenticated": true,
+            "org": org,
+            "identity": identity,
+        }))?,
+        Err(Error::Api { status, code, message }) if status == 401 => out::json(&serde_json::json!({
+            "authenticated": false,
+            "org": org,
+            "reason": code,
+            "message": message,
+            "status": status,
+        }))?,
+        Err(e) => out::json(&serde_json::json!({
+            "authenticated": false,
+            "org": org,
+            "reason": out::code(&e),
+            "message": e.to_string(),
+        }))?,
+    }
+    Ok(())
+}
+
+/// Encode query values without another dependency; GitHub accepts UTF-8 percent encoding.
+fn percent_encode(value: &str) -> String {
+    value
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            b => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
 fn run(cli: Cli, home: &Path) -> Result<(), Error> {
     let Cli { cmd, org, json: as_json, api_key, access_token } = cli;
     let url = space_station::default_url();
@@ -347,7 +422,15 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
         })
     };
     match cmd {
-        Cmd::Login { no_browser } => {
+        Cmd::Login { token, no_browser, cmd } => {
+            if matches!(cmd, Some(LoginCmd::Status)) {
+                return login_status(home, &url, org, as_json);
+            }
+            if let Some(token) = token {
+                let org = bound(home, org)?;
+                let slt = if token == "-" { stdin()? } else { token };
+                return signed_in(home, &url, space_station::exchange(&url, &slt, &org)?, org);
+            }
             let org = org.or_else(|| store::org(home)).unwrap_or_default();
             let auth = space_station::login(&url, &org, |link| {
                 if no_browser || !out::open(link) {
@@ -565,6 +648,37 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
             eprintln!("record delivered to the server or saved by the running daemon");
         }
         Cmd::Errors => out::json(&space()?.dev_errors()?)?,
+        Cmd::Iam => out::json(&serde_json::json!({
+            "app_id": APP_ID,
+            "name": "Space Station",
+            "repository": REPOSITORY,
+            "docs": DOCS,
+            "crate": CRATE,
+            "version": env!("CARGO_PKG_VERSION"),
+        }))?,
+        Cmd::Bug { summary, details, pr_ref } => {
+            let details = if details == "-" { stdin()? } else { details };
+            let mut body = details;
+            if let Some(pr) = &pr_ref {
+                if !body.is_empty() {
+                    body.push_str("\n\n");
+                }
+                body.push_str("Proposed fix: ");
+                body.push_str(pr);
+            }
+            let url =
+                format!("{REPOSITORY}/issues/new?title={}&body={}", percent_encode(&summary), percent_encode(&body),);
+            out::json(&serde_json::json!({
+                "submitted": false,
+                "url": url,
+                "repository": REPOSITORY,
+                "summary": summary,
+                "pr_ref": pr_ref,
+            }))?;
+            if !out::open(&url) {
+                eprintln!("open the URL above to submit the report");
+            }
+        }
         Cmd::Daemon { cmd } => match cmd.unwrap_or(Daemon::Run) {
             Daemon::Run => daemon::run(daemon::Config { home: home.to_path_buf(), url: url.clone() })?,
             Daemon::Status => out::json(&daemon::status(home)?)?,
