@@ -1,6 +1,6 @@
 # @teamofsilicons/space-station-web
 
-Small, framework-agnostic browser telemetry for Space Station. It works with React, Solid, Next, vanilla JavaScript, and any other web app.
+Framework-agnostic browser telemetry for React, Solid, Next, vanilla JavaScript, and other web apps.
 
 ```sh
 npm install @teamofsilicons/space-station-web
@@ -10,18 +10,21 @@ npm install @teamofsilicons/space-station-web
 import { createSpaceStationWeb } from '@teamofsilicons/space-station-web';
 
 const telemetry = createSpaceStationWeb({
-  analyticsTable: 'spacestationfrontendanalytics',
-  eventsTable: 'spacestationfrontendevents',
+  analyticsTable: 'spacestation-frontend-analytics',
+  eventsTable: 'spacestation-frontend-events',
   endpoint: '/api/web/telemetry',
-  sampleRate: 1,
 });
 
-telemetry.track('table_created', { table: 'orders' }, { source: 'tables-page' });
-// telemetry.flush() is useful before a page is unloaded.
+telemetry.track('table_created', { table_kind: 'orders' });
+await telemetry.flush();
 ```
 
-The package batches records and sends `POST {endpoint}` with `{table, events}`. Every event has `type`, `data`, and `metadata`. No API key or `Authorization` header is added; the host application's endpoint decides how to authenticate or authorize the request.
+`analyticsTable` enables automatic page views, SPA navigation, errors, scroll depth, navigation timing, network outcomes, and coarse device/browser context. `eventsTable` is for explicit `track()` events. Either stream can be disabled by omitting its table. Automatic sampling is controlled with `sampleRate` (default `1`).
 
-When `analyticsTable` is configured, it captures page views, clicks, browser/device details, errors, unhandled promise rejections, scroll depth, navigation timing, and fetch outcomes. `eventsTable` receives explicit `track()` calls. Analytics are sampled by `sampleRate` (default `1`); explicit events are always recorded. Omit either table to disable that stream.
+The package never adds credentials or an authorization header. Automatic click records contain only the element tag, ARIA role, and an optional explicit `data-spacestation-event` marker; input contents, text, IDs, URLs with queries, and hashes are excluded. Event data is bounded and non-serializable or oversized values are replaced with a diagnostic marker.
 
-Call `destroy()` on teardown. It removes listeners, restores `window.fetch`, and flushes queued records. Failed sends remain queued for a later `flush()`.
+Delivery is bounded: batches contain at most 40 events, the in-memory queue holds at most 200, and a failed batch is retried at most twice. `flush()` resolves with `{sent, failed, dropped, queued}` instead of rejecting, so telemetry cannot create an unhandled-rejection loop. Failed sends are retried after five seconds while data remains queued.
+
+Set `enabled: false` initially or call `setEnabled(false)` to opt out and clear queued data. Call `destroy()` when the app is unmounted; it removes listeners, restores history/fetch hooks, cancels timers, and flushes what remains.
+
+The endpoint receives `POST {endpoint}` with `{ table, events }`. Authentication and authorization remain the host application's responsibility.

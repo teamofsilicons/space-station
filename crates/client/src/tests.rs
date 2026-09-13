@@ -352,9 +352,9 @@ fn tables_are_listed_created_rotated_reaccessed_deleted_and_summarised() {
     space.retire_table("orders").unwrap();
     space.unretire_table("orders").unwrap();
     assert_eq!(space.create_table("orders", &["@alice", "tech"]).unwrap().value, key);
-    assert_eq!(body(&seen, 3), json!({"id": "orders", "access": ["@alice", "tech"]}));
+    assert_eq!(body(&seen, 5), json!({"id": "orders", "access": ["@alice", "tech"]}));
     assert_eq!(space.set_table_access("orders", &["@alice"]).unwrap().id, "orders");
-    assert_eq!(body(&seen, 4), json!({"access": ["@alice"]}));
+    assert_eq!(body(&seen, 6), json!({"access": ["@alice"]}));
     assert_eq!(space.rotate_table_key("orders").unwrap().value, key);
     space.delete_table("orders").unwrap();
     let overview = space.overview("1h").unwrap();

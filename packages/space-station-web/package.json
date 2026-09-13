@@ -30,6 +30,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test 'test/*.test.cjs'"
+    "test": "node --test 'test/*.test.cjs'",
+    "prepack": "node scripts/build-cjs.mjs"
   }
 }

@@ -1,33 +1,25 @@
 const MAX_TEXT = 160;
 const MAX_BATCH = 40;
+const MAX_QUEUE = 200;
+const MAX_RETRIES = 2;
 const FLUSH_MS = 1000;
+const RETRY_MS = 5000;
+const REQUEST_MS = 10000;
+const RETRY = Symbol('space-station-retry');
 
-const clip = (value) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT);
-const randomId = () => {
-  try { return globalThis.crypto?.randomUUID?.() || ''; } catch (_) { return ''; }
-};
-const id = () => randomId() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+const clip = (value, max = MAX_TEXT) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+const eventId = () => { try { return globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`; } catch (_) { return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`; } };
 const finiteRate = (value) => Math.max(0, Math.min(1, Number.isFinite(Number(value)) ? Number(value) : 1));
-
-function jsonValue(value) {
-  try { return JSON.parse(JSON.stringify(value)); } catch (_) { return { error: 'unserializable_value' }; }
+const cleanUrl = (value) => { try { const u = new URL(String(value), globalThis.location?.origin || 'http://localhost'); return `${u.origin}${u.pathname}`; } catch (_) { return undefined; } };
+function jsonValue(value, max = 8192) {
+  try {
+    const parsed = JSON.parse(JSON.stringify(value ?? {}));
+    return JSON.stringify(parsed).length <= max ? parsed : { error: 'value_too_large' };
+  } catch (_) { return { error: 'unserializable_value' }; }
 }
+function browserName(ua) { if (/Edg\//i.test(ua)) return 'edge'; if (/Chrome\//i.test(ua)) return 'chrome'; if (/Firefox\//i.test(ua)) return 'firefox'; if (/Safari\//i.test(ua)) return 'safari'; return 'unknown'; }
 
-function browserName(ua) {
-  if (/Edg\//i.test(ua)) return 'edge';
-  if (/Chrome\//i.test(ua)) return 'chrome';
-  if (/Firefox\//i.test(ua)) return 'firefox';
-  if (/Safari\//i.test(ua)) return 'safari';
-  if (/AppleWebKit/i.test(ua)) return 'webkit';
-  return 'unknown';
-}
-
-/**
- * Create a framework-agnostic browser telemetry sender.
- *
- * The endpoint receives `{table, events}`. No API key or Authorization header is ever added;
- * authentication, if needed, remains the host application's concern.
- */
+/** Create a framework-agnostic browser analytics and events sender. */
 function createSpaceStationWeb(options = {}) {
   const root = typeof globalThis === 'undefined' ? {} : globalThis;
   const win = root.window;
@@ -40,112 +32,105 @@ function createSpaceStationWeb(options = {}) {
   const rate = finiteRate(options.sampleRate);
   const queues = new Map();
   const cleanups = [];
+  const session = eventId();
+  let enabled = options.enabled !== false;
   let destroyed = false;
   let timer;
-  const session = id();
+  let retryTimer;
+  let flushing;
   const ua = clip(nav?.userAgent || '');
-  const base = {
-    session_id: session,
-    url: typeof root.location?.href === 'string' ? root.location.href : undefined,
-    path: typeof root.location?.pathname === 'string' ? root.location.pathname : undefined,
-    referrer: typeof doc?.referrer === 'string' ? doc.referrer : undefined,
-    user_agent: ua || undefined,
-    browser: browserName(ua),
-    device: /Mobi|Android|iPhone|iPad/i.test(ua) ? 'mobile' : 'desktop',
-    language: nav?.language,
-    viewport: win ? { width: win.innerWidth, height: win.innerHeight } : undefined,
-    screen: root.screen ? { width: root.screen.width, height: root.screen.height, pixel_ratio: root.devicePixelRatio || 1 } : undefined,
-  };
-  Object.keys(base).forEach((key) => base[key] === undefined && delete base[key]);
+
+  function context() {
+    const base = {
+      session_id: session,
+      url: cleanUrl(root.location?.href),
+      path: typeof root.location?.pathname === 'string' ? root.location.pathname : undefined,
+      referrer: cleanUrl(doc?.referrer),
+      user_agent: ua || undefined,
+      browser: browserName(ua),
+      device: /Mobi|Android|iPhone|iPad/i.test(ua) ? 'mobile' : 'desktop',
+      language: nav?.language,
+      viewport: win ? { width: win.innerWidth, height: win.innerHeight } : undefined,
+      screen: root.screen ? { width: root.screen.width, height: root.screen.height, pixel_ratio: root.devicePixelRatio || 1 } : undefined,
+    };
+    for (const key of Object.keys(base)) if (base[key] === undefined) delete base[key];
+    return base;
+  }
 
   function enqueue(table, type, data, metadata, sampled) {
-    if (!table || destroyed || (sampled && Math.random() > rate)) return;
+    if (!enabled || !table || destroyed || (sampled && Math.random() > rate)) return;
+    const event = { id: eventId(), type: clip(type), data: jsonValue(data), metadata: { ...context(), ...jsonValue(metadata, 4096), occurred_at: new Date().toISOString() } };
+    Object.defineProperty(event, RETRY, { value: 0, writable: true, enumerable: false });
     const list = queues.get(table) || [];
-    list.push({ type, data: jsonValue(data ?? {}), metadata: { ...base, ...jsonValue(metadata ?? {}), occurred_at: new Date().toISOString() } });
+    list.push(event);
     queues.set(table, list);
-    if (list.length >= MAX_BATCH) void flush(table).catch(() => {});
-    else if (!timer) timer = setTimeout(() => { timer = undefined; void flush().catch(() => {}); }, FLUSH_MS);
+    while ([...queues.values()].reduce((n, q) => n + q.length, 0) > MAX_QUEUE) {
+      const first = queues.keys().next().value;
+      const q = queues.get(first); q?.shift(); if (!q?.length) queues.delete(first);
+    }
+    if (list.length >= MAX_BATCH) void flush(table);
+    else if (!timer) timer = setTimeout(() => { timer = undefined; void flush(); }, FLUSH_MS);
   }
 
   function analytics(type, data, metadata) { enqueue(analyticsTable, type, data, metadata, true); }
-
   function track(name, data = {}, metadata = {}) {
     if (!name || typeof name !== 'string') throw new TypeError('track(name, data, metadata): name must be a non-empty string');
     enqueue(eventsTable, name, data, metadata, false);
   }
+  function setEnabled(value) { enabled = value !== false; if (!enabled) queues.clear(); return enabled; }
 
   async function send(table, events) {
     if (typeof transport !== 'function') throw new Error('Space Station web telemetry requires fetch or options.fetch');
-    const response = await transport(endpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ table, events }),
-    });
-    if (!response?.ok) throw new Error(`telemetry endpoint returned HTTP ${response?.status ?? 'unknown'}`);
+    let timeout;
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined;
+    try {
+      const request = transport(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ table, events }), ...(controller ? { signal: controller.signal } : {}) });
+      const response = await Promise.race([request, new Promise((_, reject) => { timeout = setTimeout(() => { controller?.abort(); reject(new Error('telemetry request timed out')); }, REQUEST_MS); })]);
+      if (!response?.ok) throw new Error(`telemetry endpoint returned HTTP ${response?.status ?? 'unknown'}`);
+    } finally { if (timeout) clearTimeout(timeout); }
   }
 
   async function flush(table) {
-    const batches = table ? [table] : [...queues.keys()];
-    const pending = [];
-    for (const key of batches) {
-      const events = queues.get(key);
-      if (!events?.length) continue;
-      queues.delete(key);
-      pending.push(send(key, events).catch((error) => { queues.set(key, [...(queues.get(key) || []), ...events]); throw error; }));
-    }
-    return Promise.all(pending);
+    if (flushing) return flushing;
+    flushing = (async () => {
+      const result = { sent: 0, failed: 0, dropped: 0, queued: 0 };
+      for (const key of table ? [table] : [...queues.keys()]) {
+        const events = queues.get(key); if (!events?.length) continue;
+        queues.delete(key);
+        for (let offset = 0; offset < events.length; offset += MAX_BATCH) {
+          const batch = events.slice(offset, offset + MAX_BATCH);
+          try { await send(key, batch); result.sent += batch.length; }
+          catch (error) {
+            result.failed += batch.length;
+            const retry = batch.filter((event) => { event[RETRY] += 1; return event[RETRY] <= MAX_RETRIES; });
+            result.dropped += batch.length - retry.length;
+            if (retry.length) queues.set(key, [...retry, ...(queues.get(key) || [])]);
+          }
+        }
+      }
+      result.queued = [...queues.values()].reduce((n, q) => n + q.length, 0);
+      if (result.queued && !retryTimer) retryTimer = setTimeout(() => { retryTimer = undefined; void flush(); }, RETRY_MS); if (!result.queued && retryTimer) { clearTimeout(retryTimer); retryTimer = undefined; }
+      return result;
+    })().finally(() => { flushing = undefined; });
+    return flushing;
   }
 
-  const on = (target, event, handler, opts) => {
-    if (!target?.addEventListener) return;
-    target.addEventListener(event, handler, opts);
-    cleanups.push(() => target.removeEventListener(event, handler, opts));
-  };
-
+  const on = (target, event, handler, opts) => { if (!target?.addEventListener) return; target.addEventListener(event, handler, opts); cleanups.push(() => target.removeEventListener(event, handler, opts)); };
   if (win && analyticsTable) {
-    analytics('page_view', {});
-    on(doc, 'click', (event) => {
-      const target = event.target?.closest?.('*') || event.target;
-      analytics('click', {
-        tag: target?.tagName?.toLowerCase(), id: target?.id || undefined,
-        role: target?.getAttribute?.('role') || undefined, text: clip(target?.textContent),
-        href: target?.href || undefined,
-      });
-    }, { passive: true });
-    on(win, 'error', (event) => analytics('error', { message: clip(event.message), source: clip(event.filename), line: event.lineno, column: event.colno }));
-    on(win, 'unhandledrejection', (event) => analytics('error', { kind: 'unhandledrejection', reason: clip(event.reason?.message || event.reason) }));
+    const page = () => analytics('page_view');
+    page();
+    on(doc, 'click', (event) => { const target = event.target?.closest?.('*') || event.target; analytics('click', { tag: target?.tagName?.toLowerCase(), role: target?.getAttribute?.('role') || undefined, marker: clip(target?.getAttribute?.('data-spacestation-event')) || undefined }); }, { passive: true });
+    on(win, 'error', (event) => analytics('error', { kind: 'runtime', message: clip(event.message), source: cleanUrl(event.filename), line: event.lineno, column: event.colno }));
+    on(win, 'unhandledrejection', () => analytics('error', { kind: 'unhandledrejection' }));
     let scrollTimer;
-    on(win, 'scroll', () => {
-      if (scrollTimer) return;
-      scrollTimer = setTimeout(() => {
-        scrollTimer = undefined;
-        const height = Math.max(1, doc.documentElement?.scrollHeight || 1);
-        analytics('scroll', { x: win.scrollX || 0, y: win.scrollY || 0, percent: Math.min(100, Math.round(((win.scrollY + win.innerHeight) / height) * 100)) });
-      }, 250);
-    }, { passive: true });
-    const timing = () => {
-      const entry = root.performance?.getEntriesByType?.('navigation')?.[0];
-      if (entry) analytics('timing', { dns_ms: entry.domainLookupEnd - entry.domainLookupStart, connect_ms: entry.connectEnd - entry.connectStart, response_ms: entry.responseEnd - entry.responseStart, dom_content_loaded_ms: entry.domContentLoadedEventEnd, load_ms: entry.loadEventEnd });
-    };
+    on(win, 'scroll', () => { if (scrollTimer) return; scrollTimer = setTimeout(() => { scrollTimer = undefined; const height = Math.max(1, doc.documentElement?.scrollHeight || 1); analytics('scroll', { percent: Math.min(100, Math.round(((win.scrollY + win.innerHeight) / height) * 100)) }); }, 250); }, { passive: true });
+    const timing = () => { const entry = root.performance?.getEntriesByType?.('navigation')?.[0]; if (entry) analytics('timing', { dns_ms: entry.domainLookupEnd - entry.domainLookupStart, connect_ms: entry.connectEnd - entry.connectStart, response_ms: entry.responseEnd - entry.responseStart, dom_content_loaded_ms: entry.domContentLoadedEventEnd, load_ms: entry.loadEventEnd }); };
     if (doc.readyState === 'complete') timing(); else on(win, 'load', timing, { once: true });
-    if (typeof win.fetch === 'function') {
-      const original = win.fetch;
-      win.fetch = function wrappedFetch(input, init) {
-        const started = Date.now();
-        const url = typeof input === 'string' ? input : input?.url || '';
-        if (url === endpoint || url.endsWith(endpoint)) return original.apply(this, arguments);
-        return original.apply(this, arguments).then((response) => { analytics('network', { method: init?.method || input?.method || 'GET', url: clip(url), status: response.status, duration_ms: Date.now() - started }); return response; }, (error) => { analytics('network_error', { method: init?.method || input?.method || 'GET', url: clip(url), duration_ms: Date.now() - started, error: clip(error?.message || error) }); throw error; });
-      };
-      cleanups.push(() => { win.fetch = original; });
-    }
+    for (const method of ['pushState', 'replaceState']) { const original = win.history?.[method]; if (!original) continue; win.history[method] = function wrappedHistory() { const value = original.apply(this, arguments); page(); return value; }; cleanups.push(() => { if (win.history[method]) win.history[method] = original; }); }
+    on(win, 'popstate', page);
+    if (typeof win.fetch === 'function') { const original = win.fetch; const wrapped = function wrappedFetch(input, init) { const started = Date.now(); const url = typeof input === 'string' ? input : input?.url || ''; if (cleanUrl(url) === cleanUrl(endpoint)) return original.apply(this, arguments); return original.apply(this, arguments).then((response) => { analytics('network', { method: init?.method || input?.method || 'GET', url: cleanUrl(url), status: response.status, duration_ms: Date.now() - started }); return response; }, (error) => { analytics('network_error', { method: init?.method || input?.method || 'GET', url: cleanUrl(url), duration_ms: Date.now() - started }); throw error; }); }; win.fetch = wrapped; cleanups.push(() => { if (win.fetch === wrapped) win.fetch = original; }); }
   }
-
-  return {
-    track,
-    flush,
-    analytics: (name, data, metadata) => analytics(name, data, metadata),
-    destroy: async () => { if (destroyed) return; destroyed = true; cleanups.splice(0).forEach((cleanup) => cleanup()); if (timer) clearTimeout(timer); await flush(); },
-  };
+  return { track, flush, setEnabled, isEnabled: () => enabled, analytics: (name, data, metadata) => analytics(name, data, metadata), destroy: async () => { if (destroyed) return; destroyed = true; cleanups.splice(0).forEach((cleanup) => cleanup()); if (timer) clearTimeout(timer); if (retryTimer) clearTimeout(retryTimer); await flush(); } };
 }
 
 export { createSpaceStationWeb };
