@@ -3,6 +3,7 @@ const MAX_TEXT = 160;
 const MAX_BATCH = 40;
 const MAX_QUEUE = 200;
 const MAX_RETRIES = 2;
+const MAX_PAYLOAD = 64 * 1024;
 const FLUSH_MS = 1000;
 const RETRY_MS = 5000;
 const REQUEST_MS = 10000;
@@ -25,6 +26,11 @@ function jsonValue(value, max = 8192) {
   } catch (_) { return { error: 'unserializable_value' }; }
 }
 function browserName(ua) { if (/Edg\//i.test(ua)) return 'edge'; if (/Chrome\//i.test(ua)) return 'chrome'; if (/Firefox\//i.test(ua)) return 'firefox'; if (/Safari\//i.test(ua)) return 'safari'; return 'unknown'; }
+function nextBatch(table, events, offset) {
+  let end = Math.min(offset + MAX_BATCH, events.length);
+  while (end > offset + 1 && JSON.stringify({ table, events: events.slice(offset, end) }).length > MAX_PAYLOAD) end -= 1;
+  return events.slice(offset, end);
+}
 
 /** Adapt a browser batch for the normal server ingest contract. Keep the table key server-side. */
 function toIngestBatch({ table, key, events, batchId = eventId() }) {
@@ -115,9 +121,10 @@ function createSpaceStationWeb(options = {}) {
       for (const key of table ? [table] : [...queues.keys()]) {
         const events = queues.get(key); if (!events?.length) continue;
         queues.delete(key);
-        for (let offset = 0; offset < events.length; offset += MAX_BATCH) {
+        for (let offset = 0; offset < events.length;) {
           if (!enabled || destroyed) { result.dropped += events.length - offset; break; }
-          const batch = events.slice(offset, offset + MAX_BATCH);
+          const batch = nextBatch(key, events, offset);
+          offset += batch.length;
           try { await send(key, batch); result.sent += batch.length; }
           catch (error) {
             result.failed += batch.length;
