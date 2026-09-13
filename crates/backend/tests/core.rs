@@ -428,7 +428,7 @@ async fn the_whole_station_end_to_end() {
     // it also seeds the mirror, so the org list holds `org` (its name still just its id until a
     // webhook carries one).
     assert_eq!(api.get("/orgs").await.0, 401, "no session: the frontend's logged-out signal");
-    assert_eq!(api.refused(Method::GET, "/auth/login", None).await, (400, "org_required".into()));
+    assert_eq!(api.get("/auth/login").await.0, StatusCode::FOUND, "IAM owns organization selection");
     login(&api, "alice", &org).await;
     assert_eq!(
         api.ok(Method::GET, "/me", None).await,

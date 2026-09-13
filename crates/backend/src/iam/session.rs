@@ -183,6 +183,9 @@ async fn login(State(state): State<AppState>, Query(q): Query<HashMap<String, St
     let mut query = form_urlencoded::Serializer::new(String::new());
     query.append_pair("app_id", &state.cfg.iam_app_id);
     query.append_pair("redirect_uri", &callback_url(&state));
+    if let Some(org) = &landing.org {
+        query.append_pair("org_id", org);
+    }
     // IAM owns consent and organization selection. The sealed `org` is only a local preference
     // used after IAM returns the organizations the person chose to share.
     let url = format!("{}?{}", state.cfg.iam_auth_url, query.finish());
