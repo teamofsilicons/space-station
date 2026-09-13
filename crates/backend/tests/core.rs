@@ -422,6 +422,24 @@ async fn the_whole_station_end_to_end() {
     let orgs = format!("/orgs/{org}");
 
     assert_eq!(api.get("/health").await, (StatusCode::OK, json!({"status": "ok"})), "readiness needs no login");
+    let (status, body) = api
+        .call(
+            Method::POST,
+            "/web/telemetry",
+            Some(json!({"table": "spacestationfrontendanalytics", "events": [{"type": "page_view"}]})),
+            Some(&origin),
+        )
+        .await;
+    assert_eq!((status, body["error"]["code"].as_str()), (StatusCode::FORBIDDEN, Some("collector_table_unavailable")));
+    let (status, body) = api
+        .call(
+            Method::POST,
+            "/web/telemetry",
+            Some(json!({"table": "spacestationfrontendanalytics", "events": [{"type": "page_view"}]})),
+            Some("http://evil.example"),
+        )
+        .await;
+    assert_eq!((status, body["error"]["code"].as_str()), (StatusCode::FORBIDDEN, Some("bad_origin")));
 
     // The browser: a login bound to `org`, then who am I. Introspection's `authorization` snapshot
     // is the bootstrap — alice's `tech` tag is on her the moment she signs in, with no webhook — and
@@ -563,22 +581,43 @@ async fn the_whole_station_end_to_end() {
     eventually("the raw record to be flushed", || async { count(&api.query(&org, count_sql, json!({})).await) == 4 })
         .await;
 
+    // HTTP ingest shares the same durable path and deduplication as the daemon socket.
+    let http_id = Uuid::new_v4();
+    let mut http_entry = entry(&key_orders, http_id);
+    http_entry.record = json!({"x": 4.75, "http": true});
+    let http_batch = Batch { batch_id: Uuid::new_v4(), records: vec![http_entry] };
+    let first = api.ok(Method::POST, "/ingest", Some(serde_json::to_value(&http_batch).unwrap())).await;
+    assert_eq!(first["status"], "ok");
+    let duplicate = api
+        .ok(
+            Method::POST,
+            "/ingest",
+            Some(
+                serde_json::to_value(&Batch { batch_id: Uuid::new_v4(), records: vec![entry(&key_orders, http_id)] })
+                    .unwrap(),
+            ),
+        )
+        .await;
+    assert_eq!(duplicate["rejected"][0]["code"], "duplicate");
+    eventually("the HTTP record to be flushed", || async { count(&api.query(&org, count_sql, json!({})).await) == 5 })
+        .await;
+
     // Query: casting, truncation, watermarks.
     let sql = "SELECT record.x::Float64 AS x, record.name AS name, record.big AS big, cursor FROM orders WHERE record.x::Float64 > 2 ORDER BY x";
     let result = api.query(&org, sql, json!({})).await;
     let rows = result["rows"].as_array().unwrap();
-    assert_eq!(rows.iter().map(|r| r["x"].as_f64().unwrap()).collect::<Vec<_>>(), [2.5, 3.5, 4.5]);
+    assert_eq!(rows.iter().map(|r| r["x"].as_f64().unwrap()).collect::<Vec<_>>(), [2.5, 3.5, 4.5, 4.75]);
     let big = rows[0]["big"].as_str().unwrap();
     assert!(big.len() <= 32 * 1024 && big.contains("...[40000]..."), "the 40 KB value was cut in the middle");
     assert!(rows[0]["name"].is_null());
     let watermark = result["watermarks"]["orders"].as_u64().unwrap();
-    let last_cursor: u64 = rows[2]["cursor"].as_str().unwrap().parse().unwrap();
+    let last_cursor: u64 = rows.last().unwrap()["cursor"].as_str().unwrap().parse().unwrap();
     assert_eq!(watermark, last_cursor, "the watermark is the last cursor flushed");
     let table = &api.ok(Method::GET, &format!("{orgs}/tables"), None).await[0];
-    assert_eq!((table["records"].as_u64(), table["watermark"].as_u64()), (Some(4), Some(watermark)));
+    assert_eq!((table["records"].as_u64(), table["watermark"].as_u64()), (Some(5), Some(watermark)));
     let overview = api.ok(Method::GET, &format!("{orgs}/tables/overview?window=1h"), None).await;
-    assert_eq!((overview["tables"].as_u64(), overview["records"].as_u64()), (Some(1), Some(4)));
-    assert_eq!(overview["top"], json!([{"id": "orders", "records": 4}]));
+    assert_eq!((overview["tables"].as_u64(), overview["records"].as_u64()), (Some(1), Some(5)));
+    assert_eq!(overview["top"], json!([{"id": "orders", "records": 5}]));
     assert!(overview["avg_lag_ms"].is_number());
     let (status, body) =
         api.post(&format!("{orgs}/query"), json!({"sql": "SELECT * FROM url('http://x', 'CSV', 'a String')"})).await;
@@ -675,7 +714,7 @@ async fn the_whole_station_end_to_end() {
     // are not bearers here.
     let access = api.ok(Method::GET, &format!("{orgs}/access-token"), None).await["token"].as_str().unwrap().to_owned();
     assert!(access.starts_with("spacewindow-"));
-    assert_eq!(api.with_bearer(&access).query(&org, count_sql, json!({})).await["rows"][0]["n"], "5");
+    assert_eq!(api.with_bearer(&access).query(&org, count_sql, json!({})).await["rows"][0]["n"], "6");
     let by_token = api.with_bearer(&access).ok(Method::GET, "/me", None).await;
     assert_eq!(by_token, json!({"id": "alice", "kind": "carbon", "org": org, "app": origin}));
     let rotated = api.ok(Method::POST, &format!("{orgs}/access-token/rotate"), None).await;
@@ -695,7 +734,7 @@ async fn the_whole_station_end_to_end() {
     // API keys: scoped reads only.
     let created = api.ok(Method::POST, &format!("{orgs}/api-keys"), Some(json!({"scopes": ["tables"]}))).await;
     let api_key = api.with_bearer(created["key"].as_str().unwrap());
-    assert_eq!(api_key.query(&org, count_sql, json!({})).await["rows"][0]["n"], "5");
+    assert_eq!(api_key.query(&org, count_sql, json!({})).await["rows"][0]["n"], "6");
     let (status, body) = api_key.get(&format!("{orgs}/windows")).await;
     assert_eq!((status.as_u16(), body["error"]["code"].as_str()), (401, Some("unauthorized")));
     assert_eq!(api.ok(Method::GET, &format!("{orgs}/api-keys"), None).await[0]["scopes"], json!(["tables"]));
