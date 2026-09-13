@@ -35,3 +35,15 @@ else
   python3 /opt/space-station/source/infra/production/configure-native.py clickhouse
 fi
 python3 /opt/space-station/source/infra/production/operations.py "$ROLE"
+if [ "$ROLE" = api ]; then
+  for attempt in $(seq 1 60); do
+    if curl -fsS --max-time 2 http://127.0.0.1:8080/api/health >/dev/null; then
+      exit 0
+    fi
+    sleep 1
+  done
+  systemctl --no-pager --full status space-station || true
+  journalctl --no-pager -u space-station -n 80 || true
+  printf 'Space Station API did not become healthy after restart\n' >&2
+  exit 1
+fi

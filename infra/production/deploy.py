@@ -56,10 +56,20 @@ commands={}
 for role,key in [('api','ApiInstanceId'),('clickhouse','ClickhouseInstanceId')]:
  command=f'''set -eu
 cloud-init status --wait
-mkdir -p /opt/space-station/source
+source=/opt/space-station/source
+staging=/opt/space-station/source.new.$$
+old=/opt/space-station/source.old.$$
+rm -rf "$staging" "$old"
+mkdir -p "$staging"
 aws s3 cp s3://{out['ArtifactBucket']}/releases/source.tar.gz /tmp/space-station.tar.gz --region us-east-1 --only-show-errors
-tar xzf /tmp/space-station.tar.gz -C /opt/space-station/source
-bash /opt/space-station/source/infra/production/setup-native.sh {role}
+tar xzf /tmp/space-station.tar.gz -C "$staging"
+# Replace source atomically while retaining Cargo's target cache; this removes
+# files deleted from the repository without making rebuilds start cold.
+if [ -d "$source/target" ]; then mv "$source/target" "$staging/target"; fi
+if [ -d "$source" ]; then mv "$source" "$old"; fi
+mv "$staging" "$source"
+rm -rf "$old"
+bash "$source/infra/production/setup-native.sh" {role}
 '''
  result=aws('ssm','send-command','--instance-ids',out[key],'--document-name','AWS-RunShellScript','--parameters',json.dumps({'commands':[command],'executionTimeout':['7200']}),'--timeout-seconds','600','--comment','Deploy Space Station native '+role)
  commands[role]={'instance':out[key],'command':result['Command']['CommandId']}
