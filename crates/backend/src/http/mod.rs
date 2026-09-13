@@ -19,6 +19,7 @@ use serde::Serialize;
 use serde_json::json;
 use std::time::Instant;
 use tokio::sync::watch;
+use uuid::Uuid;
 
 use crate::config::Config;
 use crate::iam;
@@ -84,10 +85,11 @@ async fn observe(State(state): State<AppState>, req: Request<axum::body::Body>, 
     let path = req.uri().path().to_owned();
     let skip = path == "/api/health" || path == "/api/ws/ingest" || path.starts_with("/webhooks/api");
     let method = req.method().to_string();
+    let trace_id = Uuid::new_v4();
     let started = Instant::now();
     let response = next.run(req).await;
     if !skip && let Some(telemetry) = &state.telemetry {
-        telemetry.request(&method, &path, response.status().as_u16(), started);
+        telemetry.request(trace_id, &method, &path, response.status().as_u16(), started);
     }
     response
 }
