@@ -87,7 +87,8 @@ pub fn router(state: AppState) -> Router {
 /// and recording ingest outcomes through the same path would recurse into telemetry.
 async fn observe(State(state): State<AppState>, req: Request<axum::body::Body>, next: Next) -> Response {
     let path = req.uri().path().to_owned();
-    let skip = path == "/api/health" || path == "/api/ws/ingest" || path.starts_with("/webhooks/api");
+    let skip = matches!(path.as_str(), "/api/health" | "/api/ws/ingest" | "/api/ingest" | "/api/web/telemetry")
+        || path.starts_with("/webhooks/api");
     let method = req.method().to_string();
     let trace_id = Uuid::new_v4();
     let started = Instant::now();

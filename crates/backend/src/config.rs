@@ -40,7 +40,7 @@ pub struct Config {
     pub allow_private_webhooks: bool,
     /// Ordinary `tos.spacestation` table key for backend self-telemetry. Missing disables it.
     pub telemetry_key: Option<String>,
-    /// Optional browser-facing tables. These are written through the authenticated frontend
+    /// Optional browser-facing tables. These are written through the same-origin frontend
     /// collector; the keys never leave the backend.
     pub frontend_analytics_key: Option<String>,
     pub frontend_events_key: Option<String>,

@@ -9,10 +9,10 @@ use std::sync::{LazyLock, Mutex};
 use std::time::Instant;
 
 use axum::Router;
-use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{DefaultBodyLimit, State};
 use axum::response::Response;
-use axum::routing::any;
+use axum::routing::{any, post};
 use redis::Script;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -22,7 +22,7 @@ use space_station_shared::wire::{Ack, Code, Rejection};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::http::AppState;
+use crate::http::{ApiError, AppState, Json};
 use crate::iam::CACHE_TTL;
 use crate::lock;
 
@@ -74,7 +74,27 @@ impl Keys {
 }
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/ws/ingest", any(upgrade))
+    Router::new()
+        .route("/ws/ingest", any(upgrade))
+        .route("/ingest", post(http_ingest).layer(DefaultBodyLimit::max(BATCH_MAX)))
+}
+
+/// Server-side web collectors can use HTTP with the same keys, limits, dedup and durable ack.
+async fn http_ingest(
+    State(state): State<AppState>,
+    Json(batch): Json<serde_json::Value>,
+) -> Result<Json<Ack>, ApiError> {
+    accept(&state, &batch.to_string()).await.map(Json)
+}
+
+pub(crate) async fn accept(state: &AppState, text: &str) -> Result<Ack, ApiError> {
+    handle(state, text).await.map_err(|error| match error {
+        Fault::TooLarge(_) => ApiError::bad_request("batch_too_large", "ingest batches must be at most 8 MiB"),
+        Fault::Malformed => {
+            ApiError::bad_request("invalid_batch", "expected batch_id UUID and records with key, metadata and record")
+        }
+        Fault::Store(error) => ApiError::internal("ingest_unavailable", error),
+    })
 }
 
 async fn upgrade(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {

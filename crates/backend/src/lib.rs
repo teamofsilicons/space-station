@@ -49,7 +49,7 @@ impl App {
         let store = store::Store::connect(&cfg).await?;
         let iam = iam::Client::connect(&cfg).await?;
         let telemetry = telemetry::Telemetry::from_config(&cfg)?;
-        let frontend = frontend::Collector::from_config(&cfg)?;
+        let frontend = frontend::Collector::from_config(&cfg);
         let (stop_tx, stop) = watch::channel(false);
         let lease = store::Lease::start(store.redis.clone());
         let state = AppState(Arc::new(Inner {
