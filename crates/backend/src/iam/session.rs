@@ -277,6 +277,10 @@ async fn open(state: &AppState, slt: &str, requested_org: Option<&str>, cli: boo
             proof.authorization = Some(auth);
         }
     }
+    if proof.org.is_none() && proof.authorization.is_none() && proof.authorizations.is_empty() {
+        discard(state, &tokens).await;
+        return Err(ApiError::bad_request("org_required", "IAM did not select an organization"));
+    }
     let org = tokens
         .org
         .as_deref()
