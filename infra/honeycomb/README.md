@@ -77,6 +77,15 @@ alone does not mean public publication has completed.
 - Completed the real browser IAM round trip into the live `tos` tables page.
 - Public review request `604daa17-ed26-4dad-97ad-058367d5a684` was approved and is `published`,
   revision 1. The application is public and release `0.1.3` is ready.
+- Released `0.1.4` to let fresh CLI homes save the organization selected by IAM for token or
+  browser login. All six native tests/builds and archive validation passed in
+  [CI run 35131407843](https://github.com/teamofsilicons/space-station/actions/runs/35131407843),
+  source revision `b1bb592`. Archive SHA-256:
+  `8fee12ad9f47e35868b30b85353ac8b64c5ac82642a5fc64a98747387aa6f4b8` (12,052,174 bytes).
+- Installed `0.1.4` from public Honeycomb into a clean verification home without signing into
+  Honeycomb. That installed CLI passed real IAM `login <slt>` without an org flag or environment
+  setting, saved `tos`, and passed identity, authenticated status, logout, and unauthenticated
+  status checks. Browser login without an org also passed. This CLI fix needed no backend change.
 
 Check publication status with:
 
