@@ -16,6 +16,7 @@ if [ "$role" = api ]; then
   # Dumps can contain credentials and customer data; retain private mode while
   # the temporary restore probe is running.
   chmod 600 "$file"
+  chown postgres:postgres "$file"
   runuser -u postgres -- createdb "$probe"
   trap 'runuser -u postgres -- dropdb "$probe"; rm -f "$file"' EXIT
   runuser -u postgres -- pg_restore --exit-on-error -d "$probe" "$file"

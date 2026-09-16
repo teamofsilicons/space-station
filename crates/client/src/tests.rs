@@ -7,7 +7,6 @@
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::os::unix::net::UnixListener;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -633,7 +632,7 @@ fn daemon_status_reports_the_socket_and_what_the_spool_still_owes_in_the_home_it
     let lines: String = (1..=3).map(|seq| format!("{{\"seq\":{seq},\"key\":\"k\",\"record\":{{}}}}\n")).collect();
     fs::write(home.join("spool.jsonl"), lines).unwrap();
     fs::write(home.join("spool.cursor"), "1").unwrap();
-    let listener = UnixListener::bind(home.join("daemon.sock")).unwrap();
+    let listener = crate::daemon::bind(&home).unwrap();
     let status = crate::daemon::status(&home).unwrap();
     assert_eq!((status.running, status.unacked), (true, 2), "seq 2 and 3 are still waiting");
     assert_eq!(status.socket, home.join("daemon.sock"), "a short home keeps its socket at home");

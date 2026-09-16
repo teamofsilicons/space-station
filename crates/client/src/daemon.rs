@@ -9,14 +9,19 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::os::unix::io::AsRawFd;
-use std::os::unix::net::{UnixListener, UnixStream};
+#[cfg(unix)]
+use std::os::unix::net::UnixListener;
+#[cfg(unix)]
+pub(crate) use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use std::{fmt, thread};
+#[cfg(windows)]
+use uds_windows::UnixListener;
+#[cfg(windows)]
+pub(crate) use uds_windows::UnixStream;
 
 use space_station_shared::limits::BATCH_MAX;
 use space_station_shared::secrets::sha256_hex;
@@ -146,19 +151,19 @@ pub fn run(config: Config) -> Result<(), Error> {
     Ok(())
 }
 
-/// Create `<home>` (0700) and take `flock(LOCK_EX | LOCK_NB)` on `<home>/daemon.lock`: `None`
-/// when someone else holds it. The lock lives as long as the returned file.
+/// Create a private home and take the exclusive OS file lock: `None` when someone else
+/// holds it. The lock is released automatically when its file is dropped or the process exits.
 pub(crate) fn try_lock(home: &Path) -> io::Result<Option<File>> {
-    fs::create_dir_all(home)?;
-    fs::set_permissions(home, fs::Permissions::from_mode(0o700))?;
-    let file =
-        OpenOptions::new().write(true).create(true).truncate(false).mode(0o600).open(home.join("daemon.lock"))?;
-    // SAFETY: flock takes an open descriptor and flags; no memory is handed over.
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-        return Ok(Some(file));
+    crate::local::private_dir(home)?;
+    let file = crate::local::open_private(
+        &home.join("daemon.lock"),
+        OpenOptions::new().write(true).create(true).truncate(false),
+    )?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(e)) => Err(e),
     }
-    let err = io::Error::last_os_error();
-    if err.kind() == io::ErrorKind::WouldBlock { Ok(None) } else { Err(err) }
 }
 
 /// Unlink a stale socket, bind the daemon's socket, make it 0600. Only the lock holder calls this.
@@ -166,7 +171,7 @@ pub(crate) fn bind(home: &Path) -> io::Result<UnixListener> {
     let path = socket_path(home);
     let _ = fs::remove_file(&path);
     let listener = UnixListener::bind(&path).map_err(|e| named(&path, e))?;
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+    crate::local::private(&path, false)?;
     Ok(listener)
 }
 
@@ -381,7 +386,8 @@ impl Sampler {
             .list()
             .iter()
             .enumerate()
-            .filter(|(_, d)| home.starts_with(d.mount_point()))
+            // Windows canonical paths carry a verbatim prefix; normalize the mounts too.
+            .filter(|(_, d)| d.mount_point().canonicalize().is_ok_and(|mount| home.starts_with(mount)))
             .max_by_key(|(_, d)| d.mount_point().as_os_str().len())
             .map(|(i, _)| i);
         let system = System {
@@ -542,8 +548,12 @@ mod tests {
         assert!(try_lock(&home).unwrap().is_none());
         drop(first);
         assert!(try_lock(&home).unwrap().is_some());
-        assert_eq!(fs::metadata(&home).unwrap().permissions().mode() & 0o777, 0o700);
-        assert_eq!(fs::metadata(home.join("daemon.lock")).unwrap().permissions().mode() & 0o777, 0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(fs::metadata(&home).unwrap().permissions().mode() & 0o777, 0o700);
+            assert_eq!(fs::metadata(home.join("daemon.lock")).unwrap().permissions().mode() & 0o777, 0o600);
+        }
     }
 
     #[test]
@@ -552,7 +562,11 @@ mod tests {
         drop(bind(&home).unwrap());
         assert!(home.join("daemon.sock").exists(), "a dropped listener leaves its socket file behind");
         let _listener = bind(&home).unwrap();
-        assert_eq!(fs::metadata(home.join("daemon.sock")).unwrap().permissions().mode() & 0o777, 0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(fs::metadata(home.join("daemon.sock")).unwrap().permissions().mode() & 0o777, 0o600);
+        }
         assert!(connect(&home).is_ok());
     }
 

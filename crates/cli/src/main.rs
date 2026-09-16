@@ -12,6 +12,7 @@ mod out;
 mod store;
 #[cfg(test)]
 mod tests;
+#[cfg(all(not(windows), not(feature = "honeycomb-managed")))]
 mod updater;
 
 use std::io::{self, Read};
@@ -59,7 +60,7 @@ const CRATE: &str = "https://crates.io/crates/space-station";
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
-    /// The org to work in, and the one a new session is bound to; else $SPACE_STATION_ORG, else the stored one
+    /// The org to work in; else $SPACE_STATION_ORG, else the stored one. Login defaults to IAM's selection
     #[arg(long, global = true)]
     org: Option<String>,
     /// Print the JSON of a list instead of columns
@@ -486,16 +487,10 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
             if status {
                 return login_status(home, &url, org, as_json);
             }
+            let org = org.or_else(|| store::org(home)).unwrap_or_default();
             if let Some(token) = token {
-                let org = bound(home, org)?;
                 let slt = if token == "-" { stdin()? } else { token };
                 return signed_in(home, &url, space_station::exchange(&url, &slt, &org)?, org);
-            }
-            let org = org.or_else(|| store::org(home)).unwrap_or_default();
-            if org.is_empty() {
-                return Err(Error::Local(
-                    "no org: pass --org, set $SPACE_STATION_ORG, or sign in once with an org".into(),
-                ));
             }
             let auth = space_station::login(&url, &org, |link| {
                 if no_browser || !out::open(link) {
@@ -505,7 +500,7 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
             signed_in(home, &url, auth, org)?
         }
         Cmd::Auth { token } => {
-            let org = bound(home, org)?;
+            let org = org.or_else(|| store::org(home)).unwrap_or_default();
             let slt = match setting(token, "SPACE_STATION_TOKEN").as_deref() {
                 Some("-") => stdin()?,
                 Some(token) => token.to_string(),
@@ -763,6 +758,7 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
         }
         Cmd::Daemon { cmd } => match cmd.unwrap_or(Daemon::Run) {
             Daemon::Run => {
+                #[cfg(all(not(windows), not(feature = "honeycomb-managed")))]
                 updater::spawn(home.to_path_buf());
                 daemon::run(daemon::Config { home: home.to_path_buf(), url: url.clone() })?
             }
@@ -772,21 +768,15 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-/// The org a new session is bound to: `--org` (or $SPACE_STATION_ORG), else the one stored —
-/// which outlives the session it was stored with.
-fn bound(home: &Path, org: Option<String>) -> Result<String, Error> {
-    let missing =
-        || Error::Local("no org: a session is bound to one; pass --org <org> or set $SPACE_STATION_ORG".into());
-    org.or_else(|| store::org(home)).ok_or_else(missing)
-}
-
 /// Store the session just minted with the org it is bound to, and say where the pages it unlocks
 /// live. The link is a courtesy: signing in worked whether or not the app answers, so a failure
 /// is named, not raised.
 fn signed_in(home: &Path, url: &str, auth: Auth, org: String) -> Result<(), Error> {
+    let space = Space::new(url, auth.clone())?;
+    let org = if org.is_empty() { space.session_org()? } else { org };
+    store::update(home, |_| Ok(Stored { auth: auth.clone(), org: Some(org.clone()) }))?;
     eprintln!("signed in to {org}: {}", auth.describe());
-    store::update(home, |_| Ok(Stored { auth: auth.clone(), org: Some(org) }))?;
-    match Space::new(url, auth)?.app_url() {
+    match space.app_url() {
         Ok(app) => eprintln!("the app: {app}"),
         Err(e) => eprintln!("the app: unknown ({})", out::code(&e)),
     }

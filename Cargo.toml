@@ -5,7 +5,7 @@ members = ["crates/shared", "crates/client", "crates/cli", "crates/backend"]
 [workspace.package]
 version = "0.1.1"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.89"
 license = "MIT"
 repository = "https://github.com/teamofsilicons/space-station"
 homepage = "https://github.com/teamofsilicons/space-station"

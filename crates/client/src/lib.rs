@@ -38,6 +38,8 @@
 mod api;
 mod auth;
 pub mod daemon;
+#[doc(hidden)]
+pub mod local;
 mod record;
 mod spool;
 pub mod telemetry;
@@ -75,7 +77,7 @@ pub fn default_home() -> PathBuf {
         .map(PathBuf::from)
         .map(|home| home.join(".space-station"))
         .or_else(|| std::env::var_os("SPACE_STATION_HOME").map(PathBuf::from))
-        .or_else(|| std::env::var_os("HOME").map(PathBuf::from).map(|home| home.join(".space-station")))
+        .or_else(|| std::env::home_dir().map(|home| home.join(".space-station")))
         .unwrap_or_else(|| PathBuf::from(".space-station"))
 }
 

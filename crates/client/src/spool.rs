@@ -5,7 +5,6 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Seek, SeekFrom, Write};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -54,8 +53,10 @@ impl Spool {
     /// Open `<home>/spool.jsonl` and `<home>/spool.cursor`; `next_seq` is one past the larger of
     /// the cursor and the last parseable seq, and a torn tail line is sealed with a newline.
     pub fn open(home: &Path) -> io::Result<Spool> {
-        let file =
-            OpenOptions::new().read(true).append(true).create(true).mode(0o600).open(home.join("spool.jsonl"))?;
+        let file = crate::local::open_private(
+            &home.join("spool.jsonl"),
+            OpenOptions::new().read(true).write(true).create(true).truncate(false),
+        )?;
         let cursor =
             fs::read_to_string(home.join("spool.cursor")).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
         let mut spool = Spool {
@@ -90,7 +91,8 @@ impl Spool {
         }
         spool.read_pos = first_unacked.unwrap_or(pos);
         if torn {
-            (&spool.file).write_all(b"\n")?;
+            spool.file.seek(SeekFrom::End(0))?;
+            spool.file.write_all(b"\n")?;
             spool.len += 1;
         }
         Ok(spool)
@@ -101,6 +103,9 @@ impl Spool {
         let seq = self.next_seq;
         let mut line = serde_json::to_vec(&Line { seq, entry })?;
         line.push(b'\n');
+        // One daemon and its spool mutex serialize writes. A read/write handle also permits
+        // truncation on Windows, where an append-only handle cannot set_len.
+        self.file.seek(SeekFrom::End(0))?;
         if let Err(e) = self.file.write_all(&line) {
             let _ = self.file.set_len(self.len);
             return Err(e);
@@ -189,7 +194,7 @@ impl Spool {
 /// Replace `path` with `bytes` atomically, mode 0600.
 fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let tmp = path.with_extension("tmp");
-    OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?.write_all(bytes)?;
+    crate::local::open_private(&tmp, OpenOptions::new().write(true).create(true).truncate(true))?.write_all(bytes)?;
     fs::rename(tmp, path)
 }
 

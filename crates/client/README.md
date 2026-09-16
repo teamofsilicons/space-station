@@ -123,7 +123,7 @@ invented here: `window_url(id)` hands back the page instead.
 `publish` refuses code carrying a secret — Space Station's or IAM's, the same shapes `exchange`
 refuses — before it leaves the machine, and `run_window` unpacks
 the mission-control runtime into the directory you name and runs the window's processor in `node`
-with nothing in its environment but `PATH` and the access token, one output line per callback,
+with only `PATH`, the access token and Windows `SystemRoot` in its environment, one output line per callback,
 until the window goes idle. Its callback receives `WindowOutput::Json(line)` for SiliconJSON
 and `WindowOutput::Diagnostic(line)` for status and errors, keeping data separate from diagnostics.
 
@@ -132,7 +132,7 @@ and `WindowOutput::Diagnostic(line)` for status and errors, keeping data separat
 1. `record()` stamps `record_id`, `table_id` and `event_ts_ms`, sanitises the value (below), and
    pushes one JSON line into a queue of 10 000. A full queue drops the line and reports `QueueFull`.
 2. A sender thread writes the lines to `~/.space-station/daemon.sock`. When nobody is listening it
-   takes `flock` on `daemon.lock`; the winner starts the daemon on a thread inside your process, a
+   takes the OS file lock on `daemon.lock`; the winner starts the daemon on a thread inside your process, a
    loser simply connects to the winner's socket.
 3. The daemon appends every line to `spool.jsonl` and ships the oldest unacked lines, from every key
    on the machine, as one in-flight batch over a WebSocket (`/api/ws/ingest`). The server's ack
@@ -148,7 +148,8 @@ change the wait.
 
 One per machine, any number of table keys and processes. It lives in the home it is given,
 `~/.space-station/` by default (0700): `daemon.lock`, `daemon.sock`, `spool.jsonl`, `spool.cursor`
-(all 0600). Sends as soon
+(all 0600; owner-only Windows DACLs). Windows requires Windows 10 1803 or newer for native
+AF_UNIX sockets. Sends as soon
 as it can, never batches on purpose; a batch is whatever is waiting, up to 8 MB. Pings every 20 s,
 gives up on a batch after 30 s without an ack, reconnects with backoff from 1 s to 30 s, and
 truncates a fully acked spool once it passes 64 MB. It logs one line per event to stderr.

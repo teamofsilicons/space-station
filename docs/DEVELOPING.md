@@ -64,9 +64,9 @@ cargo fmt                                   # root rustfmt.toml, max_width 120
 cargo clippy -p <crate> --all-targets       # clean, and no `allow` without a comment saying why
 ```
 
-Edition 2024, MSRV 1.88 for the published crates — do not raise it there; the backend, which is
-not published, asks for 1.98 because `silicon-iam-client` does (its `Cargo.toml` says so; the
-workspace default stays 1.88). Node ≥ 22.13 for the runtime, `windows run` and the app.
+Edition 2024, MSRV 1.89 for the published crates (standard-library file locking on Unix and
+Windows); the backend, which is not published, asks for 1.98 because `silicon-iam-client` does.
+Node ≥ 22.13 for the runtime, `windows run` and the app.
 
 | | |
 |---|---|
@@ -133,7 +133,8 @@ backend learns them (next section).
 
 Both kinds of identity sign in from a terminal, and both need the CLI pointed at the local backend
 — unset, `SPACE_STATION_URL` means the public Space Station. A session is bound to one org, so
-`login` and `auth` need `--org` (or `$SPACE_STATION_ORG`, or the org stored by `use`):
+`login` and `auth` use `--org`, `$SPACE_STATION_ORG`, or the stored org when supplied; otherwise
+they save the organization IAM selected for the new session:
 
 ```sh
 export SPACE_STATION_URL=http://localhost:8080

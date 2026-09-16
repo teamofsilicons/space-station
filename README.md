@@ -46,7 +46,11 @@ Install the CLI on macOS or Linux (Intel/x86_64 and ARM64), without Rust or sudo
 curl -fsSL https://spacestation.teamofsilicons.com/install.sh | sh && export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Then run `spacestation login --org tos`. The installer verifies SHA-256 checksums, sets up
+Honeycomb distribution uses the same `tos>spacestation` application identity and packages
+native macOS, Linux and Windows builds for x86_64 and ARM64. See
+[Honeycomb releases](infra/honeycomb/README.md) for packaging and publication status.
+
+Then run `spacestation login`. The installer verifies SHA-256 checksums, sets up
 PATH for future terminals, and installs a private Node.js runtime if needed for window commands.
 The Rust library is also published on crates.io.
 
@@ -136,17 +140,18 @@ session that it alone holds and refreshes.
 | who | how |
 |---|---|
 | a carbon in a browser | the app sends you to IAM's login page for the org you picked; IAM brings you back signed in |
-| a carbon in a terminal | `spacestation login --org <org>` does the same through a loopback port — or `iam login --app-id 'tos>spacestation' --org <org>` prints the token and `spacestation auth <slt> --org <org>` spends it |
-| a silicon | `iam silicon-login --app-id 'tos>spacestation'` prints the token; `spacestation auth <slt> --org <org>` spends it |
+| a carbon in a terminal | `spacestation login` does the same through a loopback port — or `iam login --app-id 'tos>spacestation' --grant-org <org>` prints the token and `spacestation login <slt>` spends it |
+| a silicon | `iam silicon-login --app-id 'tos>spacestation'` prints the token; `spacestation login <slt>` spends it |
 
-A session is bound to exactly one org; another org is another login, which IAM completes without
+A fresh CLI home saves the organization selected by IAM; `--org`, `$SPACE_STATION_ORG`, or an
+existing saved org overrides that default. A session is bound to exactly one org; another org is another login, which IAM completes without
 a prompt while its own session is good. Space Station never sees an IAM bearer of any kind — not a
 silicon's `stk-`, not a `sat_` or a `cat_`, not a refresh token, not the Application's `ask_`
 secret outside the backend — and nothing in the crate or the CLI ever prompts for one. The backend
 speaks to IAM through the official `silicon-iam-client` (1.2.1, with its automatic self-update
 disabled; exchange, refresh, introspection, revocation, webhook verification — see
 `docs/ARCHITECTURE.md`, "Identity"), which is why the backend needs Rust 1.98 while the published
-crates stay at 1.88 and carry no IAM dependency.
+crates require 1.89 for portable file locking and carry no IAM dependency.
 
 An Application may read nothing about the directory, but IAM tells it who just signed in: the
 introspection of an org-bound session carries the member's id, membership and **tags**, so tags are
@@ -158,7 +163,7 @@ matched against that.
 ## What is in the repo
 
 ```
-Cargo.toml                       rust workspace, edition 2024, MSRV 1.88 (backend: 1.98)
+Cargo.toml                       rust workspace, edition 2024, MSRV 1.89 (backend: 1.98)
 crates/
   shared/    space-station-shared   limits, sanitizer, wire types, secret shapes   [crates.io]
   client/    space-station          the interface: SpaceClient + daemon, Auth + Space,
@@ -275,9 +280,9 @@ SQL, notifications, the Rust package, the CLI, credentials, the HTTP API. For th
 The completed local v1 acceptance, manual user walkthroughs, startup commands and remaining
 public-login dependency are recorded in [V1 readiness](docs/V1-READINESS.md).
 
-What is built is what `scripts/test.sh` covers, end to end against the local stack, and the
-identity path has also been run against Silicon IAM's testing environment by hand. There is no AWS
-deployment yet; `infra/local` is the development environment. Registering the Application with IAM is
-in `docs/ARCHITECTURE.md`, "Identity", and in `docs/DEVELOPING.md`.
+What is built is what `scripts/test.sh` covers, end to end against the local stack. Production
+runs native Rust, PostgreSQL, Redis and ClickHouse services on AWS under systemd;
+Docker is used only for local development and integration-test databases. See
+[production operations](infra/production/README.md) and [Honeycomb releases](infra/honeycomb/README.md).
 
 [MIT](LICENSE).

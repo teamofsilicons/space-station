@@ -1,13 +1,12 @@
 //! The state this command owns and the package does not: `<home>/auth.json`, holding the one
 //! signed-in credential and the org it is bound to (or the one `use` chose). 0700 home, 0600
-//! file, written whole through a tmp file and a rename, and every read-modify-write under `flock`
+//! file (an owner-only DACL on Windows), written whole through a tmp file and a rename,
+//! and every read-modify-write under the OS file lock
 //! on a sibling lock file, so two commands storing at once never lose each other's write. A
 //! credential the server has refused for good is dropped from the file and its org kept, so the
 //! next command says "not signed in" and the next sign-in needs no `--org`.
 
 use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::{fs, io};
 
@@ -70,26 +69,24 @@ fn read(home: &Path) -> Option<Stored> {
 fn write(home: &Path, stored: &impl Serialize) -> Result<(), Error> {
     let (tmp, path) = (home.join("auth.json.tmp"), home.join("auth.json"));
     let go = || -> io::Result<()> {
-        let mut file = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+        let mut file =
+            space_station::local::open_private(&tmp, fs::OpenOptions::new().write(true).create(true).truncate(true))?;
         file.write_all(&serde_json::to_vec(stored)?)?;
+        drop(file);
         fs::rename(&tmp, &path)
     };
     go().map_err(|e| local(e, &path))
 }
 
-/// `flock(LOCK_EX)` on `<home>/auth.lock`, held until the file is dropped. A sibling file, not
-/// `auth.json` itself: tmp + rename gives `auth.json` a new inode on every write. The home is
-/// made 0700 here as the daemon does, because this is where the credential is about to live.
+/// An exclusive OS lock on `auth.lock`, released when its file is dropped. Keep it separate
+/// from `auth.json`, which is replaced on each write.
 fn lock(home: &Path) -> Result<fs::File, Error> {
-    let private = |()| fs::set_permissions(home, fs::Permissions::from_mode(0o700));
-    fs::create_dir_all(home).and_then(private).map_err(|e| local(e, home))?;
+    space_station::local::private_dir(home).map_err(|e| local(e, home))?;
     let path = home.join("auth.lock");
-    let file = fs::OpenOptions::new().write(true).create(true).truncate(false).mode(0o600).open(&path);
-    let file = file.map_err(|e| local(e, &path))?;
-    // SAFETY: `flock` only reads the descriptor and the flags; the descriptor is open and ours.
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
-        return Err(local(io::Error::last_os_error(), &path));
-    }
+    let file =
+        space_station::local::open_private(&path, fs::OpenOptions::new().write(true).create(true).truncate(false))
+            .map_err(|e| local(e, &path))?;
+    file.lock().map_err(|e| local(e, &path))?;
     Ok(file)
 }
 

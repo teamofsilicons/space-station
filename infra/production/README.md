@@ -9,6 +9,12 @@ A separate `t4g.large` with 128 GB encrypted gp3 runs ClickHouse 26.8 LTS.
 There are no containers or virtualized application runtimes. Both EC2 instances are private,
 managed through SSM, and require IMDSv2. Only the dedicated HTTPS load balancer can reach the
 API, and only the API security group can reach ClickHouse. PostgreSQL and Redis bind locally.
+Docker Compose in `infra/local/` supplies local development and integration-test dependencies
+only; production deployment builds and runs the native backend executable.
+
+Verified live on 2026-09-16: both native application services and backup timers are active,
+neither host has a Docker or containerd service, the ALB target is healthy, and the public
+API health endpoint returns `{"status":"ok"}`.
 
 The application intentionally accepts processor JavaScript and renderer HTML in authenticated
 version uploads. Its dedicated WAF counts common body-content rules that would reject this

@@ -5,9 +5,9 @@
 //! daemon runs in this process — a one-shot program would otherwise exit with its records
 //! unsent — or for the spool of the daemon another process runs, which outlives this one.
 
+use crate::daemon::UnixStream;
 use std::io::{self, Read, Write};
 use std::net::Shutdown;
-use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
@@ -344,7 +344,9 @@ mod tests {
 
     #[test]
     fn queue_full_drops_with_queue_full_when_nothing_drains() {
-        let (client, errors) = client(PathBuf::from("/dev/null/unusable"));
+        let file = test_home().join("not-a-directory");
+        std::fs::write(&file, "").unwrap();
+        let (client, errors) = client(file.join("unusable"));
         for n in 0..=QUEUE_CAPACITY {
             client.record(json!({"n": n}));
         }

@@ -106,7 +106,8 @@ pub(crate) fn refusal(name: &str, stderr: &str) -> Error {
 fn spawn(space: &Space, dir: &Path, role: &str, args: &[&str]) -> Result<Child, Error> {
     let runtime = runtime(dir)?;
     let token = space.access_token()?.token;
-    let child = Command::new("node")
+    let mut command = Command::new("node");
+    command
         .arg(runtime)
         .args([role, "--url", space.url(), "--org", space.scope()?])
         .args(args)
@@ -114,8 +115,12 @@ fn spawn(space: &Space, dir: &Path, role: &str, args: &[&str]) -> Result<Child, 
         .env("PATH", env::var_os("PATH").unwrap_or_default())
         .env("SPACE_STATION_ACCESS_TOKEN", token)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn();
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    if let Some(root) = env::var_os("SystemRoot") {
+        command.env("SystemRoot", root);
+    }
+    let child = command.spawn();
     child.map_err(|e| match e.kind() {
         ErrorKind::NotFound => Error::Local(NO_NODE.into()),
         _ => Error::Local(format!("node: {e}")),
