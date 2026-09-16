@@ -21,6 +21,8 @@ jobs:
           - { runner: windows-11-arm, target: aarch64-pc-windows-msvc, suffix: .exe }
           - { runner: windows-2022, target: x86_64-pc-windows-msvc, suffix: .exe }
     runs-on: ${{ matrix.runner }}
+    env:
+      RUSTFLAGS: ${{ matrix.suffix == '.exe' && '-C target-feature=+crt-static' || '' }}
     defaults:
       run:
         shell: bash
@@ -112,6 +114,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(python3 -c 'import tomllib; print(tomllib.load(open("crates/cli/Cargo.toml", "rb"))["package"]["version"])')
+          test "$GITHUB_REF_NAME" = "v$version"
           gh release create "v$version" \
             apps/web/public/downloads/spacestation-*.tar.gz \
             dist/spacestation-honeycomb-*.tar.gz \

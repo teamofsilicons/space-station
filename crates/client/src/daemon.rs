@@ -386,7 +386,8 @@ impl Sampler {
             .list()
             .iter()
             .enumerate()
-            .filter(|(_, d)| home.starts_with(d.mount_point()))
+            // Windows canonical paths carry a verbatim prefix; normalize the mounts too.
+            .filter(|(_, d)| d.mount_point().canonicalize().is_ok_and(|mount| home.starts_with(mount)))
             .max_by_key(|(_, d)| d.mount_point().as_os_str().len())
             .map(|(i, _)| i);
         let system = System {

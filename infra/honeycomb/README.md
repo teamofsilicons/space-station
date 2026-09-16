@@ -31,8 +31,10 @@ UUID returned by `iam app webhook 'tos>spacestation'`.
 
 ## Release
 
-Build the six targets and run `python3 scripts/package-cli-release.py`; the release workflow
-does this on native runners. The output is `dist/spacestation-honeycomb-<version>.tar.gz` with a
+Run `scripts/build-cli-release.sh` from macOS with the six Rust targets, Zig, LLVM/lld,
+`cargo-zigbuild`, and `cargo-xwin` installed; the release workflow does this on native runners.
+Both managed (`--features honeycomb-managed`) and standalone variants are built before
+`python3 scripts/package-cli-release.py` packages them. The output is `dist/spacestation-honeycomb-<version>.tar.gz` with a
 root `honeycomb.yaml` and per-platform executable mappings.
 
 ```sh
