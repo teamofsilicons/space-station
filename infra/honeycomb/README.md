@@ -62,7 +62,25 @@ alone does not mean public publication has completed.
 - Updated only the AWS application's IAM credential, preserving database and webhook secrets.
 - Restarted the native backend and verified health, real IAM token exchange, current identity,
   and authenticated access to the organization's 13 tables.
-- The webhook receiver rejects unsigned requests with HTTP 401.
+- Activated the signed IAM webhook through Honeycomb after IAM email verification. The receiver
+  rejects unsigned requests with HTTP 401.
+- Built and atomically deployed the native ARM64 backend on AWS; systemd and the public health
+  endpoint passed after replacement. The previous executable is retained for rollback.
+- The Honeycomb-managed macOS CLI authenticated and listed all 13 tables.
 
-The initial registration is private. Release upload, publication review, and webhook activation
-are tracked separately from these completed checks.
+- All six native client/CLI test and build jobs passed in [CI run 35080807100](https://github.com/teamofsilicons/space-station/actions/runs/35080807100), source revision `3045cf8`.
+  Native Windows tests caught and now cover canonical drive paths in disk-space telemetry.
+- Uploaded that CI run's archive as immutable release `0.1.3` (12,033,680 bytes), SHA-256
+  `4798af7601153e6ced3d02c9e7a918a8c0ab37c3e5cbe515c0aa470e31960859`. Honeycomb accepted it.
+- Downloaded and installed `0.1.3` through Honeycomb into an isolated verification home. The
+  installed command passed help/version checks, real IAM identity and authenticated table listing.
+- Completed the real browser IAM round trip into the live `tos` tables page.
+- Public review request `604daa17-ed26-4dad-97ad-058367d5a684` is `awaiting_validator`, revision 1.
+  The only remaining gate is Honeycomb validation; the app is still private. The current
+  organization-admin session has no global validator authority.
+
+Check the remaining external review with:
+
+```sh
+honeycomb publication get 'tos>spacestation' --json
+```
