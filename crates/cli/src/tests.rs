@@ -2,6 +2,7 @@
 //! terminal and a pipe, how a failure reads — and the credential file. What Space Station itself
 //! does is tested in the package; what needs the real binary is tested in `tests/cli.rs`.
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
@@ -80,10 +81,12 @@ fn home() -> PathBuf {
 
 /// Unique enough for a temp dir, without a dependency.
 fn uuid_ish() -> String {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    format!("{}-{nanos}", std::process::id())
+    format!("{}-{nanos}-{}", std::process::id(), NEXT.fetch_add(1, SeqCst))
 }
 
+#[cfg(unix)]
 fn mode(path: &Path) -> u32 {
     fs::metadata(path).unwrap().permissions().mode() & 0o777
 }
@@ -105,6 +108,7 @@ fn update_load_and_forget_are_the_whole_life_of_auth_json_and_it_is_private() {
         Ok(Stored { auth: session.clone(), org: Some("tos".into()) })
     })
     .unwrap();
+    #[cfg(unix)]
     assert_eq!((mode(&home), mode(&home.join("auth.json"))), (0o700, 0o600));
     assert_eq!(file(&home), json!({"bearer": "sscli-x", "org": "tos"}));
     assert!(!home.join("auth.json.tmp").exists());
@@ -138,6 +142,7 @@ fn the_lock_serialises_concurrent_updates_so_none_is_lost() {
         }
     });
     assert_eq!(file(&home)["org"], "4", "every update saw the one before it");
+    #[cfg(unix)]
     assert_eq!(mode(&home.join("auth.lock")), 0o600);
 }
 

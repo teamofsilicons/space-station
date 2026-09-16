@@ -1,0 +1,17 @@
+{
+  "org_id": "tos",
+  "local_app_id": "spacestation",
+  "name": "Space Station",
+  "description": "Space Station helps people and software agents record, query, and understand application activity within their organizations. Its native spacestation command manages tables, submits JSON records, runs read-only SQL, and configures live Space Windows and notifications. The hosted web application displays interactive views while the Rust client supports application instrumentation and durable background delivery. Silicon IAM provides identity, organization membership, and tag-based access. The backend runs as a native Rust service on AWS, with PostgreSQL, Redis, and ClickHouse storing configuration and records.",
+  "website_url": "https://spacestation.teamofsilicons.com",
+  "docs_url": "https://spacestation.teamofsilicons.com/docs",
+  "base_url": "https://backend.spacestation.teamofsilicons.com",
+  "webhook_url": "https://spacestation.teamofsilicons.com/webhooks/api/",
+  "webhook_scope": ["full"],
+  "app_scope": {
+    "iam": ["self.identity.read", "self.membership.read", "self.tags.read"],
+    "external": []
+  },
+  "obo_endpoints": [],
+  "testing_idle_days": 30
+}

@@ -6,6 +6,7 @@
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -205,6 +206,7 @@ fn auth_file(home: &Path) -> Value {
     serde_json::from_slice(&fs::read(home.join("auth.json")).unwrap()).unwrap()
 }
 
+#[cfg(unix)]
 fn mode(path: &Path) -> u32 {
     fs::metadata(path).unwrap().permissions().mode() & 0o777
 }
@@ -478,15 +480,18 @@ fn the_windows_group_reaches_every_window_route_and_hands_over_the_page_that_dra
     );
     assert!(ran(&["windows", "json", "w_01"]).out.contains("\"is_live\":true"));
 
-    let opened = Command::new(BIN)
-        .args(["windows", "open", "w_01"])
-        .env("SPACE_STATION_HOME", &home)
-        .env("SPACE_STATION_URL", &url)
-        .env("PATH", "")
-        .output()
-        .unwrap();
-    assert_eq!(String::from_utf8_lossy(&opened.stdout), "https://app.example/o/tos/windows/w_01\n");
-    assert!(String::from_utf8_lossy(&opened.stderr).contains("no browser"), "there is no opener on an empty PATH");
+    #[cfg(unix)]
+    {
+        let opened = Command::new(BIN)
+            .args(["windows", "open", "w_01"])
+            .env("SPACE_STATION_HOME", &home)
+            .env("SPACE_STATION_URL", &url)
+            .env("PATH", "")
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&opened.stdout), "https://app.example/o/tos/windows/w_01\n");
+        assert!(String::from_utf8_lossy(&opened.stderr).contains("no browser"), "there is no opener on an empty PATH");
+    }
 
     let routes: Vec<String> = calls(&seen).into_iter().filter(|c| !c.starts_with("GET /api/me")).collect();
     assert_eq!(routes.first().unwrap(), "GET /api/orgs/tos/windows");
@@ -675,6 +680,7 @@ fn whoami_offline_still_names_what_is_stored() {
 
 /// A `PATH` whose `open` (or `xdg-open`) is the browser: it fetches the link and follows the
 /// backend's redirect into the terminal's loopback listener, in the background, like a browser.
+#[cfg(unix)]
 fn browser_on_path(home: &Path) -> String {
     let bin = home.join("bin");
     fs::create_dir_all(&bin).unwrap();
@@ -687,6 +693,7 @@ fn browser_on_path(home: &Path) -> String {
 }
 
 #[test]
+#[cfg(unix)]
 fn login_opens_the_browser_binds_the_org_and_exchanges_the_short_lived_redirect() {
     let orgs = Arc::new(Mutex::new(Vec::new()));
     let bound = orgs.clone();
@@ -723,6 +730,7 @@ fn login_opens_the_browser_binds_the_org_and_exchanges_the_short_lived_redirect(
     assert!(ran.err.contains("the app: https://app.example"), "{}", ran.err);
     assert!(!ran.err.contains("sscli-fresh"), "the session is never printed: {}", ran.err);
     assert_eq!(auth_file(&home), json!({"bearer": "sscli-fresh", "org": "tos"}), "the org the session is bound to");
+    #[cfg(unix)]
     assert_eq!(mode(&home.join("auth.json")), 0o600);
 
     let again = run(&home, &backend, &[("PATH", &path)], &["login"]);
@@ -752,6 +760,7 @@ fn auth_takes_a_short_lived_token_from_the_argument_stdin_or_the_environment_and
         ran.err
     );
     assert_eq!(auth_file(&home), json!({"bearer": "sscli-minted", "org": "tos"}), "the session, never the slt");
+    #[cfg(unix)]
     assert_eq!(mode(&home.join("auth.json")), 0o600);
     assert_eq!(calls(&seen)[0], r#"POST /api/auth/session {"org":"tos","slt":"slt_arg"}"#);
 

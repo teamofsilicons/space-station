@@ -64,9 +64,9 @@ cargo fmt                                   # root rustfmt.toml, max_width 120
 cargo clippy -p <crate> --all-targets       # clean, and no `allow` without a comment saying why
 ```
 
-Edition 2024, MSRV 1.88 for the published crates — do not raise it there; the backend, which is
-not published, asks for 1.98 because `silicon-iam-client` does (its `Cargo.toml` says so; the
-workspace default stays 1.88). Node ≥ 22.13 for the runtime, `windows run` and the app.
+Edition 2024, MSRV 1.89 for the published crates (standard-library file locking on Unix and
+Windows); the backend, which is not published, asks for 1.98 because `silicon-iam-client` does.
+Node ≥ 22.13 for the runtime, `windows run` and the app.
 
 | | |
 |---|---|

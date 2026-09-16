@@ -9,34 +9,88 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    # The existing packaging script cross-builds Linux with zig and both Darwin targets
-    # from macOS, so keep the release job on the supported host.
-    runs-on: macos-14
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-14, target: aarch64-apple-darwin }
+          - { runner: macos-15-intel, target: x86_64-apple-darwin }
+          - { runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
+          - { runner: ubuntu-24.04, target: x86_64-unknown-linux-musl }
+          - { runner: windows-11-arm, target: aarch64-pc-windows-msvc, suffix: .exe }
+          - { runner: windows-2022, target: x86_64-pc-windows-msvc, suffix: .exe }
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-unknown-linux-musl,x86_64-unknown-linux-musl,aarch64-apple-darwin,x86_64-apple-darwin
-      - uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.13.0
-      - name: Build release archives
+          targets: ${{ matrix.target }}
+      - name: Install Linux musl toolchain
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Test native CLI and client
+        run: cargo test --locked -p space-station -p space-station-cli --target "${{ matrix.target }}"
+      - name: Build managed and standalone binaries
+        env:
+          TARGET: ${{ matrix.target }}
+          EXE: ${{ matrix.suffix }}
         run: |
-          cargo install cargo-zigbuild --locked
-          cargo build -p space-station-cli --release --locked --target aarch64-apple-darwin --target x86_64-apple-darwin
-          cargo zigbuild -p space-station-cli --release --locked --target aarch64-unknown-linux-musl --target x86_64-unknown-linux-musl
+          cargo build -p space-station-cli --release --locked --target "$TARGET" --features honeycomb-managed
+          mkdir -p "artifacts/$TARGET/release"
+          cp "target/$TARGET/release/spacestation$EXE" "artifacts/$TARGET/release/spacestation-honeycomb$EXE"
+          cargo build -p space-station-cli --release --locked --target "$TARGET"
+          cp "target/$TARGET/release/spacestation$EXE" "artifacts/$TARGET/release/spacestation$EXE"
+          "artifacts/$TARGET/release/spacestation-honeycomb$EXE" --version
+          "artifacts/$TARGET/release/spacestation-honeycomb$EXE" --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.target }}
+          path: artifacts/
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: target
+          merge-multiple: true
+      - name: Package release archives
+        run: |
+          python3 scripts/test-package-cli-release.py
           npm pack ./packages/space-station-web --pack-destination apps/web/public/downloads
           python3 scripts/package-cli-release.py
+      - name: Validate Honeycomb archive
+        env:
+          HONEYCOMB_NO_MODIFY_PATH: '1'
+          HONEYCOMB_NO_SERVICE: '1'
+          HONEYCOMB_VERSION: '0.1.1'
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/teamofsilicons/silicon-honeycomb/main/install.sh -o /tmp/install-honeycomb.sh
+          bash /tmp/install-honeycomb.sh
+          "$HOME/.honeycomb/dir/system/bin/honeycomb" validate dist/spacestation-honeycomb-*.tar.gz
       - name: Sign checksums
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY }}
         run: |
           test -n "$UPDATE_SIGNING_PRIVATE_KEY"
           umask 077
           printf '%s\n' "$UPDATE_SIGNING_PRIVATE_KEY" > signing-key.pem
-          # Node's built-in Ed25519 support is available on every GitHub runner and
-          # avoids the platform-specific OpenSSL pkeyutl behavior.
+          trap 'rm -f signing-key.pem' EXIT
           node - <<'NODE'
           const fs = require('fs');
           const crypto = require('crypto');
@@ -44,13 +98,23 @@ jobs:
           const manifest = fs.readFileSync('apps/web/public/downloads/SHA256SUMS');
           fs.writeFileSync('apps/web/public/downloads/SHA256SUMS.sig', crypto.sign(null, manifest, key));
           NODE
-          rm -f signing-key.pem
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-archives
+          path: |
+            dist/spacestation-honeycomb-*.tar.gz
+            apps/web/public/downloads/
+            apps/web/public/install.sh
+          retention-days: 7
       - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("crates/cli/Cargo.toml", "rb"))["package"]["version"])')
+          gh release create "v$version" \
             apps/web/public/downloads/spacestation-*.tar.gz \
+            dist/spacestation-honeycomb-*.tar.gz \
             apps/web/public/downloads/*.tgz \
             apps/web/public/install.sh \
             apps/web/public/downloads/SHA256SUMS \

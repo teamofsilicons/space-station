@@ -6,6 +6,7 @@
 //! this run acted with.
 
 use std::io::{self, IsTerminal};
+#[cfg(unix)]
 use std::process::{Command, Stdio};
 
 use serde::Serialize;
@@ -54,9 +55,23 @@ pub fn secret(note: &str, value: &str) {
 }
 
 /// Hand a link to the desktop's browser; `false` when there is nothing to hand it to.
+#[cfg(unix)]
 pub fn open(link: &str) -> bool {
     let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
     Command::new(opener).arg(link).stdout(Stdio::null()).stderr(Stdio::null()).spawn().is_ok()
+}
+
+#[cfg(windows)]
+pub fn open(link: &str) -> bool {
+    use std::ptr::{null, null_mut};
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    if link.contains('\0') {
+        return false;
+    }
+    let link: Vec<u16> = link.encode_utf16().chain(Some(0)).collect();
+    // SAFETY: the link is terminated and lives through the call; no optional arguments or
+    // window handle are supplied. ShellExecute's documented success result is greater than 32.
+    unsafe { ShellExecuteW(null_mut(), null(), link.as_ptr(), null(), null(), 1) as isize > 32 }
 }
 
 /// What a failure reads like on stderr: `error: <code>: <message>`, plus `refused` — what a 401

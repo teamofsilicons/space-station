@@ -12,6 +12,7 @@ mod out;
 mod store;
 #[cfg(test)]
 mod tests;
+#[cfg(all(not(windows), not(feature = "honeycomb-managed")))]
 mod updater;
 
 use std::io::{self, Read};
@@ -763,6 +764,7 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
         }
         Cmd::Daemon { cmd } => match cmd.unwrap_or(Daemon::Run) {
             Daemon::Run => {
+                #[cfg(all(not(windows), not(feature = "honeycomb-managed")))]
                 updater::spawn(home.to_path_buf());
                 daemon::run(daemon::Config { home: home.to_path_buf(), url: url.clone() })?
             }

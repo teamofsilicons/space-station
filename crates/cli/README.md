@@ -12,7 +12,12 @@ the links back to the web app.
 curl -fsSL https://spacestation.teamofsilicons.com/install.sh | sh && export PATH="$HOME/.local/bin:$PATH"
 ```
 
-`windows run` and `windows tool` also need Node >= 22.13 on `PATH`; nothing else does.
+Supports macOS, Linux, and Windows 10 1803 or newer. Windows uses native local sockets and
+owner-only access controls for credentials and recorded data. `windows run` and `windows tool`
+also need Node >= 22.13 on `PATH`; nothing else does.
+
+Honeycomb builds use the `honeycomb-managed` Cargo feature: Honeycomb owns their updates, so
+they never replace their own executable. Windows builds also leave updates to the installer.
 
 ## Signing in
 
@@ -62,7 +67,7 @@ stored — and that org is stored beside it, so later commands need no flag. Ano
 the terminal's session at the server and does not sign the browser out.
 
 Whatever is stored lives in `~/.space-station/auth.json` (0600, in a 0700 directory, written under
-a lock through a tmp file and a rename). `whoami` names what is stored on stderr, so it says
+a lock through a tmp file and a rename; owner-only DACLs on Windows). `whoami` names what is stored on stderr, so it says
 something even offline.
 
 ## The org
@@ -184,7 +189,7 @@ there is nothing to retry with here — and the message ends with how to sign in
 | `SPACE_STATION_ACCESS_TOKEN` | — | act as this `spacewindow-` token |
 | `SPACE_STATION_TABLE_KEY` | — | the ingest key used by `record` |
 | `SPACE_STATION_UPDATE_URL` | GitHub Releases `latest/download/SHA256SUMS` | signed update manifest URL; its detached `.sig` must verify |
-| `SPACE_STATION_UPDATE` | enabled | set to `0` or `false` to opt out of hourly daemon updates |
+| `SPACE_STATION_UPDATE` | standalone macOS/Linux only | set to `0` or `false` to opt out of hourly daemon updates |
 
 An empty variable is the same as an unset one. Nothing here reads a `.env` file or talks to IAM,
 so a local stack is one variable:
