@@ -126,6 +126,15 @@ impl Space {
         self.get(&self.at("/me")?)
     }
 
+    /// The organization selected by IAM for this session, without an explicit scope.
+    pub fn session_org(&self) -> Result<String, Error> {
+        #[derive(Deserialize)]
+        struct Session {
+            org: String,
+        }
+        Ok(self.get::<Session>("/me")?.org)
+    }
+
     /// Where the UI lives, for the links a terminal hands off. `GET /me` says so for any session,
     /// which is bound to its org and needs no `?org=`.
     pub fn app_url(&self) -> Result<String, Error> {

@@ -38,12 +38,12 @@ Both managed (`--features honeycomb-managed`) and standalone variants are built 
 root `honeycomb.yaml` and per-platform executable mappings.
 
 ```sh
-honeycomb validate dist/spacestation-honeycomb-0.1.3.tar.gz
+honeycomb validate dist/spacestation-honeycomb-0.1.4.tar.gz
 honeycomb apps get 'tos>spacestation' --json
 # Use the current revision from that response, and preserve the key on uncertain retries.
-honeycomb --idempotency-key spacestation-release-0.1.3-0001 releases upload \
-  'tos>spacestation' dist/spacestation-honeycomb-0.1.3.tar.gz --revision <revision>
-honeycomb install 'tos>spacestation' --version 0.1.3
+honeycomb --idempotency-key spacestation-release-0.1.4-0001 releases upload \
+  'tos>spacestation' dist/spacestation-honeycomb-0.1.4.tar.gz --revision <revision>
+honeycomb install 'tos>spacestation' --version 0.1.4
 spacestation --help
 ```
 
@@ -75,11 +75,10 @@ alone does not mean public publication has completed.
 - Downloaded and installed `0.1.3` through Honeycomb into an isolated verification home. The
   installed command passed help/version checks, real IAM identity and authenticated table listing.
 - Completed the real browser IAM round trip into the live `tos` tables page.
-- Public review request `604daa17-ed26-4dad-97ad-058367d5a684` is `awaiting_validator`, revision 1.
-  The only remaining gate is Honeycomb validation; the app is still private. The current
-  organization-admin session has no global validator authority.
+- Public review request `604daa17-ed26-4dad-97ad-058367d5a684` was approved and is `published`,
+  revision 1. The application is public and release `0.1.3` is ready.
 
-Check the remaining external review with:
+Check publication status with:
 
 ```sh
 honeycomb publication get 'tos>spacestation' --json

@@ -32,6 +32,7 @@ const COVERAGE: &[(&str, &[&str])] = &[
     ("orgs", &["orgs"]),
     ("me", &["whoami"]),
     ("app_url", &["login"]),
+    ("session_org", &["login"]),
     ("tables", &["tables", "ls"]),
     ("retired_tables", &["tables", "ls", "--retired"]),
     ("all_tables", &["tables", "ls", "--all"]),
@@ -695,24 +696,28 @@ fn browser_on_path(home: &Path) -> String {
 #[test]
 #[cfg(unix)]
 fn login_opens_the_browser_binds_the_org_and_exchanges_the_short_lived_redirect() {
-    let orgs = Arc::new(Mutex::new(Vec::new()));
+    let orgs = Arc::new(Mutex::new(Vec::<Option<String>>::new()));
     let bound = orgs.clone();
     let backend = serve(move |method, path, headers, body| {
         let (route, query) = path.split_once('?').unwrap_or((path, ""));
         if route == "/api/me" {
             assert!(headers.lines().any(|l| l == "authorization: bearer sscli-fresh"), "{headers}");
-            return (200, json!({"id": "alice", "kind": "carbon", "app": "https://app.example"}).to_string());
+            return (
+                200,
+                json!({"id": "alice", "kind": "carbon", "org": "tos", "app": "https://app.example"}).to_string(),
+            );
         }
         if route == "/api/auth/session" {
             assert_eq!(method, "POST");
             let body: Value = serde_json::from_str(body).unwrap();
             assert_eq!(body["slt"], "oac_fresh");
+            assert_eq!(body.get("org").and_then(Value::as_str), bound.lock().unwrap().last().unwrap().as_deref());
             assert!(!headers.contains("authorization:"), "the exchange carries no existing credential");
             return (200, json!({"token": "sscli-fresh"}).to_string());
         }
         assert_eq!((method, route), ("GET", "/api/auth/login"));
         let param = |name: &str| query.split('&').find_map(|p| p.strip_prefix(&format!("{name}=")).map(String::from));
-        bound.lock().unwrap().push(param("org").expect("the link names the org the session is bound to"));
+        bound.lock().unwrap().push(param("org"));
         let port: u16 = param("cli").unwrap().parse().expect("cli is a bare loopback port");
         let state = param("state").unwrap();
         (302, format!("http://127.0.0.1:{port}/?slt=oac_fresh&state={state}"))
@@ -721,8 +726,8 @@ fn login_opens_the_browser_binds_the_org_and_exchanges_the_short_lived_redirect(
     let path = browser_on_path(&home);
 
     let orgless = run(&home, &backend, &[("PATH", &path)], &["login"]);
-    assert!(!orgless.ok && orgless.err.contains("no org"), "nothing stored, no --org: {}", orgless.err);
-    assert!(orgs.lock().unwrap().is_empty(), "no link was handed out");
+    assert!(orgless.ok && orgless.err.contains("signed in to tos: a session"), "{}", orgless.err);
+    assert_eq!(auth_file(&home), json!({"bearer": "sscli-fresh", "org": "tos"}), "IAM selected the org");
 
     let ran = run(&home, &backend, &[("PATH", &path)], &["--org", "tos", "login"]);
     assert!(ran.ok, "{}", ran.err);
@@ -739,7 +744,58 @@ fn login_opens_the_browser_binds_the_org_and_exchanges_the_short_lived_redirect(
     let switched = run(&home, &backend, &[("PATH", &path), ("SPACE_STATION_ORG", "acme")], &["login"]);
     assert!(switched.ok, "{}", switched.err);
     assert_eq!(auth_file(&home)["org"], "acme", "switching orgs is another login");
-    assert_eq!(*orgs.lock().unwrap(), ["tos", "tos", "acme"]);
+    assert_eq!(*orgs.lock().unwrap(), [None, Some("tos".into()), Some("tos".into()), Some("acme".into())]);
+}
+
+#[test]
+fn token_login_in_a_fresh_home_saves_the_session_org_and_supports_the_auth_lifecycle() {
+    for command in ["login", "auth"] {
+        let identity = json!({"kind": "silicon", "id": "bot:tos", "org": "tos", "tags": ["ops"]});
+        let (url, seen) = station(vec![
+            ("POST /api/auth/session", json!({"token": "sscli-minted"})),
+            ("GET /api/me", json!({"id": "bot:tos", "kind": "silicon", "org": "tos", "app": "https://app.example"})),
+            ("GET /api/orgs/tos/me", identity.clone()),
+            ("POST /api/auth/logout", Value::Null),
+        ]);
+        let home = home(&format!("orgless-{command}"));
+        let login = run(&home, &url, &[], &[command, "slt_fresh"]);
+        assert!(login.ok && login.err.contains("signed in to tos: a session"), "{command}: {}", login.err);
+        assert!(!login.err.contains("sscli-minted") && !login.err.contains("slt_fresh"), "{}", login.err);
+        assert_eq!(calls(&seen)[0], r#"POST /api/auth/session {"slt":"slt_fresh"}"#);
+        assert_eq!(auth_file(&home), json!({"bearer": "sscli-minted", "org": "tos"}));
+
+        let who = run(&home, &url, &[], &["whoami"]);
+        assert!(who.ok, "{}", who.err);
+        assert_eq!(serde_json::from_str::<Value>(&who.out).unwrap(), identity);
+        let status = run(&home, &url, &[], &["login", "--status"]);
+        assert!(status.ok, "{}", status.err);
+        assert_eq!(
+            serde_json::from_str::<Value>(&status.out).unwrap(),
+            json!({"authenticated": true, "org": "tos", "identity": identity}),
+        );
+        let logout = run(&home, &url, &[], &["logout"]);
+        assert!(logout.ok, "{}", logout.err);
+        assert_eq!(calls(&seen).last().unwrap(), "POST /api/auth/logout");
+        assert!(!home.join("auth.json").exists());
+        let count = calls(&seen).len();
+        let status = run(&home, &url, &[], &["login", "--status"]);
+        assert!(status.ok, "{}", status.err);
+        assert_eq!(serde_json::from_str::<Value>(&status.out).unwrap(), json!({"authenticated": false}));
+        assert_eq!(calls(&seen).len(), count, "logged-out status needs no request");
+    }
+}
+
+#[test]
+fn orgless_login_does_not_save_or_claim_success_when_session_org_discovery_fails() {
+    let url = serve(|method, path, _, _| match (method, path) {
+        ("POST", "/api/auth/session") => (200, json!({"token": "sscli-minted"}).to_string()),
+        _ => (503, json!({"error": {"code": "unavailable", "message": "try again"}}).to_string()),
+    });
+    let home = home("org-discovery-failed");
+    let login = run(&home, &url, &[], &["login", "slt_fresh"]);
+    assert!(!login.ok && login.err.contains("unavailable"), "{}", login.err);
+    assert!(!login.err.contains("signed in"), "{}", login.err);
+    assert!(!home.join("auth.json").exists());
 }
 
 #[test]

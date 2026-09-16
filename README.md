@@ -50,7 +50,7 @@ Honeycomb distribution uses the same `tos>spacestation` application identity and
 native macOS, Linux and Windows builds for x86_64 and ARM64. See
 [Honeycomb releases](infra/honeycomb/README.md) for packaging and publication status.
 
-Then run `spacestation login --org tos`. The installer verifies SHA-256 checksums, sets up
+Then run `spacestation login`. The installer verifies SHA-256 checksums, sets up
 PATH for future terminals, and installs a private Node.js runtime if needed for window commands.
 The Rust library is also published on crates.io.
 
@@ -140,10 +140,11 @@ session that it alone holds and refreshes.
 | who | how |
 |---|---|
 | a carbon in a browser | the app sends you to IAM's login page for the org you picked; IAM brings you back signed in |
-| a carbon in a terminal | `spacestation login --org <org>` does the same through a loopback port — or `iam login --app-id 'tos>spacestation' --org <org>` prints the token and `spacestation auth <slt> --org <org>` spends it |
-| a silicon | `iam silicon-login --app-id 'tos>spacestation'` prints the token; `spacestation auth <slt> --org <org>` spends it |
+| a carbon in a terminal | `spacestation login` does the same through a loopback port — or `iam login --app-id 'tos>spacestation' --grant-org <org>` prints the token and `spacestation login <slt>` spends it |
+| a silicon | `iam silicon-login --app-id 'tos>spacestation'` prints the token; `spacestation login <slt>` spends it |
 
-A session is bound to exactly one org; another org is another login, which IAM completes without
+A fresh CLI home saves the organization selected by IAM; `--org`, `$SPACE_STATION_ORG`, or an
+existing saved org overrides that default. A session is bound to exactly one org; another org is another login, which IAM completes without
 a prompt while its own session is good. Space Station never sees an IAM bearer of any kind — not a
 silicon's `stk-`, not a `sat_` or a `cat_`, not a refresh token, not the Application's `ask_`
 secret outside the backend — and nothing in the crate or the CLI ever prompts for one. The backend

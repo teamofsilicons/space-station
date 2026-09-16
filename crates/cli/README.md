@@ -22,9 +22,9 @@ they never replace their own executable. Windows builds also leave updates to th
 ## Signing in
 
 ```sh
-spacestation login --org tos                 # opens the browser, exchanges the returned short-lived token
-spacestation auth <slt> --org tos            # a short-lived token from the iam CLI, exchanged for a session
-spacestation login <slt> --org tos           # same exchange using the shared IAM-app grammar
+spacestation login                          # opens the browser; IAM selects the organization
+spacestation auth <slt>                      # a short-lived token from the iam CLI, exchanged for a session
+spacestation login <slt>                     # same exchange using the shared IAM-app grammar
 spacestation login status --json             # whether the stored session is accepted
 spacestation iam --json                      # app id, source, docs and crate metadata
 spacestation report-bug "short summary" --details "steps and observed output" --pr-ref owner/repo#123
@@ -38,9 +38,9 @@ minted for it — good for two minutes and for one exchange — which the backen
 it alone holds and refreshes:
 
 ```sh
-iam login --app-id 'tos>spacestation' --org tos        # a carbon in a terminal: prints the token
+iam login --app-id 'tos>spacestation' --grant-org tos  # a carbon in a terminal: prints the token
 iam silicon-login --app-id 'tos>spacestation'          # a silicon: the only way a silicon signs in
-spacestation auth <slt> --org tos
+spacestation auth <slt>
 ```
 
 The token is the argument, `-` to read it from stdin, or `$SPACE_STATION_TOKEN`. The command never
@@ -48,7 +48,7 @@ prompts, and `auth` refuses anything that is not a short-lived token before it l
 a silicon's own `stk-` token, the Application's `ask_` secret, an IAM bearer (`sat_`, `cat_`,
 `oat_`) or refresh token (`rft_`, `ort_`) is answered with `error: local: not a short-lived token`,
 exit 1, nothing sent and nothing echoed. Those never leave the machine; only the `oac_` token IAM
-minted to be handed over does. `login` is the browser flow instead, brokered by Space Station (only
+minted to be handed over does. `login` without a token uses the browser flow, brokered by Space Station (only
 the backend holds the Application secret): the command listens on `127.0.0.1`, opens the sign-in
 page, catches the short-lived token redirected back, then exchanges it for an `sscli-` session;
 `--no-browser` prints the link.
@@ -62,7 +62,9 @@ IAM session you already have (`iam login --app-id …`, `iam silicon-login --app
 `--stk`) is not a new login and ends nothing.
 
 A session is bound to exactly one org — `--org` (or `$SPACE_STATION_ORG`), else the org already
-stored — and that org is stored beside it, so later commands need no flag. Another org is another
+stored, else IAM's selection. On a fresh home, `login <slt>`, `auth <slt>`, and browser login read
+the selected org from the authenticated backend and store it beside the session, so later commands
+need no flag. Another org is another
 `login` or `auth`; IAM completes it without a prompt while its own session is good. `logout` ends
 the terminal's session at the server and does not sign the browser out.
 
