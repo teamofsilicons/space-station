@@ -49,8 +49,7 @@ pub struct Introspection {
 /// `tags: None` is undisclosed (not "no tags"); `Some([])` is no tags.
 #[derive(Debug, Clone)]
 pub struct Authorization {
-    pub public_id: String,
-    pub principal_id: String,
+    pub public_id: Option<String>,
     pub org: String,
     /// IAM's uuid for the org — what a webhook envelope names it by.
     pub org_uuid: String,
@@ -134,7 +133,7 @@ impl Client {
             .login(&self.app_id, slt, &Mutation::new())
             .await
             .map_err(|e| map_error("the short-lived-token exchange", e))?;
-        Ok(tokens_of(tokens))
+        tokens_of(tokens)
     }
 
     /// Rotates a refresh token. The caller owns `idempotency_key` and must present the same one
@@ -149,7 +148,7 @@ impl Client {
             .refresh(&self.app_id, ort, &Mutation::with_key(key))
             .await
             .map_err(|e| map_error("the token refresh", e))?;
-        Ok(tokens_of(tokens))
+        tokens_of(tokens)
     }
 
     /// `{active, org_id, membership_id, authorization?}`, or `{active: false}`. No `X-Org-ID`.
@@ -176,20 +175,22 @@ impl Client {
     }
 }
 
-fn tokens_of(r: models::OAuthTokenResponse) -> Tokens {
-    Tokens {
+fn tokens_of(r: models::OAuthTokenResponse) -> Result<Tokens, IamError> {
+    let actor = r.actor.ok_or_else(|| {
+        IamError::Unavailable("IAM did not disclose the login identity; grant identity access before signing in".into())
+    })?;
+    Ok(Tokens {
         oat: r.access_token,
         ort: r.refresh_token,
         expires_in: r.expires_in,
-        actor: r.actor.public_id,
+        actor: actor.public_id,
         org: r.org_id,
-    }
+    })
 }
 
 fn authorization_of(a: models::ApplicationAuthorization) -> Authorization {
     Authorization {
         public_id: a.public_id,
-        principal_id: a.principal_id.to_string(),
         org: a.org_id,
         org_uuid: a.organization_id.to_string(),
         membership_id: a.membership_id.to_string(),
@@ -205,6 +206,20 @@ mod tests {
 
     fn refused(status: u16, code: &str) -> IamError {
         IamError::Refused { status, code: code.into(), message: "prose".into() }
+    }
+
+    #[test]
+    fn current_iam_tokens_need_no_internal_principal_and_missing_identity_fails_closed() {
+        let response = serde_json::json!({
+            "access_token": "oat_test", "refresh_token": "ort_test", "expires_in": 1800,
+            "token_type": "Bearer", "scope": "identity:read", "org_id": "tos",
+            "actor": { "type": "carbon", "public_id": "alice" }
+        });
+        let tokens = tokens_of(serde_json::from_value(response.clone()).unwrap()).unwrap();
+        assert_eq!(tokens.actor, "alice");
+        let mut hidden = response;
+        hidden.as_object_mut().unwrap().remove("actor");
+        assert!(tokens_of(serde_json::from_value(hidden).unwrap()).is_err());
     }
 
     #[test]

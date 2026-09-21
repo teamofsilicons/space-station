@@ -3,6 +3,7 @@
 import argparse,json,pathlib,subprocess,secrets,tarfile,sys
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--initialize", action="store_true", help="Initialize a new production installation; refuses existing secrets")
+parser.add_argument("--api-only", action="store_true", help="Update the API without rebuilding or restarting ClickHouse")
 args=parser.parse_args()
 ROOT=pathlib.Path(__file__).resolve().parents[2]
 def aws(*args):
@@ -56,7 +57,8 @@ with tarfile.open(archive,'w:gz') as tar:
   tar.add(ROOT/name,arcname=name,filter=archive_filter)
 subprocess.run(['aws','s3','cp',str(archive),'s3://'+out['ArtifactBucket']+'/releases/source.tar.gz','--region','us-east-1','--only-show-errors'],check=True)
 commands={}
-for role,key in [('api','ApiInstanceId'),('clickhouse','ClickhouseInstanceId')]:
+roles = [('api','ApiInstanceId')] if args.api_only else [('api','ApiInstanceId'),('clickhouse','ClickhouseInstanceId')]
+for role,key in roles:
  command=f'''set -eu
 cloud-init status --wait
 source=/opt/space-station/source

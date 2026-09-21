@@ -381,7 +381,9 @@ async fn mirror(tx: &mut PgConnection, org: &str, actor: &str, auth: &Authorizat
         actor: actor.to_owned(),
         kind: Kind::of(actor),
         membership_id: auth.membership_id.clone(),
-        principal_id: Some(auth.principal_id.clone()),
+        // IAM 3 no longer discloses internal principal UUIDs. Membership IDs remain stable;
+        // upsert preserves any legacy UUID already stored for old webhook tombstones.
+        principal_id: None,
         status: "active".into(),
         tags: auth.tags.clone(),
         org_role: auth.org_role.clone(),
@@ -687,8 +689,7 @@ mod tests {
 
     fn snapshot(org: &str, membership: &str, tags: Option<Vec<String>>) -> Authorization {
         Authorization {
-            public_id: "bot:tos".into(),
-            principal_id: "01a0-principal".into(),
+            public_id: Some("bot:tos".into()),
             org: org.into(),
             org_uuid: "01a0-org".into(),
             membership_id: membership.into(),
