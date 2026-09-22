@@ -180,19 +180,20 @@ impl Landing {
 /// rides in a ten-minute cookie sealed under `SS_KEY`, so the callback trusts nothing in the URL.
 async fn login(State(state): State<AppState>, Query(q): Query<HashMap<String, String>>) -> Result<Response, ApiError> {
     let landing = Landing::read(&q)?;
-    let mut query = form_urlencoded::Serializer::new(String::new());
-    query.append_pair("app_id", &state.cfg.iam_app_id);
-    query.append_pair("redirect_uri", &callback_url(&state));
-    if let Some(org) = &landing.org {
-        query.append_pair("org_id", org);
-    }
     // IAM owns consent and organization selection. The sealed `org` is only a local preference
     // used after IAM returns the organizations the person chose to share.
-    let url = format!("{}?{}", state.cfg.iam_auth_url, query.finish());
+    let url = login_url(&state.cfg.iam_auth_url, &state.cfg.iam_app_id, &callback_url(&state));
     let location = HeaderValue::from_str(&url).map_err(|e| ApiError::internal("login_redirect", e))?;
     let sealed = crypto::seal(&state.cfg.key, &json!(landing).to_string());
     let cookie = set_cookie(&state, LOGIN_COOKIE, &sealed, "/api/auth", 600);
     Ok((StatusCode::FOUND, [cookie, (header::LOCATION, location)]).into_response())
+}
+
+fn login_url(auth_url: &str, app_id: &str, callback: &str) -> String {
+    let mut query = form_urlencoded::Serializer::new(String::new());
+    query.append_pair("app_id", app_id);
+    query.append_pair("redirect_uri", callback);
+    format!("{auth_url}?{}", query.finish())
 }
 
 /// IAM brings the browser back with `?slt=`. A browser login exchanges it, ends the row the
@@ -381,7 +382,9 @@ async fn mirror(tx: &mut PgConnection, org: &str, actor: &str, auth: &Authorizat
         actor: actor.to_owned(),
         kind: Kind::of(actor),
         membership_id: auth.membership_id.clone(),
-        principal_id: Some(auth.principal_id.clone()),
+        // IAM 3 no longer discloses internal principal UUIDs. Membership IDs remain stable;
+        // upsert preserves any legacy UUID already stored for old webhook tombstones.
+        principal_id: None,
         status: "active".into(),
         tags: auth.tags.clone(),
         org_role: auth.org_role.clone(),
@@ -644,6 +647,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn iam_chooses_the_organization_while_local_landing_preserves_the_preference() {
+        let landing = Landing::read(&HashMap::from([("org".into(), "tos".into())])).unwrap();
+        assert_eq!(landing.org.as_deref(), Some("tos"));
+        let url = login_url("https://auth.iam.example", "tos>spacestation", "https://ss.example/api/auth/callback");
+        let parsed = url::Url::parse(&url).unwrap();
+        let query = parsed.query_pairs().collect::<HashMap<_, _>>();
+        assert_eq!(query.len(), 2);
+        assert_eq!(query["app_id"], "tos>spacestation");
+        assert_eq!(query["redirect_uri"], "https://ss.example/api/auth/callback");
+        assert!(!query.contains_key("org_id"));
+    }
+
+    #[test]
     fn production_session_crosses_to_websocket_host_and_logout_clears_the_same_cookie() {
         let origin = "https://spacestation.teamofsilicons.com";
         let domain = Some("spacestation.teamofsilicons.com");
@@ -687,8 +703,7 @@ mod tests {
 
     fn snapshot(org: &str, membership: &str, tags: Option<Vec<String>>) -> Authorization {
         Authorization {
-            public_id: "bot:tos".into(),
-            principal_id: "01a0-principal".into(),
+            public_id: Some("bot:tos".into()),
             org: org.into(),
             org_uuid: "01a0-org".into(),
             membership_id: membership.into(),

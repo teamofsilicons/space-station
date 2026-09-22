@@ -1706,7 +1706,10 @@ mod tests {
         let location = res.headers()[header::LOCATION].to_str().unwrap().to_owned();
         let (_, slt) = location.split_once("?slt=").unwrap();
         let tokens = client.oauth().login(APP, slt, &Mutation::new()).await.unwrap();
-        assert_eq!((tokens.actor.public_id.as_str(), tokens.org_id.as_deref()), ("alice", Some("tos")));
+        assert_eq!(
+            (tokens.actor.as_ref().unwrap().public_id.as_str(), tokens.org_id.as_deref()),
+            ("alice", Some("tos"))
+        );
         assert_eq!(tokens.expires_in, 1800);
         let oat = tokens.access_token.as_str();
         let Err(Error::Api(api)) = client.oauth().login(APP, slt, &Mutation::new()).await else {
@@ -1718,10 +1721,13 @@ mod tests {
         let names =
             |tags: Option<Vec<AuthorizationTag>>| tags.map(|t| t.into_iter().map(|t| t.name).collect::<Vec<_>>());
         let snapshot = client.oauth().authorization(oat, None).await.unwrap().expect("an org-bound access token");
-        assert_eq!((snapshot.public_id.as_str(), snapshot.org_id.as_str()), ("alice", "tos"));
+        assert_eq!((snapshot.public_id.as_deref().unwrap(), snapshot.org_id.as_str()), ("alice", "tos"));
         assert_eq!(snapshot.org_role.as_deref(), Some("owner"));
         assert_eq!(names(snapshot.tags), Some(vec!["tech".to_owned()]));
-        assert_eq!((snapshot.membership_id, snapshot.membership_version), (membership_id("tos", "alice"), 1));
+        assert_eq!(
+            (snapshot.membership_id, snapshot.membership_version),
+            (membership_id("tos", "alice").to_string(), 1)
+        );
         assert!(client.oauth().authorization(&tokens.refresh_token, None).await.unwrap().is_none());
         let request = TokenIntrospectionRequest { token: tokens.refresh_token.clone(), token_type_hint: None };
         let inspected = client.oauth().introspect(&request, None).await.unwrap();
