@@ -34,7 +34,7 @@ npm --prefix apps/web install && npm --prefix apps/web run dev   # the app on :3
 ## Signing in
 
 A carbon in the browser: open http://localhost:3000 and pick an org; the backend sends you to the
-stub's login page, which lists the seeded carbons — or add `&as=alice` to its URL to skip it — and
+stub's login page, which lists the seeded carbons — or add `&as=c:alice` to its URL to skip it — and
 IAM (the stub) brings you back signed in, bound to that org.
 
 A carbon or a silicon from a terminal, in a fourth window. A session is bound to one org, so
@@ -50,31 +50,29 @@ cargo run -p space-station-cli -- whoami
 Without a browser — a silicon always — `auth` takes a **short-lived token** (slt) that IAM minted
 for this Application, and nothing else: the CLI never prompts for, accepts or stores a `stk-`, an
 IAM bearer or a refresh token. Against the real IAM the `iam` CLI prints one (`iam silicon-login
---app-id 'tos>spacestation'`; `iam login --app-id 'tos>spacestation' --org tos` for a carbon). Against
+--app-id 'spacestation'`; `iam login --app-id 'spacestation' --org tos` for a carbon). Against
 the stub, the same two steps IAM takes: the silicon signs in to IAM with the `stk-` the stub printed
 at boot, then asks IAM for a token for the Application:
 
 ```
 sat=$(curl -s -X POST http://127.0.0.1:8099/api/v1/silicon-auth/token \
   -H 'Content-Type: application/json' -H "Idempotency-Key: $(uuidgen)" \
-  -d '{"silicon_id":"bot:tos","silicon_token":"stk-0123456789abcdef0123456789abcdef"}' | jq -r .access_token)
+  -d '{"silicon_id":"si:bot","silicon_token":"stk-0123456789abcdef0123456789abcdef"}' | jq -r .access_token)
 slt=$(curl -s -X POST http://127.0.0.1:8099/api/v1/app-auth/short-lived-tokens \
   -H "Authorization: Bearer $sat" -H 'Content-Type: application/json' -H "Idempotency-Key: $(uuidgen)" \
-  -d '{"app_id":"tos>spacestation"}' | jq -r .slt)             # org_id defaults to the silicon's own
+  -d '{"app_id":"spacestation","org_id":"tos"}' | jq -r .slt)
 
 cargo run -p space-station-cli -- auth "$slt" --org tos   # or `auth -` with the token on stdin, or $SPACE_STATION_TOKEN
 ```
 
-The real `iam` CLI (1.5.0) speaks to the stub too: `iam --url http://127.0.0.1:8099 silicon-login
---sid bot:tos --stk stk-0123456789abcdef0123456789abcdef --app-id 'tos>spacestation'` prints the
-same `{slt, expires_in: 120}` (set `SILICON_IAM_HOME` to a scratch directory, mode 0700, and
-`SILICON_IAM_AUTO_UPDATE=false` first, so it touches neither your own `~/.silicon-iam` nor its own
-binary). The slt is single-use and dies after two minutes; the `sat_` stays with the silicon and
-never reaches Space Station.
+Use IAM 4 for canonical identifiers. Keep test CLI sessions in a scratch `SILICON_IAM_HOME`
+directory, mode 0700. The local HTTP fixture above exercises the token handoff without relying on
+CLI release differences. The slt is single-use and dies after two minutes; the `sat_` stays with
+the silicon and never reaches Space Station.
 
 Against the real IAM, the browser login uses its hosted consent page and lets the carbon choose
 organizations. For terminal checks, `iam --test "$SILICON_IAM_TEST" login --email <you> --code 000000` once,
-then `iam --test "$SILICON_IAM_TEST" login --app-id 'tos>spacestation' --org tos -o json` for an
+then `iam --test "$SILICON_IAM_TEST" login --app-id 'spacestation' --org tos -o json` for an
 slt and `space-station auth <slt> --org tos`.
 
 The Rust package reads no file and no variable; the CLI reads no `.env`, and `SPACE_STATION_URL`
@@ -104,11 +102,11 @@ and posts the webhook IAM would send, so the mirror can be changed by hand:
 ```
 curl -s -X POST http://127.0.0.1:8099/_stub/deliver -H 'Content-Type: application/json' -d '{
   "url": "http://localhost:8080/webhooks/api/", "event_type": "organization.membership.updated.v1",
-  "org": "tos", "members": [{"actor": "alice", "tags": ["tech", "oncall"]}, {"actor": "bot:tos", "tags": ["ops"]}]}'
+  "org": "tos", "members": [{"actor": "c:alice", "tags": ["tech", "oncall"]}, {"actor": "si:bot", "tags": ["ops"]}]}'
 
 curl -s -X POST http://127.0.0.1:8099/_stub/deliver -H 'Content-Type: application/json' -d '{
   "url": "http://localhost:8080/webhooks/api/", "event_type": "organization.silicon.removed.v1",
-  "org": "tos", "tombstones": [{"actor": "bot:tos"}]}'
+  "org": "tos", "tombstones": [{"actor": "si:bot"}]}'
 ```
 
 The body is `{url, org, event_type, members | tombstones, envelope?, event_id?, version?}`. A member
@@ -132,8 +130,7 @@ neither needs it.
 and it is the `app` in `GET /me` that `space-station windows open` follows.
 
 Real IAM — its testing environment, which is the same service on isolated data: `SILICON_IAM_URL`,
-`SILICON_IAM_APP_ID` (quoted, `'tos>spacestation'`: unquoted, sourcing it in bash redirects into a
-file named `spacestation`; the backend's dotenv strips one pair of quotes), `SILICON_IAM_APP_SECRET`
+`SILICON_IAM_APP_ID` (bare `spacestation`), `SILICON_IAM_APP_SECRET`
 (the `ask_`), `SILICON_IAM_WEBHOOK_SECRET`, `SILICON_IAM_TEST_KEY` (the environment key, sent on
 every IAM request; root authority over the environment) and `SILICON_IAM_TEST` (the environment id,
 what `iam --test` takes) live in `.env.test`, which `.gitignore` keeps out of the repo (`.env.*`).

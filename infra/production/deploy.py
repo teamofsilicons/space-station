@@ -23,7 +23,7 @@ if args.initialize:
  'DATABASE_URL':f'postgres://spacestation:{pg}@127.0.0.1/space_station','_POSTGRES_PASSWORD':pg,'REDIS_URL':'redis://127.0.0.1:6379',
  'CLICKHOUSE_URL':f'http://spacestation:{ch}@{ips[out["ClickhouseInstanceId"]]}:8123/space_station','CLICKHOUSE_QUERY_PASSWORD':secrets.token_hex(32)}
  for k in ['SILICON_IAM_URL','SILICON_IAM_APP_ID','SILICON_IAM_APP_SECRET','SILICON_IAM_WEBHOOK_SECRET']:api[k]=iam[k]
- api['SILICON_IAM_APP_ID']='tos>spacestation'
+ api['SILICON_IAM_APP_ID']='spacestation'
  for key,value in [('ApiRuntime',api),('ClickhouseRuntime',{'ADMIN_PASSWORD':ch,'API_IP':ips[out['ApiInstanceId']]})]:
   # Refuse accidental secret rotation of an already configured server.
   try:existing=aws('secretsmanager','get-secret-value','--secret-id',out[key+'Arn'])
@@ -53,7 +53,8 @@ def archive_filter(info):
  return info
 
 with tarfile.open(archive,'w:gz') as tar:
- for name in ['Cargo.toml','Cargo.lock','rustfmt.toml','crates','infra/production','LICENSE']:
+ for name in ['Cargo.toml','Cargo.lock','rustfmt.toml','crates','vendor','infra/production',
+              'scripts/migrate-public-identifiers.py','docs/PUBLIC-ID-MIGRATION.md','LICENSE']:
   tar.add(ROOT/name,arcname=name,filter=archive_filter)
 subprocess.run(['aws','s3','cp',str(archive),'s3://'+out['ArtifactBucket']+'/releases/source.tar.gz','--region','us-east-1','--only-show-errors'],check=True)
 commands={}

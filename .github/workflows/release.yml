@@ -79,7 +79,7 @@ jobs:
         env:
           HONEYCOMB_NO_MODIFY_PATH: '1'
           HONEYCOMB_NO_SERVICE: '1'
-          HONEYCOMB_VERSION: '0.1.1'
+          HONEYCOMB_VERSION: '0.4.0'
         run: |
           curl -fsSL https://raw.githubusercontent.com/teamofsilicons/silicon-honeycomb/main/install.sh -o /tmp/install-honeycomb.sh
           bash /tmp/install-honeycomb.sh

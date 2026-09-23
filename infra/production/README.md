@@ -23,6 +23,10 @@ restricted by the backend, and processors and renderers run in separate sandboxe
 
 ## Deploy
 
+The identifier schema change requires the coordinated [migration procedure](../../docs/PUBLIC-ID-MIGRATION.md)
+before starting this backend against an existing database. Update the deployed app ID to
+`spacestation` while retaining its existing app secret and encryption key.
+
 `template.py` emits `stack.json`. The parameters select the VPC, private subnet, Ubuntu ARM64
 AMI and ACM certificate; the public gateway spans two public subnets in that VPC.
 Apply stack changes with CloudFormation, preserving existing parameters and IAM capabilities.
@@ -82,8 +86,8 @@ records that have not yet reached ClickHouse.
 
 ## IAM
 
-The application is `tos>spacestation`. Its approved, active webhook is
+The application is `spacestation`. Its approved, active webhook is
 `https://spacestation.teamofsilicons.com/webhooks/api/`. The receiver verifies IAM signatures and
 records event IDs transactionally, so retries are idempotent. The live deployment has received
-real IAM events. `iam app dead-letters 'tos>spacestation'` inspects exhausted deliveries;
-`iam app replay 'tos>spacestation' --delivery <id>` retries a repaired delivery.
+real IAM events. `iam app dead-letters 'spacestation'` inspects exhausted deliveries;
+`iam app replay 'spacestation' --delivery <id>` retries a repaired delivery.

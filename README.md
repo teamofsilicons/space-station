@@ -8,7 +8,7 @@ at query time. On top of the records sit **space windows** — a JavaScript proc
 into one small JSON document (SiliconJSON, at most 64 KB) that a sandboxed iframe renderer draws,
 live — and **notifications**, the same queries running always-on, ending in a message instead of
 a view. It is for carbons (people) and silicons (machine identities) in a
-[Silicon IAM](https://backend.iam.teamofsilicons.com/docs/client/) organization.
+[Silicon IAM](https://docs.iam.teamofsilicons.com/client/) organization.
 
 ## The crate is the interface
 
@@ -46,7 +46,7 @@ Install the CLI on macOS or Linux (Intel/x86_64 and ARM64), without Rust or sudo
 curl -fsSL https://spacestation.teamofsilicons.com/install.sh | sh && export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Honeycomb distribution uses the same `tos>spacestation` application identity and packages
+Honeycomb distribution uses the same `spacestation` application identity and packages
 native macOS, Linux and Windows builds for x86_64 and ARM64. See
 [Honeycomb releases](infra/honeycomb/README.md) for packaging and publication status.
 
@@ -79,7 +79,7 @@ use space_station::{Auth, Space};
 let url = space_station::default_url();
 let auth = space_station::exchange(&url, slt, "tos")?;         // slt: what `iam login --app-id` / `iam silicon-login --app-id` printed
 let space = Space::new(&url, auth)?.org("tos");
-let key = space.create_table("orders", &["@alice", "tech"])?;   // the table key, shown once
+let key = space.create_table("orders", &["@c:alice", "tech"])?;   // the table key, shown once
 let rows = space.query("SELECT count() FROM orders", &Default::default())?;
 let link = space.window_url("w_01")?;                           // a window id; pixels live in the app
 ```
@@ -132,32 +132,37 @@ tools. Notifications run the same SQL under the same guard, always on.
 
 ## Who you are
 
-Space Station is a Silicon IAM **Application** (`tos>spacestation`), and one Application serves
+Space Station is a Silicon IAM **Application** (`spacestation`), and one Application serves
 every organization. Signing in is the same act for everyone: IAM mints a **short-lived token**
 (two minutes, one use) for this Application, and the backend exchanges it once for an Application
 session that it alone holds and refreshes.
 
+Public actor IDs include their kind: `c:alice` and `si:bot`. Organization authority stays in
+IAM membership records; the application's owning organization is `tos`. Existing installations
+must follow the [identifier migration procedure](docs/PUBLIC-ID-MIGRATION.md) before cutover.
+
 | who | how |
 |---|---|
 | a carbon in a browser | the app sends you to IAM's login page for the org you picked; IAM brings you back signed in |
-| a carbon in a terminal | `spacestation login` does the same through a loopback port — or `iam login --app-id 'tos>spacestation' --grant-org <org>` prints the token and `spacestation login <slt>` spends it |
-| a silicon | `iam silicon-login --app-id 'tos>spacestation'` prints the token; `spacestation login <slt>` spends it |
+| a carbon in a terminal | `spacestation login` does the same through a loopback port — or `iam login --app-id 'spacestation' --grant-org <org>` prints the token and `spacestation login <slt>` spends it |
+| a silicon | `iam silicon-login --app-id 'spacestation'` prints the token; `spacestation login <slt>` spends it |
 
 A fresh CLI home saves the organization selected by IAM; `--org`, `$SPACE_STATION_ORG`, or an
 existing saved org overrides that default. A session is bound to exactly one org; another org is another login, which IAM completes without
 a prompt while its own session is good. Space Station never sees an IAM bearer of any kind — not a
 silicon's `stk-`, not a `sat_` or a `cat_`, not a refresh token, not the Application's `ask_`
 secret outside the backend — and nothing in the crate or the CLI ever prompts for one. The backend
-speaks to IAM through the official `silicon-iam-client` (1.2.1, with its automatic self-update
-disabled; exchange, refresh, introspection, revocation, webhook verification — see
-`docs/ARCHITECTURE.md`, "Identity"), which is why the backend needs Rust 1.98 while the published
-crates require 1.89 for portable file locking and carry no IAM dependency.
+speaks to IAM through a vendored snapshot of the published `silicon-iam-client` 4.0.0. Its
+[documented local patch](vendor/silicon-iam-client/SPACE-STATION-PATCH.md) accepts string
+webhook `aggregate.id` values, including canonical membership IDs, while retaining signature
+and envelope verification. The backend needs Rust 1.98; the published Space Station crates
+require 1.89 for portable file locking and carry no IAM dependency.
 
 An Application may read nothing about the directory, but IAM tells it who just signed in: the
 introspection of an org-bound session carries the member's id, membership and **tags**, so tags are
 known the moment anyone signs in and re-read every minute — no waiting for a webhook. IAM's
 webhooks are the asynchronous updates in between (a tag renamed, a member removed), kept in a
-mirror the backend also writes at every login. Access lists (`["@alice", "@bot:tos", "tech"]`) are
+mirror the backend also writes at every login. Access lists (`["@c:alice", "@si:bot", "tech"]`) are
 matched against that.
 
 ## What is in the repo

@@ -31,9 +31,11 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use url::Url;
 use uuid::Uuid;
 
-const APP_ID: &str = "tos>spacestation";
+const APP_ID: &str = "spacestation";
 const APP_SECRET: &str = "ask_stubstubstubstubstubstubstubstubstubstubabc";
 const WEBHOOK_SECRET: &str = "whs_stubstubstubstubstubstubstubstubstubstubabc";
+// The shared integration database belongs to the same IAM world as core.rs.
+const TEST_KEY: &str = "TkTkTkTkTkTkTkTkTkTkTkTkTkTkTkTk";
 
 fn env(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_owned())
@@ -47,9 +49,9 @@ fn free_port() -> u16 {
 /// One org, one carbon who owns it.
 fn seed(org: &str) -> Seed {
     serde_json::from_value(json!({
-        "app": {"app_id": APP_ID, "secret": APP_SECRET, "webhook_secret": WEBHOOK_SECRET},
+        "app": {"app_id": APP_ID, "secret": APP_SECRET, "webhook_secret": WEBHOOK_SECRET, "testing_key": TEST_KEY},
         "orgs": [{"org_id": org, "name": "Test Org", "tags": ["tech"]}],
-        "carbons": [{"carbon_id": "alice", "name": "Alice", "memberships": {org: {"org_role": "owner", "tags": ["tech"]}}}],
+        "carbons": [{"carbon_id": "c:alice", "name": "Alice", "memberships": {org: {"org_role": "owner", "tags": ["tech"]}}}],
         "silicons": [],
     }))
     .expect("the stub's seed shape")
@@ -69,6 +71,7 @@ fn config(port: u16, origin: &str, iam: SocketAddr) -> Config {
         ("SILICON_IAM_APP_ID", APP_ID.into()),
         ("SILICON_IAM_APP_SECRET", APP_SECRET.into()),
         ("SILICON_IAM_WEBHOOK_SECRET", WEBHOOK_SECRET.into()),
+        ("SILICON_IAM_TEST_KEY", TEST_KEY.into()),
     ]);
     let mut cfg = Config::from_vars(|name| vars.get(name).cloned()).unwrap();
     cfg.bind = SocketAddr::from(([127, 0, 0, 1], port));
@@ -139,8 +142,10 @@ impl Api {
 /// Plays the browser through the stub as `carbon`, bound to `org`: login → IAM (`?as=`) → callback.
 async fn login(api: &Api, carbon: &str, org: &str) {
     let res = api.http.get(format!("{}/auth/login?org={org}", api.base)).send().await.unwrap();
-    let authorize = res.headers()["location"].to_str().unwrap().to_owned();
-    let res = api.http.get(format!("{authorize}&as={carbon}")).send().await.unwrap();
+    let mut authorize = Url::parse(res.headers()["location"].to_str().unwrap()).unwrap();
+    assert!(!authorize.query_pairs().any(|(k, _)| k == "org_id"), "IAM owns organization selection");
+    authorize.query_pairs_mut().append_pair("as", carbon).append_pair("org_id", org);
+    let res = api.http.get(authorize).send().await.unwrap();
     let callback = res.headers()["location"].to_str().unwrap().to_owned();
     assert!(api.http.get(&callback).send().await.unwrap().status().is_redirection(), "the callback lands on next");
 }
@@ -227,7 +232,7 @@ async fn a_notification_fires_delivers_and_cools_down() {
     let app = App::start(config(port, &origin, iam)).await.expect("docker services and the stub must be reachable");
     let api = Api::new(&origin);
     let orgs = format!("/orgs/{org}");
-    login(&api, "alice", &org).await;
+    login(&api, "c:alice", &org).await;
     let key = api.post(&format!("{orgs}/tables"), json!({"id": "orders"})).await["key"].as_str().unwrap().to_owned();
     let (url, mut hooks) = receiver().await;
     let hook = api.post(&format!("{orgs}/webhooks"), json!({"url": url})).await;
@@ -252,7 +257,7 @@ async fn a_notification_fires_delivers_and_cools_down() {
         (json!({"triggers": [{"schedule": "*/5 * * *"}]}), json!([]), "invalid_cron"),
         (json!({"delay": "2x"}), json!([]), "invalid_duration"),
         (json!({"cooldown": "60d"}), json!([]), "invalid_duration"),
-        (json!({}), json!(["@bob"]), "recipients_not_in_access"),
+        (json!({}), json!(["@c:bob"]), "recipients_not_in_access"),
         (json!({}), json!(["ops"]), "recipients_not_in_access"),
         (json!({}), json!([format!("webhook:{}", Uuid::new_v4())]), "unknown_webhook"),
     ] {
@@ -268,11 +273,11 @@ async fn a_notification_fires_delivers_and_cools_down() {
     let big = create(
         json!({"triggers": [{"table": "orders", "where": "record.amount::Float64 > 100"}],
                "delay": "1s", "cooldown": "8s", "description": "over 100"}),
-        json!(["@alice", format!("webhook:{hook_id}")]),
+        json!(["@c:alice", format!("webhook:{hook_id}")]),
     )
     .await;
-    assert_eq!(big["def"]["access"], json!(["@alice"]), "the creator is appended");
-    assert_eq!((big["enabled"].as_bool(), big["created_by"].as_str()), (Some(true), Some("alice")));
+    assert_eq!(big["def"]["access"], json!(["@c:alice"]), "the creator is appended");
+    assert_eq!((big["enabled"].as_bool(), big["created_by"].as_str()), (Some(true), Some("c:alice")));
     assert_eq!(big["def"]["delay"], "1s", "the definition is stored with its defaults filled in");
     let bad = create(
         json!({"name": "Bad rows", "delay": "1s",
@@ -350,11 +355,11 @@ async fn a_notification_fires_delivers_and_cools_down() {
     assert!(api.post(&of(&big, "/test"), json!({})).await["last_trigger_at"].is_string(), "that one has");
 
     // Subscribing edits only the recipients; editing writes a new version and can pause it.
-    assert_eq!(api.post(&of(&probe, "/subscribe"), json!({})).await["recipients"], json!(["@alice"]));
+    assert_eq!(api.post(&of(&probe, "/subscribe"), json!({})).await["recipients"], json!(["@c:alice"]));
     let edit = json!({"def": def(json!({"name": "Probe v2", "enabled": false}))});
     let edited = api.ok(Method::PUT, &of(&probe, ""), Some(edit)).await;
     assert_eq!((edited["def"]["name"].as_str(), edited["enabled"].as_bool()), (Some("Probe v2"), Some(false)));
-    assert_eq!(edited["recipients"], json!(["@alice"]), "an absent recipients keeps the subscribers");
+    assert_eq!(edited["recipients"], json!(["@c:alice"]), "an absent recipients keeps the subscribers");
     assert_eq!(api.ok(Method::DELETE, &of(&probe, "/subscribe"), None).await["recipients"], json!([]));
 
     // An API key with the notifications scope reads, and only reads.
@@ -364,11 +369,10 @@ async fn a_notification_fires_delivers_and_cools_down() {
     assert_eq!(key_api.get(&of(&big, "/events")).await.as_array().unwrap().len(), 2);
     assert_eq!(key_api.refused(Method::POST, &of(&big, "/test"), Some(json!({}))).await, (401, "unauthorized".into()));
 
-    // This server lives in no testing environment, so a `test` envelope — however well signed —
-    // is somebody else's and is refused before its rows are read.
+    // A different testing world's envelope is refused before its rows are read, even when signed correctly.
     let ts = chrono::Utc::now().timestamp();
     let event_id = Uuid::now_v7();
-    let envelope = json!({"test": {"testing_key": "TkTkTkTkTkTkTkTkTkTkTkTkTkTkTkTk",
+    let envelope = json!({"test": {"testing_key": "KkKkKkKkKkKkKkKkKkKkKkKkKkKkKkKk",
         "metadata": {"spec_version": "1.0", "event_id": event_id, "event_type": "organization.membership.updated.v1",
                      "occurred_at": chrono::Utc::now().to_rfc3339(), "organization_id": Uuid::now_v7(),
                      "aggregate": {"type": "organization_membership", "id": Uuid::now_v7(), "version": 1}},

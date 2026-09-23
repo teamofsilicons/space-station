@@ -131,8 +131,8 @@ missing `to` becomes that table's watermark at query start — which is what com
 A refused query is an error with a `code` — a dev error in a window, `dev_errors` for a
 notification, `Error::Api { code, .. }` from the package, a message in the CLI.
 
-A table your access list does not include is refused the same way, and an access list is
-**matched, never validated**: Space Station cannot ask IAM which tags exist, so `["Tech"]` on a
+A table your access list does not include is refused the same way. Actor syntax is validated,
+but tag and member existence is not looked up, so `["Tech"]` on a
 table whose readers carry the tag `tech` is saved without complaint and lets nobody but its
 author in. When a query you expect to work answers `table_not_found`, check the spelling and the
 case of the tag before anything else.

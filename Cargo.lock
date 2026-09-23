@@ -2431,9 +2431,7 @@ dependencies = [
 
 [[package]]
 name = "silicon-iam-client"
-version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "102cff396732fcd7e71e7c31ce292f97241444af455a1fd87a0af92bda2faebd"
+version = "4.0.0"
 dependencies = [
  "base64 0.22.1",
  "hex",
@@ -2447,7 +2445,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sha2 0.10.9",
- "space-station 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "space-station 0.1.1",
  "subtle",
  "thiserror",
  "time",
@@ -2506,10 +2504,26 @@ dependencies = [
 [[package]]
 name = "space-station"
 version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d23c6025cd1697bc9a6c04425ec7f0b5084df564aa0dbac3a22644768ef45ef1"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
  "space-station-shared 0.1.1",
+ "sysinfo",
+ "tungstenite 0.30.0",
+ "ureq",
+ "uuid",
+]
+
+[[package]]
+name = "space-station"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "space-station-shared 0.2.0",
  "sysinfo",
  "tungstenite 0.30.0",
  "uds_windows",
@@ -2519,24 +2533,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "space-station"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d23c6025cd1697bc9a6c04425ec7f0b5084df564aa0dbac3a22644768ef45ef1"
-dependencies = [
- "libc",
- "serde",
- "serde_json",
- "space-station-shared 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "sysinfo",
- "tungstenite 0.30.0",
- "ureq",
- "uuid",
-]
-
-[[package]]
 name = "space-station-backend"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "axum",
@@ -2551,8 +2549,8 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "silicon-iam-client",
- "space-station 0.1.1",
- "space-station-shared 0.1.1",
+ "space-station 0.2.0",
+ "space-station-shared 0.2.0",
  "sqlparser",
  "sqlx",
  "tempfile",
@@ -2566,7 +2564,7 @@ dependencies = [
 
 [[package]]
 name = "space-station-cli"
-version = "0.1.4"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -2575,7 +2573,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "space-station 0.1.1",
+ "space-station 0.2.0",
  "tar",
  "ureq",
  "windows-sys 0.61.2",
@@ -2584,6 +2582,8 @@ dependencies = [
 [[package]]
 name = "space-station-shared"
 version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f76ad739efabec005409d87404e9db24fed4a0cdc0f6225dec1e72ce92281afd"
 dependencies = [
  "serde",
  "serde_json",
@@ -2593,9 +2593,7 @@ dependencies = [
 
 [[package]]
 name = "space-station-shared"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f76ad739efabec005409d87404e9db24fed4a0cdc0f6225dec1e72ce92281afd"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",

@@ -128,6 +128,9 @@ impl From<Refusal> for ApiError {
 /// name this deployment's environment.
 pub fn verify(headers: &HeaderMap, body: &[u8], secrets: &Secrets) -> Result<Event, Refusal> {
     let verified = authenticate(headers, body, secrets)?;
+    if verified.is_testing() != secrets.test_key.is_some() {
+        return Err(Refusal::BadTestingKey);
+    }
     if verified.is_testing() {
         let key = secrets.test_key.ok_or(Refusal::BadTestingKey)?;
         let expected = EnvironmentKey::new(key).map_err(|_| Refusal::BadTestingKey)?;
@@ -208,11 +211,15 @@ fn member(row: &Value) -> Option<Member> {
     let text = |v: &Value| v.as_str().map(str::to_owned);
     let (membership, principal, organization) = (&row["membership"], &row["principal"], &row["organization"]);
     let actor = text(&principal["public_id"])?;
+    let kind = Kind::of(&actor)?;
+    if principal["type"].as_str()? != kind.as_str() {
+        return None;
+    }
     Some(Member {
         org: text(&organization["org_id"])?,
         org_uuid: text(&organization["id"]),
         org_name: text(&organization["name"]),
-        kind: Kind::of(&actor),
+        kind,
         actor,
         membership_id: text(&membership["id"])?,
         principal_id: text(&principal["principal_id"]),
@@ -427,14 +434,14 @@ mod tests {
     const OLD_SECRET: &str = "whs_oldoldoldoldoldoldoldoldoldoldoldoldoldoabc";
     const TEST_KEY: &str = "TkTkTkTkTkTkTkTkTkTkTkTkTkTkTkTk";
 
-    /// One full row as IAM delivers it: `bot:tos` in `tos` with the `ops` tag, membership version 4.
+    /// One full row as IAM delivers it: `si:bot` in `tos` with the `ops` tag, membership version 4.
     fn bot_row() -> Value {
         json!({
             "membership": {"id": "01a0702c-6520-77c1-9c5b-2aecd65f88d1", "status": "active", "version": 4,
                 "removed_at": null, "tags": [{"id": "01a0702a-75a0-7901-85da-acb13c3b3dda", "name": "ops"}]},
             "organization": {"id": "01a0702a-6f88-79f2-9cc1-aaa7d91388fd", "org_id": "tos", "name": "Team of Silicons",
                 "status": "active", "version": 1},
-            "principal": {"principal_id": "01a0702c-6520-77c1-9c5b-2ad0df6f4da4", "public_id": "bot:tos",
+            "principal": {"principal_id": "01a0702c-6520-77c1-9c5b-2ad0df6f4da4", "public_id": "si:bot",
                 "type": "silicon", "status": "active"},
             "resource": {"id": "01a0702c-6520-77c1-9c5b-2aecd65f88d1", "principal_id": "01a0702c-6520-77c1-9c5b-2ad0df6f4da4",
                 "principal_type": "silicon", "status": "active", "type": "organization_membership", "version": 4}
@@ -485,7 +492,7 @@ mod tests {
             org: "tos".into(),
             org_uuid: Some("01a0702a-6f88-79f2-9cc1-aaa7d91388fd".into()),
             org_name: Some("Team of Silicons".into()),
-            actor: "bot:tos".into(),
+            actor: "si:bot".into(),
             kind: Kind::Silicon,
             membership_id: "01a0702c-6520-77c1-9c5b-2aecd65f88d1".into(),
             principal_id: Some("01a0702c-6520-77c1-9c5b-2ad0df6f4da4".into()),
@@ -505,6 +512,21 @@ mod tests {
         assert_eq!(event.event_type, "organization.membership.updated.v1");
         assert_eq!(event.org_uuid.as_deref(), Some("01a0702a-6f88-79f2-9cc1-aaa7d91388fd"), "the envelope's org");
         assert_eq!((event.members, event.tombstones.len(), event.rows), (vec![bot()], 0, 1));
+    }
+
+    #[test]
+    fn canonical_aggregate_ids_verify_without_changing_signed_bytes() {
+        let now = Utc::now().timestamp();
+        for id in ["c:alice[tos]", "si:bot[tos]", "spacestation"] {
+            let mut event = metadata("organization.membership.updated.v1");
+            event["aggregate"]["id"] = json!(id);
+            event["data"] = json!({"current": {"members": [bot_row()]}});
+            let body = event.to_string().into_bytes();
+            let h = headers(SECRET, now, &body);
+            assert!(verify(&h, &body, &secrets(None)).is_ok(), "{id}");
+            event["aggregate"]["id"] = json!("si:other[tos]");
+            assert_eq!(verify(&h, event.to_string().as_bytes(), &secrets(None)).unwrap_err(), Refusal::BadSignature);
+        }
     }
 
     #[test]
@@ -537,10 +559,13 @@ mod tests {
     }
 
     #[test]
-    fn a_production_envelope_carries_no_key_to_check_even_in_a_testing_deployment() {
+    fn a_production_envelope_cannot_enter_a_testing_deployment() {
         let now = Utc::now().timestamp();
         let body = production("organization.membership.updated.v1", json!([bot_row()]));
-        assert!(verify(&headers(SECRET, now, &body), &body, &secrets(Some(TEST_KEY))).is_ok());
+        assert_eq!(
+            verify(&headers(SECRET, now, &body), &body, &secrets(Some(TEST_KEY))).unwrap_err(),
+            Refusal::BadTestingKey
+        );
     }
 
     #[test]
@@ -580,10 +605,20 @@ mod tests {
     #[test]
     fn a_member_row_and_a_tombstone_are_told_apart() {
         let mut carbon = bot_row();
-        carbon["principal"]["public_id"] = json!("alice");
+        carbon["principal"]["public_id"] = json!("c:alice");
+        carbon["principal"]["type"] = json!("carbon");
         carbon["membership"]["tags"] = json!([]);
         let m = member(&carbon).unwrap();
-        assert_eq!((m.kind, m.actor.as_str(), m.tags), (Kind::Carbon, "alice", Some(vec![])), "the kind is the colon");
+        assert_eq!(
+            (m.kind, m.actor.as_str(), m.tags),
+            (Kind::Carbon, "c:alice", Some(vec![])),
+            "the kind matches the namespace"
+        );
+        let mut mismatched = carbon.clone();
+        mismatched["principal"]["type"] = json!("silicon");
+        assert!(member(&mismatched).is_none(), "a declared kind cannot contradict the public ID");
+        mismatched["principal"]["public_id"] = json!("bot:tos");
+        assert!(member(&mismatched).is_none(), "legacy identities are not authentication aliases");
         carbon["membership"].as_object_mut().unwrap().remove("tags");
         assert_eq!(member(&carbon).unwrap().tags, None, "a row without tags discloses none, it does not clear them");
         assert!(tombstone(&bot_row()).is_some(), "a full row also carries a resource, but member() wins first");

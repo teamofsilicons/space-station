@@ -148,10 +148,10 @@ export function Access(p: {
               <input
                 value={text()}
                 onInput={(e) => setText(e.currentTarget.value)}
-                placeholder="@alice, #engineering"
+                placeholder="@c:alice, #engineering"
               />
             </label>
-            <p class="muted">Separate @actors and #tags with commas.</p>
+            <p class="muted">Separate @c:handle, @si:handle and #tags with commas.</p>
             <ErrorText message={a.error()} />
             <button class="primary" disabled={a.busy()}>
               Save access

@@ -9,7 +9,7 @@ crate and has no capability of its own; the web app is a subset.
 
 ```toml
 [dependencies]
-space-station = "0.1"
+space-station = "0.2"
 ```
 
 ## Recording
@@ -50,10 +50,10 @@ disabled so an application never fails to start because observability is unavail
 use space_station::{Auth, Space};
 
 let url = space_station::default_url();
-let auth = space_station::exchange(&url, slt, "tos")?;          // slt: what `iam silicon-login --app-id tos>spacestation` printed
+let auth = space_station::exchange(&url, slt, "tos")?;          // slt: what `iam silicon-login --app-id spacestation` printed
 let space = Space::new(&url, auth)?.org("tos");
 
-let key = space.create_table("orders", &["@alice", "tech"])?;   // the table key, shown exactly once
+let key = space.create_table("orders", &["@c:alice", "tech"])?;   // the table key, shown exactly once
 let rows = space.query("SELECT count() FROM orders", &Default::default())?;
 let window = &space.windows()?[0];
 let link = space.window_url(&window.id)?;                       // graphs live in the app; this is the way there
@@ -75,7 +75,7 @@ credential — not a silicon's token, not a bearer, not a refresh token. Two fun
 session without keeping one:
 
 - `space_station::exchange(url, slt, org)` spends a **short-lived token** — what `iam login
-  --app-id tos>spacestation --org <org>` or `iam silicon-login --app-id tos>spacestation` prints,
+  --app-id spacestation --org <org>` or `iam silicon-login --app-id spacestation` prints,
   two minutes old at most and good for one exchange — at `POST /api/auth/session {slt, org}` and
   returns the `Auth::session` the backend minted for it, bound to `org`. Anything that is not a
   short-lived token is refused before it leaves the machine as `Error::Local("not a short-lived
@@ -114,9 +114,10 @@ access_token() rotate_access_token()
 query(sql, restrict) dev_errors()
 ```
 
-`me()` is `Identity { kind, id, org, tags }` — the public id is the handle people know; there is no
-display name. A refused request is `Error::Api { status, code, message }`; branch on `code`, which
-is snake_case and stable, never on the message. A `status` of 401 is final — there is nothing here
+`me()` is `Identity { kind, id, org, tags }` — IDs are `c:<handle>` or `si:<handle>`, and
+organization authority stays in `org`; neither actor kind nor organization is inferred from a colon.
+A refused request is `Error::Api { status, code, message }`; branch on `code`, which is snake_case
+and stable, never on the message. A `status` of 401 is final — there is nothing here
 to retry with — so a program tells its person to sign in again. Nothing that needs pixels is
 invented here: `window_url(id)` hands back the page instead.
 

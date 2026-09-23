@@ -12,7 +12,7 @@ use serde_json::Value;
 
 /// A carbon or a silicon, inside one org: the public id people know it by (stored and sent
 /// without the `@` a UI prepends) and the tag names the directory mirror holds for it there. No
-/// display name: the id is the handle.
+/// display name: the id includes its `c:` or `si:` namespace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Identity {
     pub kind: Kind,
@@ -21,7 +21,7 @@ pub struct Identity {
     pub tags: Vec<String>,
 }
 
-/// A human, or a machine. The colon in a silicon's id (`bot:tos`) is what tells them apart.
+/// A human (`c:<handle>`) or a machine (`si:<handle>`), as explicitly identified by IAM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {

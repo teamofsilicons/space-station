@@ -346,7 +346,7 @@ impl Space {
         self.delete(&self.at(&format!("/webhooks/{id}"))?)
     }
 
-    /// This silicon's own delivery webhook, where `@silicon` recipients land. Every write
+    /// This silicon's own delivery webhook, where `@si:<handle>` recipients land. Every write
     /// replaces the URL and mints a new signing secret.
     pub fn set_silicon_webhook(&self, url: &str) -> Result<Key, Error> {
         self.put(&self.at("/silicon-webhook")?, json!({"url": webhook_url(url)?}))

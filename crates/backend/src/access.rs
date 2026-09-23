@@ -1,4 +1,4 @@
-//! Access lists: `["@alice", "@bot:tos", "tech"]`. `@` names an actor, `webhook:` an org webhook
+//! Access lists: `["@c:alice", "@si:bot", "tech"]`. `@` names an actor, `webhook:` an org webhook
 //! (recipients only), anything else is a tag matched exactly. Whoever creates or edits something
 //! is on its list, so every check is one membership test and nothing can be left unreachable.
 //! `visible_tables` is that test over an org's tables, cached per identity for 60 s.
@@ -10,7 +10,7 @@ use std::time::Instant;
 use serde_json::Value;
 
 use crate::http::{ApiError, AppState};
-use crate::iam::{CACHE_TTL, Identity};
+use crate::iam::{CACHE_TTL, Identity, Kind};
 use crate::lock;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -58,8 +58,14 @@ pub fn with_actor(mut list: Vec<String>, actor: &str) -> Vec<String> {
 
 /// An access list as a client sent it: short, non-empty entries, never `webhook:`.
 pub fn validate(list: &[String]) -> Result<(), ApiError> {
-    let bad =
-        |e: &&String| e.len() > 100 || matches!(Entry::parse(e), Entry::Webhook(_) | Entry::Actor("") | Entry::Tag(""));
+    let bad = |e: &&String| {
+        e.len() > 100
+            || match Entry::parse(e) {
+                Entry::Actor(actor) => Kind::of(actor).is_none(),
+                Entry::Webhook(_) | Entry::Tag("") => true,
+                Entry::Tag(_) => false,
+            }
+    };
     match list.iter().find(bad) {
         Some(entry) => Err(ApiError::bad_request("invalid_access", format!("{entry:?} is not a valid access entry"))),
         None => Ok(()),
@@ -115,7 +121,7 @@ mod tests {
     use crate::iam::Kind;
 
     fn alice() -> Identity {
-        Identity { kind: Kind::Carbon, id: "alice".into(), org: "tos".into(), tags: vec!["tech".into()] }
+        Identity { kind: Kind::Carbon, id: "c:alice".into(), org: "tos".into(), tags: vec!["tech".into()] }
     }
 
     fn strings(list: &[&str]) -> Vec<String> {
@@ -124,18 +130,18 @@ mod tests {
 
     #[test]
     fn entries_parse_by_prefix() {
-        assert_eq!(Entry::parse("@alice"), Entry::Actor("alice"));
-        assert_eq!(Entry::parse("@bot:tos"), Entry::Actor("bot:tos"));
+        assert_eq!(Entry::parse("@c:alice"), Entry::Actor("c:alice"));
+        assert_eq!(Entry::parse("@si:bot"), Entry::Actor("si:bot"));
         assert_eq!(Entry::parse("webhook:abc"), Entry::Webhook("abc"));
         assert_eq!(Entry::parse("tech"), Entry::Tag("tech"));
     }
 
     #[test]
     fn an_actor_matches_by_id_or_tag_and_never_by_webhook() {
-        assert!(matches(&alice(), &strings(&["@alice"])));
-        assert!(matches(&alice(), &strings(&["@bob", "tech"])));
-        assert!(!matches(&alice(), &strings(&["@bob", "ops", "Tech"])), "tags are case-sensitive");
-        assert!(!matches(&alice(), &strings(&["webhook:alice", "alice"])));
+        assert!(matches(&alice(), &strings(&["@c:alice"])));
+        assert!(matches(&alice(), &strings(&["@c:bob", "tech"])));
+        assert!(!matches(&alice(), &strings(&["@c:bob", "ops", "Tech"])), "tags are case-sensitive");
+        assert!(!matches(&alice(), &strings(&["webhook:alice", "c:alice"])));
         assert!(!matches(&alice(), &[]));
     }
 
@@ -149,13 +155,16 @@ mod tests {
 
     #[test]
     fn the_writing_actor_is_appended_once() {
-        assert_eq!(with_actor(strings(&["ops"]), "alice"), strings(&["ops", "@alice"]));
-        assert_eq!(with_actor(strings(&["@alice", "ops"]), "alice"), strings(&["@alice", "ops"]));
+        assert_eq!(with_actor(strings(&["ops"]), "c:alice"), strings(&["ops", "@c:alice"]));
+        assert_eq!(with_actor(strings(&["@c:alice", "ops"]), "c:alice"), strings(&["@c:alice", "ops"]));
     }
 
     #[test]
     fn webhooks_and_empty_names_are_not_access_entries() {
-        assert!(validate(&strings(&["@alice", "tech"])).is_ok());
+        assert!(validate(&strings(&["@c:alice", "@si:bot", "tech"])).is_ok());
+        for old in ["@alice", "@bot:tos", "@c:si:bot"] {
+            assert_eq!(validate(&strings(&[old])).unwrap_err().code, "invalid_access");
+        }
         assert_eq!(validate(&strings(&["webhook:x"])).unwrap_err().code, "invalid_access");
         assert_eq!(validate(&strings(&["@"])).unwrap_err().code, "invalid_access");
         assert_eq!(validate(&strings(&[""])).unwrap_err().code, "invalid_access");

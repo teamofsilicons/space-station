@@ -26,7 +26,7 @@
 //! ss.record(serde_json::json!({"id": "o-42", "amount": 12.5}));
 //!
 //! let url = space_station::default_url();
-//! let auth = space_station::exchange(&url, "<what `iam silicon-login --app-id 'tos>spacestation'` printed>", "tos")?;
+//! let auth = space_station::exchange(&url, "<what `iam silicon-login --app-id 'spacestation'` printed>", "tos")?;
 //! let space = Space::new(url, auth)?.org("tos");
 //! let tables = space.tables()?;
 //! let rows = space.query("SELECT count() FROM orders", &Default::default())?;

@@ -324,8 +324,8 @@ fn logout_ends_a_terminal_session_with_its_bearer_and_sends_nothing_for_any_othe
 #[test]
 fn tables_are_listed_created_rotated_reaccessed_deleted_and_summarised() {
     let key = "table-orders-0123456789abcdef0123456789abcdef";
-    let row = json!({"id": "orders", "records": 12, "watermark": 130, "access": ["@alice", "tech"],
-                     "created_by": "alice", "created_at": "2026-09-03T10:00:00Z"});
+    let row = json!({"id": "orders", "records": 12, "watermark": 130, "access": ["@c:alice", "tech"],
+                     "created_by": "c:alice", "created_at": "2026-09-03T10:00:00Z"});
     let listing = json!([row]);
     let (space, seen) = station(move |method, path, _| match (method, path) {
         ("GET", "/api/orgs/tos/tables") => ok(listing.clone()),
@@ -344,16 +344,16 @@ fn tables_are_listed_created_rotated_reaccessed_deleted_and_summarised() {
 
     let tables = space.tables().unwrap();
     assert_eq!((tables[0].id.as_str(), tables[0].records, tables[0].watermark), ("orders", 12, 130));
-    assert_eq!(space.table("orders").unwrap().access, ["@alice", "tech"]);
+    assert_eq!(space.table("orders").unwrap().access, ["@c:alice", "tech"]);
     assert!(
         matches!(space.table("gone").unwrap_err(), Error::Api { status: 404, ref code, .. } if code == "not_found")
     );
     space.retire_table("orders").unwrap();
     space.unretire_table("orders").unwrap();
-    assert_eq!(space.create_table("orders", &["@alice", "tech"]).unwrap().value, key);
-    assert_eq!(body(&seen, 5), json!({"id": "orders", "access": ["@alice", "tech"]}));
-    assert_eq!(space.set_table_access("orders", &["@alice"]).unwrap().id, "orders");
-    assert_eq!(body(&seen, 6), json!({"access": ["@alice"]}));
+    assert_eq!(space.create_table("orders", &["@c:alice", "tech"]).unwrap().value, key);
+    assert_eq!(body(&seen, 5), json!({"id": "orders", "access": ["@c:alice", "tech"]}));
+    assert_eq!(space.set_table_access("orders", &["@c:alice"]).unwrap().id, "orders");
+    assert_eq!(body(&seen, 6), json!({"access": ["@c:alice"]}));
     assert_eq!(space.rotate_table_key("orders").unwrap().value, key);
     space.delete_table("orders").unwrap();
     let overview = space.overview("1h").unwrap();
@@ -365,7 +365,7 @@ fn tables_are_listed_created_rotated_reaccessed_deleted_and_summarised() {
 
 #[test]
 fn windows_are_created_edited_published_read_and_linked_to_their_page() {
-    let window = json!({"id": "w1", "name": "Orders", "access": ["@alice"], "created_by": "alice",
+    let window = json!({"id": "w1", "name": "Orders", "access": ["@c:alice"], "created_by": "c:alice",
                         "created_at": "2026-09-03T10:00:00Z",
                         "version": {"name": "v3", "processor": "export default {}", "renderer": "<div/>"}});
     let one = window.clone();
@@ -377,7 +377,7 @@ fn windows_are_created_edited_published_read_and_linked_to_their_page() {
         ("DELETE", "/api/orgs/tos/windows/w1") => (204, String::new()),
         ("GET", "/api/orgs/tos/windows/w1/versions") => {
             ok(json!([{"id": "v-1", "name": "v3", "processor": "p", "renderer": "r",
-                       "created_by": "alice", "created_at": "2026-09-03T10:00:00Z"}]))
+                       "created_by": "c:alice", "created_at": "2026-09-03T10:00:00Z"}]))
         }
         ("POST", "/api/orgs/tos/windows/w1/versions") => {
             (201, json!({"name": "v4", "processor": "p", "renderer": "r"}).to_string())
@@ -387,19 +387,19 @@ fn windows_are_created_edited_published_read_and_linked_to_their_page() {
                       "produced_at": "2026-09-03T10:00:01Z", "is_live": true}}))
         }
         ("GET", "/api/me") => {
-            ok(json!({"id": "alice", "kind": "carbon", "org": "tos", "app": "https://space.example"}))
+            ok(json!({"id": "c:alice", "kind": "carbon", "org": "tos", "app": "https://space.example"}))
         }
         _ => error(404, "not_found"),
     });
 
     assert_eq!(space.windows().unwrap()[0].version.as_ref().unwrap().name, "v3");
     assert_eq!(space.window("w1").unwrap().name, "Orders");
-    assert_eq!(space.create_window("Orders", &["@alice"]).unwrap().id, "w1");
-    assert_eq!(body(&seen, 2), json!({"name": "Orders", "access": ["@alice"]}));
+    assert_eq!(space.create_window("Orders", &["@c:alice"]).unwrap().id, "w1");
+    assert_eq!(body(&seen, 2), json!({"name": "Orders", "access": ["@c:alice"]}));
     space.update_window("w1", Some("Orders 2"), None).unwrap();
     assert_eq!(body(&seen, 3), json!({"name": "Orders 2", "access": null}));
     space.delete_window("w1").unwrap();
-    assert_eq!(space.versions("w1").unwrap()[0].created_by.as_deref(), Some("alice"));
+    assert_eq!(space.versions("w1").unwrap()[0].created_by.as_deref(), Some("c:alice"));
     assert_eq!(space.publish("w1", "v4", "export default {}", "<div/>").unwrap().name, "v4");
     let state = space.window_state("w1").unwrap();
     assert_eq!((state.json.unwrap()["orders"].as_u64(), state.metadata.is_live), (Some(3), true));
@@ -482,14 +482,14 @@ fn def() -> Def {
         sql: "SELECT dedup_key, text, metadata FROM orders".into(),
         delay: "2s".into(),
         cooldown: "10m".into(),
-        access: vec!["@alice".into()],
+        access: vec!["@c:alice".into()],
     }
 }
 
 #[test]
 fn notifications_are_created_edited_read_subscribed_tested_and_deleted() {
-    let row = json!({"id": "n1", "def": def(), "recipients": ["@alice"], "enabled": true,
-                     "created_by": "alice", "created_at": "2026-09-03T10:00:00Z"});
+    let row = json!({"id": "n1", "def": def(), "recipients": ["@c:alice"], "enabled": true,
+                     "created_by": "c:alice", "created_at": "2026-09-03T10:00:00Z"});
     let one = row.clone();
     let (space, seen) = station(move |method, path, _| match (method, path) {
         ("GET", "/api/orgs/tos/notifications") => ok(json!([one.clone()])),
@@ -501,8 +501,8 @@ fn notifications_are_created_edited_read_subscribed_tested_and_deleted() {
             ok(json!([{"id": 7, "dedup_key": "o-42", "text": "new order", "metadata": {"amount": 12.5},
                        "created_at": "2026-09-03T10:00:00Z"}]))
         }
-        ("POST", "/api/orgs/tos/notifications/n1/subscribe") => ok(json!({"recipients": ["@alice", "@bot:tos"]})),
-        ("DELETE", "/api/orgs/tos/notifications/n1/subscribe") => ok(json!({"recipients": ["@alice"]})),
+        ("POST", "/api/orgs/tos/notifications/n1/subscribe") => ok(json!({"recipients": ["@c:alice", "@si:bot"]})),
+        ("DELETE", "/api/orgs/tos/notifications/n1/subscribe") => ok(json!({"recipients": ["@c:alice"]})),
         ("POST", "/api/orgs/tos/notifications/n1/test") => {
             ok(json!({"rows": [{"dedup_key": "o-42"}], "last_trigger_at": "2026-09-03T09:59:00Z"}))
         }
@@ -510,15 +510,15 @@ fn notifications_are_created_edited_read_subscribed_tested_and_deleted() {
     });
 
     assert_eq!(space.notifications().unwrap()[0].def.name, "new order");
-    assert_eq!(space.notification("n1").unwrap().recipients, ["@alice"]);
-    assert_eq!(space.create_notification(&def(), &["@alice"]).unwrap().id, "n1");
-    assert_eq!(body(&seen, 2), json!({"def": def(), "recipients": ["@alice"]}));
+    assert_eq!(space.notification("n1").unwrap().recipients, ["@c:alice"]);
+    assert_eq!(space.create_notification(&def(), &["@c:alice"]).unwrap().id, "n1");
+    assert_eq!(body(&seen, 2), json!({"def": def(), "recipients": ["@c:alice"]}));
     space.update_notification("n1", &def(), None).unwrap();
     assert_eq!(body(&seen, 3), json!({"def": def(), "recipients": null}), "no recipients keeps the subscribers");
     space.delete_notification("n1").unwrap();
     assert_eq!(space.events("n1").unwrap()[0].dedup_key, "o-42");
-    assert_eq!(space.subscribe("n1").unwrap(), ["@alice", "@bot:tos"]);
-    assert_eq!(space.unsubscribe("n1").unwrap(), ["@alice"]);
+    assert_eq!(space.subscribe("n1").unwrap(), ["@c:alice", "@si:bot"]);
+    assert_eq!(space.unsubscribe("n1").unwrap(), ["@c:alice"]);
     let run = space.test_notification("n1").unwrap();
     assert_eq!((run.rows.len(), run.error, run.last_trigger_at.is_some()), (1, None, true));
 }
@@ -532,7 +532,7 @@ fn webhooks_api_keys_and_the_access_token_hand_back_their_secrets_once() {
     let token = "spacewindow-0123456789abcdef0123456789abcdef";
     let (space, seen) = station(move |method, path, _| match (method, path) {
         ("GET", "/api/orgs/tos/webhooks") => {
-            ok(json!([{"id": "h1", "url": "https://example.com/hook", "created_by": "alice",
+            ok(json!([{"id": "h1", "url": "https://example.com/hook", "created_by": "c:alice",
                        "created_at": "2026-09-03T10:00:00Z"}]))
         }
         ("POST", "/api/orgs/tos/webhooks") => {
@@ -541,7 +541,7 @@ fn webhooks_api_keys_and_the_access_token_hand_back_their_secrets_once() {
         ("DELETE", "/api/orgs/tos/webhooks/h1") => (204, String::new()),
         ("PUT", "/api/orgs/tos/silicon-webhook") => ok(json!({"url": "https://bot.example", "secret": secret})),
         ("DELETE", "/api/orgs/tos/silicon-webhook") => (204, String::new()),
-        ("GET", "/api/orgs/tos/api-keys") => ok(json!([{"id": "k1", "scopes": ["tables"], "created_by": "alice",
+        ("GET", "/api/orgs/tos/api-keys") => ok(json!([{"id": "k1", "scopes": ["tables"], "created_by": "c:alice",
                        "created_at": "2026-09-03T10:00:00Z", "last_used_at": null}])),
         ("POST", "/api/orgs/tos/api-keys") => (201, json!({"id": "k1", "key": apikey}).to_string()),
         ("DELETE", "/api/orgs/tos/api-keys/k1") => (204, String::new()),
@@ -602,15 +602,15 @@ fn a_query_carries_its_restriction_and_comes_back_with_rows_and_watermarks() {
 #[test]
 fn whoami_reads_the_org_route_and_the_app_and_the_orgs_come_from_the_session_alone() {
     let (space, seen) = station(|method, path, _| match (method, path) {
-        ("GET", "/api/orgs/tos/me") => ok(json!({"kind": "silicon", "id": "bot:tos", "org": "tos", "tags": ["ops"]})),
+        ("GET", "/api/orgs/tos/me") => ok(json!({"kind": "silicon", "id": "si:bot", "org": "tos", "tags": ["ops"]})),
         ("GET", "/api/me") => {
-            ok(json!({"id": "bot:tos", "kind": "silicon", "org": "tos", "app": "https://space.example"}))
+            ok(json!({"id": "si:bot", "kind": "silicon", "org": "tos", "app": "https://space.example"}))
         }
         ("GET", "/api/orgs") => ok(json!([{"id": "tos", "name": "Team of Silicons"}, {"id": "acme"}])),
         _ => error(404, "not_found"),
     });
     let me = space.me().unwrap();
-    assert_eq!((me.kind, me.id.as_str(), me.org.as_str()), (Kind::Silicon, "bot:tos", "tos"));
+    assert_eq!((me.kind, me.id.as_str(), me.org.as_str()), (Kind::Silicon, "si:bot", "tos"));
     assert_eq!(me.tags, ["ops"]);
     assert_eq!(space.app_url().unwrap(), "https://space.example");
     assert_eq!(space.window_url("w1").unwrap(), "https://space.example/o/tos/windows/w1");

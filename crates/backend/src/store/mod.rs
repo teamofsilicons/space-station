@@ -15,6 +15,7 @@ pub use flush::{Flushed, Watermarks};
 pub use lease::Lease;
 use redis::aio::ConnectionManager;
 use space_station_shared::limits::FLUSH_BYTES;
+use space_station_shared::secrets::sha256_hex;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use tokio::sync::{Notify, broadcast};
@@ -36,6 +37,23 @@ impl Store {
     pub async fn connect(cfg: &Config) -> Result<Store, Box<dyn std::error::Error + Send + Sync>> {
         let pg = PgPoolOptions::new().max_connections(16).connect(&cfg.database_url).await?;
         sqlx::migrate!("./migrations").run(&pg).await?;
+        let configured_key = cfg.iam_test_key.as_deref().map(sha256_hex);
+        // Bind fresh stores once too: an empty store will later contain identities from this world.
+        sqlx::query(
+            "UPDATE public_identifier_migration SET environment_bound = true, testing_key_sha256 = $1 \
+                     WHERE ready AND NOT environment_bound",
+        )
+        .bind(&configured_key)
+        .execute(&pg)
+        .await?;
+        let (ready, testing_key): (bool, Option<String>) =
+            sqlx::query_as("SELECT ready, testing_key_sha256 FROM public_identifier_migration").fetch_one(&pg).await?;
+        if !ready {
+            return Err("public identities need offline migration; follow docs/PUBLIC-ID-MIGRATION.md".into());
+        }
+        if testing_key != configured_key {
+            return Err("IAM testing environment does not match this database's identifier migration".into());
+        }
         let redis = ConnectionManager::new(redis::Client::open(cfg.redis_url.as_str())?).await?;
         let ch = Clickhouse::new(&cfg.clickhouse_url, &cfg.clickhouse_query_password)?;
         ch.bootstrap(&cfg.clickhouse_query_password).await?;

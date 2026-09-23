@@ -1,7 +1,7 @@
 //! The one IAM client, the official `silicon-iam-client`. One `Client` is built at boot with the
 //! Application's Basic credential and, in a testing environment, its `X-Testing-Environment-Key`;
-//! `auto_update(false)` ALWAYS, because the crate otherwise runs `cargo update` against this
-//! project's manifest at runtime. `system().negotiate()` is the boot handshake and is fail-closed.
+//! SDK 4 never updates the consumer's dependencies at runtime. `system().negotiate()` is the
+//! boot handshake and is fail-closed.
 //! Everything Space Station asks IAM is here: exchanging a short-lived or refresh token at
 //! `app-auth/tokens`, introspecting a token — which since IAM 1.2.0 carries the `authorization`
 //! snapshot this server reads its tags and membership from — and revoking one. The crate owns the
@@ -14,6 +14,7 @@ use std::time::Duration;
 use axum::http::StatusCode;
 use silicon_iam_client::{Credential, EnvironmentKey, Error, IdempotencyKey, Mutation, models};
 
+use super::Kind;
 use crate::config::Config;
 use crate::http::ApiError;
 
@@ -27,8 +28,9 @@ pub struct Tokens {
     pub oat: String,
     pub ort: String,
     pub expires_in: i64,
-    /// The actor's public id: `alice`, `bot:tos`.
+    /// The actor's full public id: `c:alice`, `si:bot`.
     pub actor: String,
+    pub kind: Kind,
     /// The organization the login was bound to; `None` for an unscoped login.
     pub org: Option<String>,
 }
@@ -111,7 +113,7 @@ impl Client {
     pub async fn connect(cfg: &Config) -> Result<Client, Box<dyn std::error::Error + Send + Sync>> {
         let mut builder = silicon_iam_client::Client::builder(&cfg.iam_url)?
             .credential(Credential::application(cfg.iam_app_id.clone(), cfg.iam_app_secret.clone()))
-            // Never on: the crate otherwise edits this project's Cargo.lock at runtime.
+            // Explicit for older SDK compatibility; a no-op in SDK 4.
             .auto_update(false)
             .user_agent(concat!("space-station-backend/", env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(10));
@@ -163,8 +165,13 @@ impl Client {
             active: seen.active,
             org: seen.org_id,
             membership_id: seen.membership_id.map(|id| id.to_string()),
-            authorization: seen.authorization.map(authorization_of),
-            authorizations: seen.authorizations.unwrap_or_default().into_iter().map(authorization_of).collect(),
+            authorization: seen.authorization.map(|a| authorization_of(a, &self.app_id)).transpose()?,
+            authorizations: seen
+                .authorizations
+                .unwrap_or_default()
+                .into_iter()
+                .map(|a| authorization_of(a, &self.app_id))
+                .collect::<Result<_, _>>()?,
         })
     }
 
@@ -179,17 +186,39 @@ fn tokens_of(r: models::OAuthTokenResponse) -> Result<Tokens, IamError> {
     let actor = r.actor.ok_or_else(|| {
         IamError::Unavailable("IAM did not disclose the login identity; grant identity access before signing in".into())
     })?;
+    let kind = match actor.type_field {
+        models::ActorRefType::Carbon => Kind::Carbon,
+        models::ActorRefType::Silicon => Kind::Silicon,
+        _ => return Err(IamError::Unavailable("IAM returned an unsupported login actor type".into())),
+    };
+    if Kind::of(&actor.public_id) != Some(kind) {
+        return Err(IamError::Unavailable("IAM returned a noncanonical or mismatched login identity".into()));
+    }
     Ok(Tokens {
         oat: r.access_token,
         ort: r.refresh_token,
         expires_in: r.expires_in,
         actor: actor.public_id,
+        kind,
         org: r.org_id,
     })
 }
 
-fn authorization_of(a: models::ApplicationAuthorization) -> Authorization {
-    Authorization {
+fn authorization_of(a: models::ApplicationAuthorization, app: &str) -> Result<Authorization, IamError> {
+    let kind = a.actor_type.as_ref().and_then(|kind| match kind {
+        models::ApplicationAuthorizationActorType::Carbon => Some(Kind::Carbon),
+        models::ApplicationAuthorizationActorType::Silicon => Some(Kind::Silicon),
+        _ => None,
+    });
+    if a.audience != app
+        || (a.actor_type.is_some() && kind.is_none())
+        || a.public_id
+            .as_ref()
+            .is_some_and(|id| Kind::of(id).is_none() || kind.is_some_and(|k| Kind::of(id) != Some(k)))
+    {
+        return Err(IamError::Unavailable("IAM returned a mismatched authorization identity or audience".into()));
+    }
+    Ok(Authorization {
         public_id: a.public_id,
         org: a.org_id,
         org_uuid: a.organization_id.to_string(),
@@ -197,7 +226,7 @@ fn authorization_of(a: models::ApplicationAuthorization) -> Authorization {
         membership_version: a.membership_version,
         org_role: a.org_role,
         tags: a.tags.map(|tags| tags.into_iter().map(|t| t.name).collect()),
-    }
+    })
 }
 
 #[cfg(test)]
@@ -213,10 +242,16 @@ mod tests {
         let response = serde_json::json!({
             "access_token": "oat_test", "refresh_token": "ort_test", "expires_in": 1800,
             "token_type": "Bearer", "scope": "identity:read", "org_id": "tos",
-            "actor": { "type": "carbon", "public_id": "alice" }
+            "actor": { "type": "carbon", "public_id": "c:alice" }
         });
         let tokens = tokens_of(serde_json::from_value(response.clone()).unwrap()).unwrap();
-        assert_eq!(tokens.actor, "alice");
+        assert_eq!(tokens.actor, "c:alice");
+        assert_eq!(tokens.kind, Kind::Carbon);
+        for (kind, id) in [("carbon", "alice"), ("silicon", "bot:tos"), ("silicon", "c:alice"), ("carbon", "si:bot")] {
+            let mut invalid = response.clone();
+            invalid["actor"] = serde_json::json!({"type": kind, "public_id": id});
+            assert!(tokens_of(serde_json::from_value(invalid).unwrap()).is_err(), "{kind} {id}");
+        }
         let mut hidden = response;
         hidden.as_object_mut().unwrap().remove("actor");
         assert!(tokens_of(serde_json::from_value(hidden).unwrap()).is_err());

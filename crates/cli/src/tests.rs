@@ -34,10 +34,10 @@ fn columns_are_headed_by_their_label_not_their_path_and_a_field_that_is_not_ther
 
 #[test]
 fn a_window_with_no_published_version_shows_a_dash_where_its_version_name_would_be() {
-    let rows = json!([{"id": "w_01", "name": "Orders", "version": null, "created_by": "alice", "access": []}]);
+    let rows = json!([{"id": "w_01", "name": "Orders", "version": null, "created_by": "c:alice", "access": []}]);
     let printed = out::table(&rows, WINDOWS);
     assert_eq!(printed.lines().next().unwrap(), "ID    NAME    VERSION  CREATED_BY  ACCESS");
-    assert_eq!(printed.lines().nth(1).unwrap(), "w_01  Orders  -        alice");
+    assert_eq!(printed.lines().nth(1).unwrap(), "w_01  Orders  -        c:alice");
 }
 
 #[test]

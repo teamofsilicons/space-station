@@ -8,8 +8,8 @@ const valid = {
   name: "Big order",
   triggers: [{ table: "orders", where: "record.amount::Float64 > 100" }, { schedule: "*/5 * * * *" }],
   sql: "SELECT 'k' AS dedup_key, 't' AS text, map() AS metadata FROM orders",
-  access: ["@alice", "ops"],
-  recipients: ["@alice", "webhook:wh1"],
+  access: ["@c:alice", "ops"],
+  recipients: ["@c:alice", "webhook:wh1"],
 };
 
 const errorsOf = (patch: Record<string, unknown>) => parseDefinition(JSON.stringify({ ...valid, ...patch })).errors;
@@ -17,7 +17,7 @@ const errorsOf = (patch: Record<string, unknown>) => parseDefinition(JSON.string
 test("a valid definition becomes {def, recipients} with recipients split out of def", () => {
   const { body, errors } = parseDefinition(JSON.stringify(valid));
   assert.deepEqual(errors, []);
-  assert.deepEqual(body?.recipients, ["@alice", "webhook:wh1"]);
+  assert.deepEqual(body?.recipients, ["@c:alice", "webhook:wh1"]);
   assert.equal("recipients" in (body?.def ?? {}), false);
   assert.equal(body?.def.name, "Big order");
 });
@@ -25,6 +25,17 @@ test("a valid definition becomes {def, recipients} with recipients split out of 
 test("recipients default to an empty array", () => {
   const { recipients: _, ...noRecipients } = valid;
   assert.deepEqual(parseDefinition(JSON.stringify(noRecipients)).body?.recipients, []);
+});
+
+test("actor selectors keep the canonical namespace once and reject legacy identifiers", () => {
+  const actors = ["@c:alice", "@c:user0", "@si:bot"];
+  const { body, errors } = parseDefinition(JSON.stringify({ ...valid, access: [...actors, "ops"], recipients: actors }));
+  assert.deepEqual(errors, []);
+  assert.deepEqual(body?.recipients, actors);
+  for (const actor of ["@alice", "@bot:tos", "@c:c:alice", "@si:bot:tos", "@c:", "@si:", "@c:ab", `@c:${"a".repeat(31)}`, `@si:${"a".repeat(51)}`]) {
+    assert.match(errorsOf({ access: [actor] })[0], /^access/, actor);
+    assert.match(errorsOf({ recipients: [actor] })[0], /^recipients/, actor);
+  }
 });
 
 test("invalid JSON and non-objects are refused with one error", () => {

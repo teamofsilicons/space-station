@@ -32,8 +32,8 @@ CLI); tokio where it is not (backend).
 | word | meaning |
 |---|---|
 | org | an IAM organization. Everything is scoped to one. |
-| carbon | a human. Public id `alice` (`^[a-z0-9_-]{3,30}$`, no colon) |
-| silicon | a machine identity. Public id `bot:tos` (`handle:org_id`, always has a colon) |
+| carbon | a human. Public id `c:alice`; the handle has 3–30 lowercase letters, digits, underscores or hyphens. Existing handles containing zero remain valid. |
+| silicon | a machine identity. Public id `si:bot`; its 3–50-character handle is globally unique and its owning organization is explicit IAM authority. |
 | actor | a carbon or a silicon. Stored and sent **without** `@`; UIs prepend `@` for display |
 | table | a logical table inside an org. `table_id` is `^[a-z0-9]{1,50}$`, unique in the org |
 | record | one JSON object sent to a table |
@@ -41,7 +41,7 @@ CLI); tokio where it is not (backend).
 | watermark | per (org, table): while this process holds the engine lease, the `to` of its most recent successful flush; otherwise `max(cursor)` from ClickHouse, re-read at most once a flush interval and never allowed to move backwards. Every watermark handed out uses this value, never the counter |
 | space window | processor (JS) → SiliconJSON (≤ 64 KB) → renderer (iframe) |
 | version | one named pair (processor, renderer) of a window; `metadata.processor_version` and `renderer_version` are both this name, or `dev` |
-| access list | `["@alice", "@bot:tos", "tech"]`: `@` + actor id, `webhook:` + webhook id (recipients only), otherwise a tag name, matched exactly and case-sensitively against the actor's IAM tag names. Union. **Matched, never validated**: the backend cannot ask IAM which tags or members exist, so a mistyped entry (`Tech`, `@alcie`) is accepted and grants nothing. Renaming a tag in IAM changes access, by design |
+| access list | `["@c:alice", "@si:bot", "tech"]`: `@` + complete actor id, `webhook:` + webhook id (recipients only), otherwise a tag name, matched exactly and case-sensitively against the actor's IAM tag names. Union. The backend validates actor syntax but cannot ask IAM which tags or members exist, so a mistyped entry (`Tech`, `@c:alcie`) grants nothing. Renaming a tag in IAM changes access, by design |
 
 Whoever creates something is its `created_by` and is appended to its access list at create time;
 whoever writes an access list is appended to it too, so a table, window or notification can never
@@ -79,17 +79,21 @@ The backend applies it to processor and renderer bodies on every version create
 
 ## Identity (crate `backend`, module `iam`)
 
-Written against the live Silicon IAM contract as observed on 2026-09-05 in a testing environment.
+Originally verified against Silicon IAM on 2026-09-05 in a testing environment; identifier
+handling now follows SDK 4 and the [public ID migration](PUBLIC-ID-MIGRATION.md).
 The crate named `silicon-iam` (now a `0.0.0` placeholder on crates.io) implemented a PKCE flow the
-service no longer has; the maintained client is **`silicon-iam-client`** (1.2.1, Rust 1.98), which
-types every call below: `Client::builder(url)?.credential(Credential::application(app_id,
+service no longer has; the backend vendors the published **`silicon-iam-client`** 4.0.0 snapshot
+(Rust 1.98). Its [documented local patch](../vendor/silicon-iam-client/SPACE-STATION-PATCH.md)
+accepts nonempty string webhook `aggregate.id` values so canonical membership IDs verify;
+event IDs remain UUIDs, and signed bytes, signatures, envelope checks and testing-key checks
+are unchanged. It types every call below: `Client::builder(url)?.credential(Credential::application(app_id,
 secret)).environment(EnvironmentKey::new(key)?).auto_update(false).build()?`,
 `system().negotiate()`, `oauth().login(app_id, slt, &Mutation::new())`, `oauth().refresh(app_id,
 ort, &Mutation::with_key(k))`, `oauth().authorization(..)` → `Option<ApplicationAuthorization>`,
 `oauth().introspect(..)`, `oauth().revoke(.., &mutation)`, and `webhook::{WebhookVerifier,
 WebhookSecretKeyring, WebhookSecret}` with `VerifiedWebhook::verify_testing_environment`. The
-backend uses it with **`auto_update(false)`** — the crate would otherwise run `cargo update`
-against the host's manifest at runtime — and with an explicit `User-Agent` (IAM's edge answers an
+backend retains **`auto_update(false)`** for compatibility; SDK 4 disables runtime dependency
+updates unconditionally. It also sets an explicit `User-Agent` (IAM's edge answers an
 HTML 403 to any request without one). There is one HTTP client, the official one, and no fallback.
 
 **How anyone signs in.** IAM mints a *short-lived token* (`slt`, 2 minutes, single use) for an
@@ -114,9 +118,10 @@ is what Space Station scopes the session to; an unscoped login (no `org_id`) is 
 Station with `org_required`, because everything here lives inside an org. A login bound to an
 org the actor is not a member of never reaches us: IAM answers `organization_context_forbidden`.
 
-`APP` is the canonical `{org}>{handle}` id, `tos>spacestation`. One Application serves every
-organization: alice, a member of `acme`, signs in to `tos>spacestation` bound to `acme` and
-introspection reports her `acme` membership.
+`APP` is the globally unique bare id `spacestation`, owned by `tos` in IAM/Honeycomb's explicit
+`org_id` field. One Application serves every organization: `c:alice`, a member of `acme`, signs
+in to `spacestation` bound to `acme` and introspection reports her `c:alice[acme]` membership.
+Neither application nor Silicon IDs encode an organization. Bundle IDs retain `org>bundle`.
 
 **Refresh**: the same endpoint with `refresh_token=` instead of `slt=`, under the session row lock,
 reusing the row's `refresh_key` as the `Idempotency-Key` until it succeeds. Rotation is
@@ -140,8 +145,9 @@ are asynchronous updates, not prerequisites for initial access". `tags` needs th
 `memberships.read` scope (ours has it); `null` means undisclosed and `[]` means no tags. Refresh
 tokens and unscoped tokens carry no `authorization`.
 
-`Identity { kind: carbon|silicon (from the colon), id, org, tags: [name] }` is built as: `kind`,
-`id` and `org` from the session row (set at exchange from `actor.public_id` and `org_id`), and
+`Identity { kind: carbon|silicon, id, org, tags: [name] }` uses the explicit IAM actor kind and
+validates its matching `c:` or `si:` prefix; a colon alone cannot distinguish kinds. It reads
+`id` and `org` from the session row (set at exchange from `actor.public_id` and `org_id`) and
 `tags` from the snapshot. The backend introspects at exchange and whenever `checked_at` is older
 than 60 s, and each time writes the snapshot's `public_id`, `principal_id`, `membership_id` and
 `tags` into the session row **and** into the directory mirror — so tags are known the moment
@@ -187,7 +193,7 @@ every re-check **refreshes first** (below), an older Space Station session of th
 its **next re-check** — the first request it makes more than 60 s after its last check, so about
 a minute after its next command, not at the access token's expiry — with `invalid_grant`; the
 second device wins. (Observed live 2026-09-05 17:48, rid `01a07181-ff54-7363-9d8e-7c7019e3ef92`:
-a fresh `iam silicon-login` for `bot:tos`, and the older terminal session's next command a minute
+a fresh `iam silicon-login` for the Silicon now identified as `si:bot`, and the older terminal session's next command a minute
 later answered `401`.) Revoking one family's refresh token flips sibling access tokens of the
 same login to `active: false` although their refresh still works, which is the other reason a
 re-check refreshes before it gives up.
@@ -226,14 +232,13 @@ address, and permits `http://` **only** to such hosts — a public `http://` URL
 it). `Config::from_env` reads `./.env` underneath the real environment.
 
 Registering the Application (once, by an org owner with the `iam` CLI): `iam app create
-spacestation --name "Space Station" --base-url https://spacestation.teamofsilicons.com
+spacestation --org tos --name "Space Station" --base-url https://spacestation.teamofsilicons.com
 --webhook-url https://spacestation.teamofsilicons.com/webhooks/api/ --webhook-secret <whs_…>`.
 There are no redirect URIs to register; a login names its redirect URI. The app requests
 `self.identity.read`, `self.profile.read`, `self.organizations.read`, `self.membership.read`, and
 `self.tags.read`, and subscribes to the full webhook event scope.
 The generated `ask_` secret is shown once. In a testing environment, `iam --test <env> app
-import 'tos>spacestation'` mirrors the production Application with a fresh test-only secret (quoted
-in a shell: `>` is a redirect).
+import 'spacestation'` mirrors the production Application with a fresh test-only secret.
 
 **IAM stub** (`crates/backend/examples/iam-stub.rs`, also the library module `src/iam_stub.rs`
 the integration tests start in-process): the contract above on a loopback port, seeded from a
@@ -610,8 +615,8 @@ Engine (runs under the engine lease):
 - cooldown is one statement: `INSERT INTO notification_events … SELECT … WHERE NOT EXISTS (SELECT 1
   FROM notification_events WHERE notification = $1 AND dedup_key = $2 AND created_at > now() -
   $3::interval)`; a row is delivered only if the INSERT inserted;
-- delivery to every recipient: `@carbon` → `notification` WS frame (the tab shows the stored
-  events); `@silicon` → its delivery webhook row; `webhook:{id}` → that org webhook. Body is
+- delivery to every recipient: `@c:alice` → `notification` WS frame (the tab shows the stored
+  events); `@si:bot` → its delivery webhook row; `webhook:{id}` → that org webhook. Body is
   exactly `{dedup_key, text, metadata}`; headers `X-Space-Station-Event-Id`,
   `X-Space-Station-Notification`, `X-Space-Station-Timestamp` (unix seconds),
   `X-Space-Station-Signature: v1=<hex hmac_sha256(secret, "{seconds}.{raw body}")>`. Attempts at
@@ -625,7 +630,7 @@ Engine (runs under the engine lease):
 - `DELETE /orgs/{org}/webhooks/{id}` also **prunes `webhook:{id}` from every notification's
   recipients** in the org, in the same transaction, so no notification keeps addressing a
   recipient that no longer exists; `DELETE /orgs/{org}/silicon-webhook` removes the caller's
-  delivery webhook the same way (a notification that still names `@silicon` then records a
+  delivery webhook the same way (a notification that still names `@si:bot` then records a
   `dev_errors` row at delivery, exactly as if none had ever been set).
 - `POST …/notifications/{id}/test` runs the sql now over `(cursors, watermark]` without advancing
   and returns `{rows, error?, last_trigger_at | null}`.
@@ -712,7 +717,7 @@ ss.record(serde_json::json!({"id": "o-42", "amount": 12.5}));
 let auth = space_station::exchange(&url, slt_from_the_iam_cli, "tos")?;   // a value; the CLI is what stores one
 let space = Space::new(space_station::default_url(), auth)?.org("tos");
 let tables = space.tables()?;
-let key = space.create_table("orders", &["@alice", "tech"])?;
+let key = space.create_table("orders", &["@c:alice", "tech"])?;
 let rows = space.query("SELECT count() FROM orders", &Default::default())?;
 ```
 
@@ -771,8 +776,8 @@ decides what to do with it.
 
 One `clap` tree over the package, plus formatting. Human tables for `ls`, JSON for everything else
 (pretty on a TTY, compact when piped), secrets alone on stdout with a one-line note on stderr.
-`--org` (or `SPACE_STATION_ORG`, or the org stored by `use`) scopes every org command; a silicon's
-org is the suffix of its id and needs no flag.
+`--org` (or `SPACE_STATION_ORG`, or the org stored by `use`) scopes every org command. A fresh
+login without an org preference saves IAM's selected organization; actor IDs never encode it.
 
 ```
 login [--no-browser]              a carbon: opens IAM in a browser, stores the session
@@ -824,8 +829,8 @@ The backend brokers every login, because only it holds the Application secret.
   history, proxy logs, the Referer of the "you may close this tab" page). What appears in the URL
   is single-use and dead in two minutes.
 - **No browser** (`spacestation auth <slt> --org o`, or a silicon): the person or machine mints an
-  slt with the `iam` CLI (`iam login --app-id 'tos>spacestation' --org o`, `iam silicon-login
-  --app-id 'tos>spacestation'`) and hands it over; `space_station::exchange` posts it to
+  slt with the `iam` CLI (`iam login --app-id 'spacestation' --org o`, `iam silicon-login
+  --app-id 'spacestation'`) and hands it over; `space_station::exchange` posts it to
   `POST /api/auth/session {slt, org}` and gets `{token: sscli-…}` back. The slt is single-use and
   two minutes old at most, which is the whole point.
 

@@ -30,7 +30,8 @@ with tempfile.TemporaryDirectory() as temporary:
     with tarfile.open(result) as archive:
         assert len(archive.getmembers()) == 7
         manifest = archive.extractfile('honeycomb.yaml').read().decode()
-        assert 'app_id: tos>spacestation\nversion: 1.2.3\n' in manifest
+        assert 'app_id: spacestation\nversion: 1.2.3\n' in manifest
+        assert 'org_id:' not in manifest  # Ownership lives in application configuration.
         for _, target, _ in packager.TARGETS:
             suffix = '.exe' if target.startswith('windows-') else ''
             name = f'targets/{target}/spacestation{suffix}'

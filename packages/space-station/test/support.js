@@ -35,7 +35,7 @@ async function backend({ tables = { orders: 130 }, version = null, state = { jso
       res.end(JSON.stringify(v));
     };
     const rest = req.url.match(/^\/api\/orgs\/[^/]+(\/.*)$/)?.[1] ?? "";
-    if (rest === "/tables") return send(200, Object.entries(b.tables).map(([id, watermark]) => ({ id, records: watermark, watermark, access: ["@alice"], created_by: "alice", created_at: "2026-09-03T00:00:00Z" })));
+    if (rest === "/tables") return send(200, Object.entries(b.tables).map(([id, watermark]) => ({ id, records: watermark, watermark, access: ["@c:alice"], created_by: "c:alice", created_at: "2026-09-03T00:00:00Z" })));
     if (/^\/windows\/[^/]+$/.test(rest)) return send(200, { id: rest.split("/")[2], name: "Orders", version: b.version });
     if (/^\/windows\/[^/]+\/state$/.test(rest)) return send(200, b.state);
     if (/^\/windows\/[^/]+\/versions$/.test(rest)) {

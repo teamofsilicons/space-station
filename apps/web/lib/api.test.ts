@@ -45,8 +45,8 @@ test("a table id is 1 to 50 lowercase letters and digits", () => {
 test("204 resolves to nothing and a JSON body to itself", async () => {
   answering(204, null);
   assert.equal(await api("/auth/logout", "POST"), undefined);
-  answering(200, JSON.stringify({ id: "alice", kind: "carbon", org: "tos", app: "x" }), "application/json");
-  assert.equal((await api<{ id: string }>("/me")).id, "alice");
+  answering(200, JSON.stringify({ id: "c:alice", kind: "carbon", org: "tos", app: "x" }), "application/json");
+  assert.equal((await api<{ id: string }>("/me")).id, "c:alice");
 });
 
 test("local WebSockets connect directly to the native backend", () => {

@@ -38,8 +38,8 @@ minted for it — good for two minutes and for one exchange — which the backen
 it alone holds and refreshes:
 
 ```sh
-iam login --app-id 'tos>spacestation' --grant-org tos  # a carbon in a terminal: prints the token
-iam silicon-login --app-id 'tos>spacestation'          # a silicon: the only way a silicon signs in
+iam login --app-id 'spacestation' --grant-org tos  # a carbon in a terminal: prints the token
+iam silicon-login --app-id 'spacestation'          # a silicon: the only way a silicon signs in
 spacestation auth <slt>
 ```
 
@@ -72,6 +72,11 @@ Whatever is stored lives in `~/.space-station/auth.json` (0600, in a 0700 direct
 a lock through a tmp file and a rename; owner-only DACLs on Windows). `whoami` names what is stored on stderr, so it says
 something even offline.
 
+IAM actor IDs are `c:<handle>` and `si:<handle>`; access and recipient selectors use
+`@c:<handle>` and `@si:<handle>`. Organizations remain explicit. After the coordinated identifier
+cutover, sign in again when the backend refuses the old session. The local file stores only
+the opaque session token and organization; do not rewrite tokens or infer an organization from an actor ID.
+
 ## The org
 
 Every org command needs one, and takes the first of:
@@ -96,8 +101,8 @@ and its org act.
 ```sh
 spacestation tables ls
 spacestation tables get orders
-spacestation tables create orders --access @alice,tech    # prints the table key once
-spacestation tables access orders --access @alice,@bot:tos
+spacestation tables create orders --access @c:alice,tech    # prints the table key once
+spacestation tables access orders --access @c:alice,@si:bot
 spacestation tables rotate orders                          # prints the new key once
 spacestation tables rm orders                              # the records go too
 spacestation tables overview --window 5h
@@ -108,7 +113,7 @@ printf '%s\n' '{"order_id":"o_10","amount":7}' | SPACE_STATION_TABLE_KEY="$TABLE
 spacestation windows ls
 spacestation windows get w_01
 spacestation windows code w_01                             # processor and renderer of the current version
-spacestation windows create "Orders" --access @alice
+spacestation windows create "Orders" --access @c:alice
 spacestation windows edit w_01 --name "Orders live"
 spacestation windows rm w_01
 spacestation windows versions w_01

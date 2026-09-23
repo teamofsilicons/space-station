@@ -299,7 +299,7 @@ async fn open(state: &AppState, slt: &str, requested_org: Option<&str>, cli: boo
         discard(state, &tokens).await;
         return Err(e);
     }
-    if let Err(e) = agrees(&proof, org, proof.membership_id.as_deref()) {
+    if let Err(e) = agrees(&proof, &tokens.actor, org, proof.membership_id.as_deref()) {
         discard(state, &tokens).await;
         tracing::warn!("IAM: a token just minted for @{} bound to {org} introspects as {proof:?}", tokens.actor);
         return Err(e);
@@ -314,7 +314,7 @@ async fn open(state: &AppState, slt: &str, requested_org: Option<&str>, cli: boo
     )
     .bind(sha256_hex(&id))
     .bind(&tokens.actor)
-    .bind(Kind::of(&tokens.actor).as_str())
+    .bind(tokens.kind.as_str())
     .bind(org)
     .bind(&proof.membership_id)
     .bind(crypto::seal(&state.cfg.key, &tokens.oat))
@@ -354,8 +354,16 @@ fn bound_to(tokens: &Tokens, org: &str) -> Result<(), ApiError> {
 /// Introspection proves the token is live, bound to `org`, and holds `membership`; a present
 /// snapshot must name the same org and membership. `membership` is `None` only for the initial
 /// exchange, whose membership introspection itself supplies.
-fn agrees(proof: &Introspection, org: &str, membership: Option<&str>) -> Result<(), ApiError> {
-    if !proof.active || proof.org.as_deref() != Some(org) {
+fn agrees(proof: &Introspection, actor: &str, org: &str, membership: Option<&str>) -> Result<(), ApiError> {
+    if !proof.active
+        || proof.org.as_deref() != Some(org)
+        || proof.membership_id.as_deref() != Some(format!("{actor}[{org}]").as_str())
+        || proof.authorization.iter().chain(&proof.authorizations).any(|a| {
+            a.public_id.as_deref().is_some_and(|id| id != actor)
+                || !valid_org(&a.org)
+                || a.membership_id != format!("{actor}[{}]", a.org)
+        })
+    {
         return Err(inconsistent());
     }
     if let Some(want) = membership
@@ -380,10 +388,9 @@ async fn mirror(tx: &mut PgConnection, org: &str, actor: &str, auth: &Authorizat
         org_uuid: Some(auth.org_uuid.clone()),
         org_name: None,
         actor: actor.to_owned(),
-        kind: Kind::of(actor),
+        kind: Kind::of(actor).expect("validated IAM actor"),
         membership_id: auth.membership_id.clone(),
-        // IAM 3 no longer discloses internal principal UUIDs. Membership IDs remain stable;
-        // upsert preserves any legacy UUID already stored for old webhook tombstones.
+        // IAM exposes public membership IDs; retain any prior principal UUID for historical tombstones.
         principal_id: None,
         status: "active".into(),
         tags: auth.tags.clone(),
@@ -469,10 +476,14 @@ async fn fetch_locked(state: &AppState, tx: &mut PgConnection, id_hash: &str) ->
 /// `None` when the tokens were sealed under another key: the session is unusable.
 fn decode(state: &AppState, id_hash: &str, row: &PgRow) -> Option<Session> {
     let open = |column| crypto::open(&state.cfg.key, &row.get::<String, _>(column));
-    let kind = if row.get::<String, _>("kind") == "silicon" { Kind::Silicon } else { Kind::Carbon };
+    let actor: String = row.get("actor");
+    let kind = Kind::of(&actor)?;
+    if row.get::<String, _>("kind") != kind.as_str() {
+        return None;
+    }
     Some(Session {
         id_hash: id_hash.to_owned(),
-        actor: row.get("actor"),
+        actor,
         kind,
         org: row.get("org"),
         membership_id: row.get("membership_id"),
@@ -519,6 +530,12 @@ async fn rotate(state: &AppState, tx: &mut PgConnection, current: &Session) -> R
     };
     match state.iam.refresh(&current.ort, &key.to_string()).await {
         Ok(tokens) => {
+            if tokens.actor != current.actor
+                || tokens.kind != current.kind
+                || tokens.org.as_deref().is_some_and(|org| org != current.org)
+            {
+                return Err(inconsistent());
+            }
             let expires_at = Utc::now() + TimeDelta::seconds(tokens.expires_in);
             sqlx::query(
                 "UPDATE sessions SET oat_enc = $2, ort_enc = $3, expires_at = $4, refresh_key = NULL WHERE id_hash = $1",
@@ -607,7 +624,7 @@ async fn finish(
     session: &mut Session,
 ) -> Result<(), ApiError> {
     let authorizations = proof.authorizations.clone();
-    if agrees(&proof, &proved.org, proved.membership_id.as_deref()).is_err() {
+    if agrees(&proof, &proved.actor, &proved.org, proved.membership_id.as_deref()).is_err() {
         sqlx::query("DELETE FROM sessions WHERE id_hash = $1").bind(&proved.id_hash).execute(&mut *tx).await?;
         tx.commit().await?;
         tracing::info!("session of @{} in {} ended: introspection answered {proof:?}", proved.actor, proved.org);
@@ -650,11 +667,11 @@ mod tests {
     fn iam_chooses_the_organization_while_local_landing_preserves_the_preference() {
         let landing = Landing::read(&HashMap::from([("org".into(), "tos".into())])).unwrap();
         assert_eq!(landing.org.as_deref(), Some("tos"));
-        let url = login_url("https://auth.iam.example", "tos>spacestation", "https://ss.example/api/auth/callback");
+        let url = login_url("https://auth.iam.example", "spacestation", "https://ss.example/api/auth/callback");
         let parsed = url::Url::parse(&url).unwrap();
         let query = parsed.query_pairs().collect::<HashMap<_, _>>();
         assert_eq!(query.len(), 2);
-        assert_eq!(query["app_id"], "tos>spacestation");
+        assert_eq!(query["app_id"], "spacestation");
         assert_eq!(query["redirect_uri"], "https://ss.example/api/auth/callback");
         assert!(!query.contains_key("org_id"));
     }
@@ -686,7 +703,8 @@ mod tests {
             oat: "oat_x".into(),
             ort: "ort_x".into(),
             expires_in: 1800,
-            actor: "alice".into(),
+            actor: "c:alice".into(),
+            kind: Kind::Carbon,
             org: org.map(str::to_owned),
         }
     }
@@ -703,7 +721,7 @@ mod tests {
 
     fn snapshot(org: &str, membership: &str, tags: Option<Vec<String>>) -> Authorization {
         Authorization {
-            public_id: Some("bot:tos".into()),
+            public_id: Some("si:bot".into()),
             org: org.into(),
             org_uuid: "01a0-org".into(),
             membership_id: membership.into(),
@@ -731,24 +749,44 @@ mod tests {
 
     #[test]
     fn a_snapshot_must_agree_with_the_introspection_it_rode_in_on() {
-        let auth = snapshot("tos", "m1", Some(vec!["ops".into()]));
-        assert!(agrees(&proof(true, Some("tos"), Some("m1"), Some(auth)), "tos", Some("m1")).is_ok());
-        // Live, org-bound, no snapshot (an IAM too old, or the stub before it learns to send one):
-        // still accepted on the introspection's own proof.
-        assert!(agrees(&proof(true, Some("tos"), Some("m1"), None), "tos", Some("m1")).is_ok());
+        let auth = snapshot("tos", "si:bot[tos]", Some(vec!["ops".into()]));
+        assert!(
+            agrees(&proof(true, Some("tos"), Some("si:bot[tos]"), Some(auth)), "si:bot", "tos", Some("si:bot[tos]"))
+                .is_ok()
+        );
+        // Undisclosed snapshot: the canonical membership still proves this actor and organization.
+        assert!(
+            agrees(&proof(true, Some("tos"), Some("si:bot[tos]"), None), "si:bot", "tos", Some("si:bot[tos]")).is_ok()
+        );
         // Inactive, wrong org, or a snapshot naming another membership: refused.
         assert_eq!(
-            agrees(&proof(false, Some("tos"), Some("m1"), None), "tos", Some("m1")).unwrap_err().code,
+            agrees(&proof(false, Some("tos"), Some("si:bot[tos]"), None), "si:bot", "tos", Some("si:bot[tos]"))
+                .unwrap_err()
+                .code,
             "iam_inconsistent"
         );
         assert_eq!(
-            agrees(&proof(true, Some("acme"), Some("m1"), None), "tos", Some("m1")).unwrap_err().code,
+            agrees(&proof(true, Some("acme"), Some("si:bot[tos]"), None), "si:bot", "tos", Some("si:bot[tos]"))
+                .unwrap_err()
+                .code,
             "iam_inconsistent"
         );
-        let wrong = snapshot("tos", "m2", None);
+        let wrong = snapshot("tos", "si:other[tos]", None);
         assert_eq!(
-            agrees(&proof(true, Some("tos"), Some("m1"), Some(wrong)), "tos", Some("m1")).unwrap_err().code,
+            agrees(&proof(true, Some("tos"), Some("si:bot[tos]"), Some(wrong)), "si:bot", "tos", Some("si:bot[tos]"))
+                .unwrap_err()
+                .code,
             "iam_inconsistent"
+        );
+        let other_actor = snapshot("tos", "si:bot[tos]", None);
+        assert!(
+            agrees(
+                &proof(true, Some("tos"), Some("si:bot[tos]"), Some(other_actor)),
+                "c:alice",
+                "tos",
+                Some("si:bot[tos]")
+            )
+            .is_err()
         );
     }
 

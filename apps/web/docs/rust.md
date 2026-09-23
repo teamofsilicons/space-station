@@ -31,18 +31,18 @@ let ss = SpaceClient::new("table-orders-…")?;
 ss.record(serde_json::json!({"id": "o-42", "amount": 12.5}));
 
 // Managing: an identity, an org, and typed calls. The short-lived token came from
-// `iam login --app-id 'tos>spacestation' --org tos` or `iam silicon-login --app-id 'tos>spacestation'`.
+// `iam login --app-id 'spacestation' --org tos` or `iam silicon-login --app-id 'spacestation'`.
 let url = space_station::default_url();
 let auth = space_station::exchange(&url, &slt, "tos")?;   // a value; the CLI is what stores one
 let space = Space::new(&url, auth)?.org("tos");
 let tables = space.tables()?;
-let key = space.create_table("orders", &["@alice", "tech"])?;
+let key = space.create_table("orders", &["@c:alice", "tech"])?;
 let rows = space.query("SELECT count() FROM orders", &Default::default())?;
 ```
 
 `Space::new` takes the Space Station URL and an `Auth`; `.org(id)` scopes it. Every org call
-needs one, and a session is bound to the org it signed in to — a silicon's is the suffix of its
-id, so pass that.
+needs one, and a session is bound to the organization selected through IAM. Pass that explicit
+organization; neither a Carbon ID (`c:alice`) nor a Silicon ID (`si:bot`) contains it.
 
 ## Stateless
 
@@ -75,8 +75,8 @@ that owns `~/.space-station/`, a signed-in user and a browser.
 `Auth::describe()` says what it is and never what it holds; `Debug` prints the same. There is no
 constructor that takes an IAM bearer, a refresh token or a silicon's long-lived `stk-` token, and
 nothing here prompts. **Never a credential, always a short-lived token**: a carbon or a silicon
-obtains one from IAM by their own means — `iam login --app-id 'tos>spacestation' --org o`, `iam
-silicon-login --app-id 'tos>spacestation'`, or the browser — and hands that over; Space Station
+obtains one from IAM by their own means — `iam login --app-id 'spacestation' --org o`, `iam
+silicon-login --app-id 'spacestation'`, or the browser — and hands that over; Space Station
 exchanges it once and holds the resulting session itself.
 
 Two actions produce a session without keeping one, and both are brokered by the backend, because
