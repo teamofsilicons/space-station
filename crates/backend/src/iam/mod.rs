@@ -37,7 +37,10 @@ impl Identity {
     /// has said otherwise. Membership itself is never read here; the session proved it.
     pub async fn resolve(state: &AppState, org: &str, actor: &str) -> Result<Identity, ApiError> {
         let tags = mirrored_tags(state, org, actor).await?.unwrap_or_default();
-        Ok(Identity { kind: Kind::of(actor), id: actor.to_owned(), org: org.to_owned(), tags })
+        let kind = Kind::of(actor).ok_or_else(|| {
+            ApiError::unauthorized("identity_migration_required", "migrate stored identities before signing in")
+        })?;
+        Ok(Identity { kind, id: actor.to_owned(), org: org.to_owned(), tags })
     }
 }
 
@@ -57,9 +60,16 @@ pub enum Kind {
 }
 
 impl Kind {
-    /// Silicon ids are `handle:org`; a carbon id never carries a colon.
-    pub fn of(actor: &str) -> Kind {
-        if actor.contains(':') { Kind::Silicon } else { Kind::Carbon }
+    /// Full IAM public identities. Organization authority is always supplied separately.
+    pub fn of(actor: &str) -> Option<Kind> {
+        let (kind, handle, max) = if let Some(handle) = actor.strip_prefix("c:") {
+            (Kind::Carbon, handle, 30)
+        } else {
+            (Kind::Silicon, actor.strip_prefix("si:")?, 50)
+        };
+        ((3..=max).contains(&handle.len())
+            && handle.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'-')))
+        .then_some(kind)
     }
 
     pub fn as_str(self) -> &'static str {
@@ -67,5 +77,23 @@ impl Kind {
             Kind::Carbon => "carbon",
             Kind::Silicon => "silicon",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Kind;
+
+    #[test]
+    fn actor_namespaces_and_handle_limits_are_explicit() {
+        assert_eq!(Kind::of("c:alice0"), Some(Kind::Carbon));
+        assert_eq!(Kind::of("si:bot"), Some(Kind::Silicon));
+        assert_eq!(Kind::of(&format!("c:{}", "a".repeat(30))), Some(Kind::Carbon));
+        assert_eq!(Kind::of(&format!("si:{}", "a".repeat(50))), Some(Kind::Silicon));
+        for id in ["alice", "bot:tos", "c:ab", "si:ab", "c:Alice", "si:bot:tos", "c:si:bot"] {
+            assert_eq!(Kind::of(id), None, "{id}");
+        }
+        assert_eq!(Kind::of(&format!("c:{}", "a".repeat(31))), None);
+        assert_eq!(Kind::of(&format!("si:{}", "a".repeat(51))), None);
     }
 }

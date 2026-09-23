@@ -31,6 +31,7 @@ export function durationMs(s: unknown): number | null {
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
+const ACTOR = /^@(c:[a-z0-9_-]{3,30}|si:[a-z0-9_-]{3,50})$/;
 
 /** `body` is set only when `errors` is empty. */
 export function parseDefinition(text: string): { body: Body | null; errors: string[] } {
@@ -67,9 +68,10 @@ export function parseDefinition(text: string): { body: Body | null; errors: stri
     if (ms === null) bad(`${k}: like "2s", "10m" or "1h"`);
     else if (ms > max) bad(`${k}: at most ${label}`);
   }
-  if (!isStrings(d.access)) bad('access: an array of "@actor" ids and tag names');
-  if (d.recipients !== undefined && (!isStrings(d.recipients) || !d.recipients.every((r) => /^(@|webhook:)./.test(r))))
-    bad('recipients: an array of "@actor" or "webhook:<id>"');
+  if (!isStrings(d.access) || d.access.some((a) => a.startsWith("@") && !ACTOR.test(a)))
+    bad('access: an array of "@c:<handle>", "@si:<handle>" and tag names');
+  if (d.recipients !== undefined && (!isStrings(d.recipients) || !d.recipients.every((r) => ACTOR.test(r) || /^webhook:.+/.test(r))))
+    bad('recipients: an array of "@c:<handle>", "@si:<handle>" or "webhook:<id>"');
 
   if (errors.length) return { body: null, errors };
   const { recipients = [], ...def } = d as NotificationDef & { recipients?: string[] };

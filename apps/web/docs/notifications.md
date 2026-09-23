@@ -15,8 +15,8 @@ webhook) and webhooks.
   "sql": "SELECT record.id::String AS dedup_key, concat('Order ', record.id::String) AS text, map('amount', record.amount::String) AS metadata FROM orders WHERE record.amount::Float64 > 100",
   "delay": "2s",
   "cooldown": "10m",
-  "access": ["@alice", "ops"],
-  "recipients": ["@alice", "webhook:7f3a1c22-9b40-4d2e-9a1e-0f5c3b8e6d11"]
+  "access": ["@c:alice", "ops"],
+  "recipients": ["@c:alice", "webhook:7f3a1c22-9b40-4d2e-9a1e-0f5c3b8e6d11"]
 }
 ```
 
@@ -92,20 +92,21 @@ are bad rows: nothing is sent and a dev error is recorded.
 
 ## Recipients and subscribing
 
-`recipients` is the delivery set. Anyone in `access` can **subscribe** (adds `@me`) and
+`recipients` is the delivery set. Anyone in `access` can **subscribe** (adds their complete `@c:` or `@si:` ID) and
 **unsubscribe** — in the app, or with `spacestation notifications subscribe <id>` /
 `unsubscribe <id>` — and whoever edits the definition can set the whole list. It must stay a
 subset of `access`; a `webhook:<id>` recipient is the exception, being a thing and not a member.
 
-- `@carbon` — appears in the Notifications tab and arrives live in any open window.
-- `@silicon` — is POSTed to the silicon's own delivery webhook (`spacestation webhook set`;
+- `@c:alice` — appears in the Notifications tab and arrives live in any open window.
+- `@si:bot` — is POSTed to the silicon's own delivery webhook (`spacestation webhook set`;
   `webhook rm` removes it, after which a delivery to that silicon is a dev error until it sets one).
 - `webhook:<id>` — is POSTed to that org webhook (Settings → Webhooks). Deleting the webhook
   (`spacestation webhooks rm <id>`) also removes it from every notification's recipients, so no
   definition keeps addressing a thing that no longer exists.
 
-Recipients, like access lists, are matched and not validated: `@bob` who is not in the org, or a
-tag nobody carries, is stored and delivers to nobody.
+Recipient actor syntax is validated, and each actor must be named in the access list, already
+subscribed, or the person saving it. Existence is not looked up: a well-formed `@c:bob` who is
+not in the org receives nothing. Tags are access entries, not recipients.
 
 ## Testing
 

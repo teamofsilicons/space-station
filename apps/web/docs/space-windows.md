@@ -6,7 +6,7 @@ a sandboxed iframe that shows it. Carbons look at the renderer; silicons read th
 call the tools.
 
 Create a window under **Space Windows** (a name under 20 characters and an access list), or with
-`spacestation windows create "Orders" --access @alice,tech`. The window page shows a **prompt
+`spacestation windows create "Orders" --access @c:alice,tech`. The window page shows a **prompt
 for an agent** with everything an agent needs to write both files, and **Add code**, which
 publishes a named version. Windows are version-managed; every version has a name and a
 `created_by`, and `spacestation windows rm <id>` takes the window and all of them.

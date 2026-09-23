@@ -33,7 +33,7 @@ def archive(path, entries):
 def package(root=ROOT, target_dir=None):
     target_dir = target_dir or Path(os.environ.get('CARGO_TARGET_DIR', root / 'target'))
     version = tomllib.loads((root / 'crates/cli/Cargo.toml').read_text())['package']['version']
-    manifest = f'format_version: 1\napp_id: tos>spacestation\nversion: {version}\nbin:\n  spacestation: main\ntargets:\n'
+    manifest = f'format_version: 1\napp_id: spacestation\nversion: {version}\nbin:\n  spacestation: main\ntargets:\n'
     payloads = []
     # Read every build before producing artifacts, so a missing platform fails the release.
     for asset, target, triple in TARGETS:

@@ -341,7 +341,7 @@ export function Windows() {
               <input
                 value={access()}
                 onInput={(e) => setAccess(e.currentTarget.value)}
-                placeholder="@alice, #engineering"
+                placeholder="@c:alice, #engineering"
               />
             </label>
             <p class="muted">You are added automatically.</p>
@@ -857,7 +857,7 @@ function NotificationEditor(p: {
         }}
       >
         <p class="muted">
-          SQL must return dedup_key, text, and metadata. Recipients are @actors
+          SQL must return dedup_key, text, and metadata. Recipients are @c:handle, @si:handle
           or webhook:&lt;id&gt;.{" "}
           <A href="/docs/notifications" target="_blank">
             Documentation

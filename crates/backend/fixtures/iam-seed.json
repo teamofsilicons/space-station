@@ -1,6 +1,6 @@
 {
   "app": {
-    "app_id": "tos>spacestation",
+    "app_id": "spacestation",
     "secret": "ask_stubstubstubstubstubstubstubstubstubstubabc",
     "webhook_secret": "whs_stubstubstubstubstubstubstubstubstubstubabc",
     "testing_key": "stubstubstubstubstubstubstubstub"
@@ -11,7 +11,7 @@
   ],
   "carbons": [
     {
-      "carbon_id": "alice",
+      "carbon_id": "c:alice",
       "name": "Alice",
       "memberships": {
         "tos": { "org_role": "owner", "tags": ["tech"] },
@@ -19,7 +19,7 @@
       }
     },
     {
-      "carbon_id": "bob",
+      "carbon_id": "c:bob",
       "name": "Bob",
       "memberships": {
         "tos": { "org_role": "member", "tags": ["ops"] }
@@ -28,7 +28,8 @@
   ],
   "silicons": [
     {
-      "silicon_id": "bot:tos",
+      "silicon_id": "si:bot",
+      "org_id": "tos",
       "name": "Bot",
       "token": "stk-0123456789abcdef0123456789abcdef",
       "tags": ["ops"]

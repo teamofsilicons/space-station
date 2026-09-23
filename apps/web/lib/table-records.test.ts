@@ -34,7 +34,7 @@ test("opening captures a precise visible record boundary and table details, incl
     return new Response(
       JSON.stringify(
         url.includes("/tables?retired=all")
-          ? [{ id: "orders", access: ["@alice"] }]
+          ? [{ id: "orders", access: ["@c:alice"] }]
           : {
               rows: [{ last: count === "0" ? "0" : "9007199254740993", count }],
             },
@@ -46,7 +46,7 @@ test("opening captures a precise visible record boundary and table details, incl
     const snapshot = await openSnapshot("tos", "orders");
     assert.equal(snapshot.cursor, "9007199254740993");
     assert.equal(snapshot.count, 40);
-    assert.deepEqual(snapshot.table.access, ["@alice"]);
+    assert.deepEqual(snapshot.table.access, ["@c:alice"]);
     assert.match(JSON.parse(calls[1].body!).sql, /toString\(max\(cursor\)\)/);
     count = "0";
     assert.equal((await openSnapshot("tos", "orders")).count, 0);

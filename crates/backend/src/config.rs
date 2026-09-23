@@ -27,7 +27,7 @@ pub struct Config {
     pub iam_url: String,
     /// Browser-facing IAM login endpoint; the API client still uses `iam_url`.
     pub iam_auth_url: String,
-    /// The canonical `{org}>{handle}` Application id, `tos>spacestation`.
+    /// The globally unique bare Application id, `spacestation`.
     pub iam_app_id: String,
     pub iam_app_secret: String,
     /// What IAM signs webhook deliveries with: caller-chosen, 32 to 512 characters.
@@ -87,7 +87,7 @@ impl Config {
             .ok_or("CLICKHOUSE_URL must be http(s)://user:password@host:port/database")?;
         let iam_app_id = need("SILICON_IAM_APP_ID")?;
         if !canonical_app_id(&iam_app_id) {
-            return Err("SILICON_IAM_APP_ID must be the canonical {org}>{handle} Application id".into());
+            return Err("SILICON_IAM_APP_ID must be the bare Application handle (for example spacestation)".into());
         }
         // 32 to 512 non-whitespace ASCII, exactly what silicon-iam-client's WebhookSecret accepts,
         // so a misconfigured secret fails here at boot rather than on every webhook delivery.
@@ -166,16 +166,10 @@ impl Config {
     }
 }
 
-/// IAM's `AppId`: `^[a-z0-9_-]{3,50}>[a-z][a-z0-9_-]{2,79}$`. A bare handle is what the retired
-/// SDK took, and what IAM now refuses, so it is refused here with a message that says why.
+/// IAM 4's `AppId`: `^[a-z][a-z0-9_-]{0,79}$`.
 fn canonical_app_id(id: &str) -> bool {
     let word = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-';
-    let Some((org, handle)) = id.split_once('>') else { return false };
-    (3..=50).contains(&org.len())
-        && org.bytes().all(word)
-        && (3..=80).contains(&handle.len())
-        && handle.as_bytes()[0].is_ascii_lowercase()
-        && handle.bytes().all(word)
+    (1..=80).contains(&id.len()) && id.as_bytes()[0].is_ascii_lowercase() && id.bytes().all(word)
 }
 
 /// `env` with the `KEY=value` lines of `path` underneath it: a real environment variable always
@@ -210,7 +204,7 @@ mod tests {
             ("DATABASE_URL", "postgres://dev:dev@localhost:5433/space_station"),
             ("REDIS_URL", "redis://localhost:6379"),
             ("SILICON_IAM_URL", "http://127.0.0.1:8099/"),
-            ("SILICON_IAM_APP_ID", "tos>spacestation"),
+            ("SILICON_IAM_APP_ID", "spacestation"),
             ("SILICON_IAM_APP_SECRET", "ask_x"),
             ("SILICON_IAM_WEBHOOK_SECRET", "whs_stubstubstubstubstubstubstubstubstubstubabc"),
         ])
@@ -232,7 +226,7 @@ mod tests {
         assert_eq!(cfg.key[..3], [0x00, 0x11, 0x22]);
         assert_eq!(cfg.iam_url, "http://127.0.0.1:8099");
         assert_eq!(cfg.iam_auth_url, "http://127.0.0.1:8099/api/v1/login");
-        assert_eq!(cfg.iam_app_id, "tos>spacestation");
+        assert_eq!(cfg.iam_app_id, "spacestation");
         assert!(cfg.iam_webhook_secret_previous.is_none() && cfg.iam_test_key.is_none());
         assert!(!cfg.allow_private_webhooks);
         assert!(cfg.telemetry_key.is_none());
@@ -296,14 +290,16 @@ mod tests {
     #[test]
     fn the_application_id_is_the_canonical_one_iam_issues() {
         let mut map = full();
-        map.insert("SILICON_IAM_APP_ID", "space-station");
-        assert_eq!(error(&map), "SILICON_IAM_APP_ID must be the canonical {org}>{handle} Application id");
-        for bad in ["tos>", ">spacestation", "tos>1station", "TOS>spacestation", "to>spacestation"] {
+        for good in ["a", "space-station", "obs-2"] {
+            map.insert("SILICON_IAM_APP_ID", good);
+            assert!(from(&map).is_ok(), "{good}");
+        }
+        for bad in ["tos>spacestation", "", "1station", "Spacestation", "space station"] {
             map.insert("SILICON_IAM_APP_ID", bad);
             assert!(from(&map).is_err(), "{bad:?} is not a canonical id");
         }
-        map.insert("SILICON_IAM_APP_ID", "acme_co>obs-2");
-        assert!(from(&map).is_ok());
+        assert!(canonical_app_id(&"a".repeat(80)));
+        assert!(!canonical_app_id(&"a".repeat(81)));
     }
 
     #[test]

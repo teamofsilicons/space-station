@@ -47,7 +47,7 @@ const WEBHOOKS: &[Col] = &[("ID", "id"), ("URL", "url"), ("CREATED_BY", "created
 const KEYS: &[Col] =
     &[("ID", "id"), ("SCOPES", "scopes"), ("CREATED_BY", "created_by"), ("LAST_USED_AT", "last_used_at")];
 const ORGS: &[Col] = &[("ID", "id"), ("NAME", "name")];
-const APP_ID: &str = "tos>spacestation";
+const APP_ID: &str = "spacestation";
 const REPOSITORY: &str = "https://github.com/teamofsilicons/space-station";
 const DOCS: &str = "https://spacestation.teamofsilicons.com/docs/cli";
 const CRATE: &str = "https://crates.io/crates/space-station";
@@ -87,8 +87,8 @@ enum Cmd {
         #[arg(long)]
         status: bool,
     },
-    /// Sign in with a short-lived token from `iam login --app-id 'tos>spacestation' --org <org>` or
-    /// `iam silicon-login --app-id 'tos>spacestation'`; never prompts
+    /// Sign in with a short-lived token from `iam login --app-id 'spacestation' --org <org>` or
+    /// `iam silicon-login --app-id 'spacestation'`; never prompts
     Auth {
         /// The short-lived token; `-` reads it from stdin; else $SPACE_STATION_TOKEN
         #[arg(value_name = "SLT")]

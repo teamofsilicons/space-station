@@ -487,7 +487,7 @@ async fn shape(state: &AppState, org: &str, plan: &sql::Plan) -> Result<(), ApiE
 fn recipient_in(entry: &str, access: &[String], current: &[String], saver: &str) -> bool {
     match Entry::parse(entry) {
         Entry::Actor(actor) => {
-            !actor.is_empty()
+            crate::iam::Kind::of(actor).is_some()
                 && (actor == saver || access.iter().any(|e| e == entry) || current.iter().any(|e| e == entry))
         }
         Entry::Webhook(id) => !id.is_empty(),
@@ -535,22 +535,22 @@ mod tests {
         );
         assert!(stored.get("description").is_none(), "an absent description stays absent");
         let full = json!({"name": "Big order", "description": "over 100", "enabled": false, "sql": "SELECT 1",
-            "triggers": [{"schedule": "0 * * * *"}], "delay": "500ms", "cooldown": "1d", "access": ["@alice"]});
+            "triggers": [{"schedule": "0 * * * *"}], "delay": "500ms", "cooldown": "1d", "access": ["@c:alice"]});
         let def: Def = serde_json::from_value(full.clone()).unwrap();
         assert_eq!(json!(def), full, "what a client sends round-trips field for field");
     }
 
     #[test]
     fn recipients_stay_inside_the_access_list() {
-        let access = strings(&["@alice", "ops"]);
-        let subscribed = strings(&["@bob"]);
-        assert!(recipient_in("@alice", &access, &[], "carol"), "named by the list");
-        assert!(recipient_in("@carol", &access, &[], "carol"), "the saver, who passed the list to get here");
-        assert!(recipient_in("@bob", &access, &subscribed, "carol"), "already subscribed, through a tag");
-        assert!(!recipient_in("@bob", &access, &[], "carol"), "another actor's tags are not ours to resolve");
-        assert!(recipient_in("webhook:abc", &[], &[], "carol"), "a webhook is a thing, not a member");
-        assert!(!recipient_in("ops", &access, &[], "carol"), "a tag is not a recipient");
-        assert!(!recipient_in("@", &access, &[], "carol"));
-        assert!(!recipient_in("webhook:", &access, &[], "carol"));
+        let access = strings(&["@c:alice", "ops"]);
+        let subscribed = strings(&["@c:bob"]);
+        assert!(recipient_in("@c:alice", &access, &[], "c:carol"), "named by the list");
+        assert!(recipient_in("@c:carol", &access, &[], "c:carol"), "the saver, who passed the list to get here");
+        assert!(recipient_in("@c:bob", &access, &subscribed, "c:carol"), "already subscribed, through a tag");
+        assert!(!recipient_in("@c:bob", &access, &[], "c:carol"), "another actor's tags are not ours to resolve");
+        assert!(recipient_in("webhook:abc", &[], &[], "c:carol"), "a webhook is a thing, not a member");
+        assert!(!recipient_in("ops", &access, &[], "c:carol"), "a tag is not a recipient");
+        assert!(!recipient_in("@", &access, &[], "c:carol"));
+        assert!(!recipient_in("webhook:", &access, &[], "c:carol"));
     }
 }

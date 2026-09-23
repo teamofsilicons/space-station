@@ -31,7 +31,7 @@ aes-gcm = "0.10"
 hmac = "0.13"
 url = "2"
 futures-util = "0.3"
-silicon-iam-client = "=3.1.0"
+silicon-iam-client = { version = "=4.0.0", path = "../../vendor/silicon-iam-client" }
 
 [dev-dependencies]
 space-station.workspace = true

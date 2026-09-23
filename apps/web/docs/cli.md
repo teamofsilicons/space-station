@@ -50,9 +50,9 @@ never reached it.
 
 **The org.** `--org <org>`, else `$SPACE_STATION_ORG`, else the org stored with the credential. A
 session is bound to the one org it signed in to (see [Credentials](/docs/credentials)), so that is
-the org to name at `login` or `auth`; a silicon's is the suffix of its id (`bot:tos`). When no
-org is known the command says so and names every way to set one, without asking the server
-anything.
+the org to name at `login` or `auth`. Both `c:alice` and `si:bot` keep their organization separate
+from their ID. With no saved or explicit org, login saves IAM's selected organization. Other
+commands require an org and report how to set one when it is missing.
 
 ## Sign in
 
@@ -78,8 +78,8 @@ refreshes the session for as long as it is used.
 short-lived token the `iam` CLI minted for this Application:
 
 ```
-iam login --app-id 'tos>spacestation' --org tos     # a carbon: IAM signs you in and prints the token
-iam silicon-login --app-id 'tos>spacestation'       # a silicon: the iam CLI holds the stk-, and it never leaves it
+iam login --app-id 'spacestation' --org tos     # a carbon: IAM signs you in and prints the token
+iam silicon-login --app-id 'spacestation'       # a silicon: the iam CLI holds the stk-, and it never leaves it
 spacestation auth <slt> --org tos
 ```
 
@@ -91,7 +91,7 @@ long-lived `stk-` or an Application secret — `auth` wants a short-lived token 
 
 **One session, one org.** The session is bound to the org it signed in to, and every later command
 works there. To work in another org, sign in again for it: `login --org other`, or a fresh token
-from `iam login --app-id 'tos>spacestation' --org other`. IAM completes either without a prompt
+from `iam login --app-id 'spacestation' --org other`. IAM completes either without a prompt
 while its own session is good. `use <org>` only changes the default for later commands; a session
 bound to another org answers `not_a_member` there until you sign in for it.
 
@@ -128,6 +128,7 @@ tables ls                                       every table you may see, with it
        rotate <id>                              prints the new key once; the old one dies
        rm <id>                                  the table and its records
        overview [--window 5h]                   1m 5m 15m 1h 5h 1d 7d 30d
+```
 
 The `tos` organization owns Space Station's own telemetry table like any other table. Provision
 it once with the normal command, store the one-time key in the deployment secret store, and send
@@ -147,6 +148,7 @@ sampled automatic browser analytics and `spacestationfrontendevents` for explici
 The browser never receives their table keys; its authenticated session posts batches to the
 frontend collector. Install the reusable package with `npm i @teamofsilicons/space-station-web`.
 
+```
 windows ls | get <id>                           a summary: id, name, access, current version and its author
         create <name> [--access a,b]            name under 20 characters
         edit <id> [--name n] [--access a,b]     rename, change who may open it, or both; prints the summary

@@ -17,7 +17,7 @@ An IAM token of any kind is refused with `unsupported_bearer`: Space Station nev
 
 ## Signing in: the short-lived token
 
-Space Station is an *Application* registered with Silicon IAM, `tos>spacestation`. IAM never hands
+Space Station is an *Application* registered with Silicon IAM, `spacestation`. IAM never hands
 an application a person's or a machine's credential; what it hands over is a **short-lived token**:
 minted for this Application, good for two minutes and for exactly one exchange, bound to who you
 are and to one organization. Space Station exchanges it with IAM — the only party that can, since
@@ -30,9 +30,9 @@ Three ways to obtain one, one way to spend it:
 
 | who | how the short-lived token is minted | how it is spent |
 |---|---|---|
-| a carbon in a browser | the app sends you to IAM's login for `tos>spacestation`, bound to the org you chose; IAM signs you in — or recognises you — and comes straight back | the callback exchanges it and sets the `ss_session` cookie |
-| a carbon in a terminal | `spacestation login --org o` opens that same page and catches the short-lived token on loopback (`?slt=…&state=…`); without a browser, `iam login --app-id 'tos>spacestation' --org o` prints one | either way `POST /api/auth/session {slt, org}` — `login` does it for you, `spacestation auth <slt>` does it with the one you pasted — and the `sscli-` session comes back over that POST, never in a URL |
-| a silicon | `iam silicon-login --app-id 'tos>spacestation'` prints one; the `iam` CLI is what holds the `stk-`, and it never leaves | `spacestation auth <slt> --org o` |
+| a carbon in a browser | the app sends you to IAM's login for `spacestation`, bound to the org you chose; IAM signs you in — or recognises you — and comes straight back | the callback exchanges it and sets the `ss_session` cookie |
+| a carbon in a terminal | `spacestation login --org o` opens that same page and catches the short-lived token on loopback (`?slt=…&state=…`); without a browser, `iam login --app-id 'spacestation' --org o` prints one | either way `POST /api/auth/session {slt, org}` — `login` does it for you, `spacestation auth <slt>` does it with the one you pasted — and the `sscli-` session comes back over that POST, never in a URL |
+| a silicon | `iam silicon-login --app-id 'spacestation'` prints one; the `iam` CLI is what holds the `stk-`, and it never leaves | `spacestation auth <slt> --org o` |
 
 **One session, one org.** A login is bound to an organization, and so is the session it becomes:
 `GET /me` answers `{id, kind, org, app}`, and every `/orgs/{org}/…` route of another org answers
@@ -66,20 +66,21 @@ moves the directory.
 
 ## Who you are, and tags
 
-Everyone is known by their IAM public id — `alice`, or `bot:tos` for a silicon — and shown as
-`@alice` and `@bot:tos`. There are no display names in Space Station: the handle is the name.
+Everyone is known by their complete IAM public ID — `c:alice`, or `si:bot` for a silicon — and
+shown as `@c:alice` and `@si:bot`. Organization membership comes from IAM; neither ID encodes an
+organization. There are no display names in Space Station: the public ID is the name.
 
 Access to tables, windows and notifications is decided by **access lists** — `@actor` ids and IAM
 **tag** names — checked against who you are in the org. Org owners and admins can read every table
 in their org. Whoever creates something is on its list. Deleting something needs the same access
 as reading it.
 
-An access list is **matched, never validated.** An Application may ask IAM nothing about its
-directory, so Space Station cannot know whether the tag `tech` or the member `@bob` exists; it
-stores what you wrote and compares it, exactly and case-sensitively, with what IAM reports about
-each person who signs in. A mistyped entry — `Tech`, `@alcie`, a tag that was renamed — is
-accepted without a word and grants nothing. When someone cannot see what you shared, compare the
-list (`spacestation tables get <id>`) with their `spacestation whoami` before anything else.
+Space Station validates actor syntax: use `@c:<handle>` or `@si:<handle>`, including the prefix
+exactly once. It does not look up whether a tag or member exists. Entries are matched exactly and
+case-sensitively against what IAM reports about each person who signs in. A well-formed but
+mistyped entry — `Tech`, `@c:alcie`, a tag that was renamed — grants nothing. When someone cannot
+see what you shared, compare the list (`spacestation tables get <id>`) with their
+`spacestation whoami` before anything else.
 
 Tags reach Space Station **with your login**: an Application may ask IAM nothing about its
 directory, but when Space Station verifies the session it just opened, IAM's answer carries your
@@ -141,7 +142,8 @@ deliveries; see [Notifications](/docs/notifications) for the header and how to v
 
 ## Carbons and silicons
 
-A silicon is a machine identity in IAM, shown like anyone else as `@handle:org`. It can do
+A silicon is a machine identity in IAM, shown as `@si:<handle>`. Its owning organization is
+separate IAM authority, and `whoami` reports the organization selected for its session. It can do
 everything a carbon can: create tables and windows, read the code of windows it has access to,
 get its access token, create and subscribe to notifications, query past events, write a window
 locally and publish it for carbons. A carbon can do everything a silicon can, from the same

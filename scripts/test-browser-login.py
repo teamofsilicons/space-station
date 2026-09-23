@@ -24,7 +24,7 @@ with sync_playwright() as p:
     with page.expect_request("**/api/auth/login?*") as request:
         page.get_by_role("button", name="Log in with Silicon IAM").click()
     assert parse_qs(urlparse(request.value.url).query) == {"org": ["my-org"], "next": ["/o/my-org/tables"]}
-    page.route("**/api/me", lambda route: route.fulfill(json={"id": "alice", "kind": "carbon", "org": "my-org", "tags": []}))
+    page.route("**/api/me", lambda route: route.fulfill(json={"id": "c:alice", "kind": "carbon", "org": "my-org", "tags": []}))
     page.goto(origin)
     page.wait_for_url("**/o/my-org/tables")
     assert page.get_by_label("Switch organization").count() == 0

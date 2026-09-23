@@ -343,7 +343,7 @@ fn a_secret_is_alone_on_stdout_and_its_note_is_only_on_stderr() {
     let home = home("secret");
     signed_in(&home, Some("tos"));
 
-    let ran = run(&home, &url, &[], &["tables", "create", "orders", "--access", "@alice,tech"]);
+    let ran = run(&home, &url, &[], &["tables", "create", "orders", "--access", "@c:alice,tech"]);
     assert!(ran.ok, "{}", ran.err);
     assert_eq!(ran.out, format!("{key}\n"), "stdout is the secret and nothing else");
     assert!(ran.err.contains("the table key, shown once; treat it like a password"), "{}", ran.err);
@@ -353,14 +353,14 @@ fn a_secret_is_alone_on_stdout_and_its_note_is_only_on_stderr() {
 #[test]
 fn a_list_is_columns_and_json_only_when_asked_and_that_json_is_one_line_in_a_pipe() {
     let rows = json!([{"id": "orders", "records": 12, "watermark": 130, "access": ["@a", "tech"],
-                       "created_by": "alice", "created_at": "2026-01-01T00:00:00Z"}]);
+                       "created_by": "c:alice", "created_at": "2026-01-01T00:00:00Z"}]);
     let (url, _) = station(vec![("GET /api/orgs/tos/tables", rows)]);
     let home = home("columns");
     signed_in(&home, Some("tos"));
 
     let columns = run(&home, &url, &[], &["tables", "ls"]);
     assert_eq!(columns.out.lines().next().unwrap(), "ID      RECORDS  WATERMARK  CREATED_BY  ACCESS   RETIRED_AT");
-    assert_eq!(columns.out.lines().nth(1).unwrap(), "orders  12       130        alice       @a,tech  -");
+    assert_eq!(columns.out.lines().nth(1).unwrap(), "orders  12       130        c:alice     @a,tech  -");
 
     let scripted = run(&home, &url, &[], &["tables", "ls", "--json"]);
     assert_eq!(scripted.out.lines().count(), 1, "a pipe gets one compact line: {}", scripted.out);
@@ -375,12 +375,12 @@ fn the_tables_group_reaches_every_table_route() {
         (
             "GET /api/orgs/tos/tables?retired=all",
             json!([{"id": "orders", "records": 1, "watermark": 1, "access": [],
-                                             "created_by": "alice", "created_at": "t"}]),
+                                             "created_by": "c:alice", "created_at": "t"}]),
         ),
         (
             "PUT /api/orgs/tos/tables/orders",
             json!({"id": "orders", "records": 1, "watermark": 1,
-                                                   "access": ["@bob"], "created_by": "alice", "created_at": "t"}),
+                                                   "access": ["@c:bob"], "created_by": "c:alice", "created_at": "t"}),
         ),
         ("POST /api/orgs/tos/tables/orders/rotate-key", json!({"key": "table-orders-1"})),
         ("DELETE /api/orgs/tos/tables/orders", Value::Null),
@@ -400,7 +400,7 @@ fn the_tables_group_reaches_every_table_route() {
     };
 
     assert!(ran(&["tables", "get", "orders"]).out.contains("\"orders\""));
-    assert!(ran(&["tables", "access", "orders", "--access", "@bob"]).out.contains("@bob"));
+    assert!(ran(&["tables", "access", "orders", "--access", "@c:bob"]).out.contains("@c:bob"));
     assert_eq!(ran(&["tables", "rotate", "orders"]).out, "table-orders-1\n");
     assert!(ran(&["tables", "rm", "orders"]).err.contains("table orders deleted"));
     assert!(ran(&["tables", "retire", "orders"]).err.contains("table orders retired"));
@@ -411,7 +411,7 @@ fn the_tables_group_reaches_every_table_route() {
         calls(&seen),
         [
             "GET /api/orgs/tos/tables?retired=all",
-            "PUT /api/orgs/tos/tables/orders {\"access\":[\"@bob\"]}",
+            "PUT /api/orgs/tos/tables/orders {\"access\":[\"@c:bob\"]}",
             "POST /api/orgs/tos/tables/orders/rotate-key",
             "DELETE /api/orgs/tos/tables/orders",
             "POST /api/orgs/tos/tables/orders/retire",
@@ -423,10 +423,10 @@ fn the_tables_group_reaches_every_table_route() {
 
 #[test]
 fn the_windows_group_reaches_every_window_route_and_hands_over_the_page_that_draws_it() {
-    let window = json!({"id": "w_01", "name": "Orders", "access": [], "created_by": "alice",
+    let window = json!({"id": "w_01", "name": "Orders", "access": [], "created_by": "c:alice",
                         "created_at": "t", "version": null});
     let (url, seen) = station(vec![
-        ("GET /api/me", json!({"id": "alice", "kind": "carbon", "org": "tos", "app": "https://app.example"})),
+        ("GET /api/me", json!({"id": "c:alice", "kind": "carbon", "org": "tos", "app": "https://app.example"})),
         ("GET /api/orgs/tos/windows", json!([window.clone()])),
         ("GET /api/orgs/tos/windows/w_01", window.clone()),
         ("POST /api/orgs/tos/windows", window.clone()),
@@ -452,7 +452,7 @@ fn the_windows_group_reaches_every_window_route_and_hands_over_the_page_that_dra
     };
 
     let list = ran(&["windows", "ls"]);
-    assert_eq!(list.out.lines().nth(1).unwrap(), "w_01  Orders  -        alice");
+    assert_eq!(list.out.lines().nth(1).unwrap(), "w_01  Orders  -        c:alice");
 
     let one = ran(&["windows", "get", "w_01"]);
     assert!(
@@ -504,7 +504,7 @@ fn the_windows_group_reaches_every_window_route_and_hands_over_the_page_that_dra
 fn the_notifications_group_sends_the_definition_file_as_its_two_arguments() {
     let notification = json!({"id": "n_01", "def": {"name": "New orders", "enabled": true, "triggers": [],
         "sql": "select 1", "delay": "2s", "cooldown": "10m", "access": []},
-        "recipients": ["@alice"], "enabled": true, "created_by": "alice", "created_at": "t"});
+        "recipients": ["@c:alice"], "enabled": true, "created_by": "c:alice", "created_at": "t"});
     let (url, seen) = station(vec![
         ("GET /api/orgs/tos/notifications", json!([notification.clone()])),
         ("GET /api/orgs/tos/notifications/n_01", notification.clone()),
@@ -512,7 +512,7 @@ fn the_notifications_group_sends_the_definition_file_as_its_two_arguments() {
         ("PUT /api/orgs/tos/notifications/n_01", notification.clone()),
         ("DELETE /api/orgs/tos/notifications/n_01", Value::Null),
         ("GET /api/orgs/tos/notifications/n_01/events", json!([])),
-        ("POST /api/orgs/tos/notifications/n_01/subscribe", json!({"recipients": ["@alice"]})),
+        ("POST /api/orgs/tos/notifications/n_01/subscribe", json!({"recipients": ["@c:alice"]})),
         ("DELETE /api/orgs/tos/notifications/n_01/subscribe", json!({"recipients": []})),
         ("POST /api/orgs/tos/notifications/n_01/test", json!({"rows": [], "last_trigger_at": null})),
     ]);
@@ -520,7 +520,7 @@ fn the_notifications_group_sends_the_definition_file_as_its_two_arguments() {
     signed_in(&home, Some("tos"));
     let file = home.join("new-orders.json");
     let def = json!({"name": "New orders", "triggers": [{"table": "orders"}], "sql": "select 1"});
-    fs::write(&file, json!({"def": def, "recipients": ["@alice"]}).to_string()).unwrap();
+    fs::write(&file, json!({"def": def, "recipients": ["@c:alice"]}).to_string()).unwrap();
     let path = file.to_str().unwrap();
     let ran = |args: &[&str]| {
         let ran = run(&home, &url, &[], args);
@@ -537,13 +537,13 @@ fn the_notifications_group_sends_the_definition_file_as_its_two_arguments() {
     assert!(ran(&["notifications", "edit", "n_01", path]).out.contains("n_01"));
     assert!(ran(&["notifications", "rm", "n_01"]).err.contains("notification n_01 deleted"));
     assert_eq!(ran(&["notifications", "events", "n_01"]).out, "[]\n");
-    assert_eq!(ran(&["notifications", "subscribe", "n_01"]).out, "[\"@alice\"]\n");
+    assert_eq!(ran(&["notifications", "subscribe", "n_01"]).out, "[\"@c:alice\"]\n");
     assert_eq!(ran(&["notifications", "unsubscribe", "n_01"]).out, "[]\n");
     assert!(ran(&["notifications", "test", "n_01"]).out.contains("\"rows\":[]"));
 
     let created = calls(&seen).into_iter().find(|c| c.starts_with("POST /api/orgs/tos/notifications ")).unwrap();
     let body: Value = serde_json::from_str(created.splitn(3, ' ').nth(2).unwrap()).unwrap();
-    assert_eq!(body["recipients"], json!(["@alice"]));
+    assert_eq!(body["recipients"], json!(["@c:alice"]));
     assert_eq!(body["def"]["delay"], "2s", "the package fills in what the file left out");
     assert_eq!(body["def"]["triggers"], json!([{"table": "orders"}]));
 }
@@ -553,7 +553,7 @@ fn the_webhook_groups_print_each_secret_once_naming_what_it_belongs_to() {
     let (url, seen) = station(vec![
         (
             "GET /api/orgs/tos/webhooks",
-            json!([{"id": "wh_1", "url": "https://x.example/h", "created_by": "alice",
+            json!([{"id": "wh_1", "url": "https://x.example/h", "created_by": "c:alice",
                                                "created_at": "t"}]),
         ),
         ("POST /api/orgs/tos/webhooks", json!({"id": "wh_1", "url": "https://x.example/h", "secret": "whsec-1"})),
@@ -585,7 +585,7 @@ fn the_keys_and_token_groups_print_the_key_the_server_shows_once_and_the_token_i
     let (url, seen) = station(vec![
         (
             "GET /api/orgs/tos/api-keys",
-            json!([{"id": "k_1", "scopes": ["tables"], "created_by": "alice",
+            json!([{"id": "k_1", "scopes": ["tables"], "created_by": "c:alice",
                                                "created_at": "t", "last_used_at": null}]),
         ),
         ("POST /api/orgs/tos/api-keys", json!({"id": "k_1", "key": "apikey-1"})),
@@ -601,7 +601,7 @@ fn the_keys_and_token_groups_print_the_key_the_server_shows_once_and_the_token_i
         ran
     };
 
-    assert_eq!(ran(&["keys", "ls"]).out.lines().nth(1).unwrap(), "k_1  tables  alice       -");
+    assert_eq!(ran(&["keys", "ls"]).out.lines().nth(1).unwrap(), "k_1  tables  c:alice     -");
     let created = ran(&["keys", "create", "--scopes", "tables,notifications"]);
     assert_eq!(created.out, "apikey-1\n");
     assert!(created.err.contains("the api key for k_1, shown once"), "{}", created.err);
@@ -638,7 +638,7 @@ fn the_query_and_errors_groups_print_what_the_server_answered() {
 #[test]
 fn whoami_orgs_use_and_logout_are_the_credential_group_and_logout_ends_the_session() {
     let (url, seen) = station(vec![
-        ("GET /api/orgs/tos/me", json!({"kind": "carbon", "id": "alice", "org": "tos", "tags": ["tech"]})),
+        ("GET /api/orgs/tos/me", json!({"kind": "carbon", "id": "c:alice", "org": "tos", "tags": ["tech"]})),
         ("GET /api/orgs", json!([{"id": "tos", "name": "Team of Silicons"}, {"id": "acme"}])),
         ("POST /api/auth/logout", Value::Null),
     ]);
@@ -646,7 +646,7 @@ fn whoami_orgs_use_and_logout_are_the_credential_group_and_logout_ends_the_sessi
     signed_in(&home, Some("tos"));
 
     let who = run(&home, &url, &[], &["whoami"]);
-    assert_eq!(who.out.trim(), r#"{"id":"alice","kind":"carbon","org":"tos","tags":["tech"]}"#);
+    assert_eq!(who.out.trim(), r#"{"id":"c:alice","kind":"carbon","org":"tos","tags":["tech"]}"#);
     assert!(who.err.contains("stored: a session"), "what is stored is named, never shown: {}", who.err);
     assert_eq!(run(&home, &url, &[], &["orgs"]).out, "ID    NAME\ntos   Team of Silicons\nacme  -\n");
 
@@ -704,7 +704,7 @@ fn login_opens_the_browser_binds_the_org_and_exchanges_the_short_lived_redirect(
             assert!(headers.lines().any(|l| l == "authorization: bearer sscli-fresh"), "{headers}");
             return (
                 200,
-                json!({"id": "alice", "kind": "carbon", "org": "tos", "app": "https://app.example"}).to_string(),
+                json!({"id": "c:alice", "kind": "carbon", "org": "tos", "app": "https://app.example"}).to_string(),
             );
         }
         if route == "/api/auth/session" {
@@ -750,10 +750,10 @@ fn login_opens_the_browser_binds_the_org_and_exchanges_the_short_lived_redirect(
 #[test]
 fn token_login_in_a_fresh_home_saves_the_session_org_and_supports_the_auth_lifecycle() {
     for command in ["login", "auth"] {
-        let identity = json!({"kind": "silicon", "id": "bot:tos", "org": "tos", "tags": ["ops"]});
+        let identity = json!({"kind": "silicon", "id": "si:bot", "org": "tos", "tags": ["ops"]});
         let (url, seen) = station(vec![
             ("POST /api/auth/session", json!({"token": "sscli-minted"})),
-            ("GET /api/me", json!({"id": "bot:tos", "kind": "silicon", "org": "tos", "app": "https://app.example"})),
+            ("GET /api/me", json!({"id": "si:bot", "kind": "silicon", "org": "tos", "app": "https://app.example"})),
             ("GET /api/orgs/tos/me", identity.clone()),
             ("POST /api/auth/logout", Value::Null),
         ]);
@@ -802,7 +802,7 @@ fn orgless_login_does_not_save_or_claim_success_when_session_org_discovery_fails
 fn auth_takes_a_short_lived_token_from_the_argument_stdin_or_the_environment_and_never_prompts() {
     let (url, seen) = station(vec![
         ("POST /api/auth/session", json!({"token": "sscli-minted"})),
-        ("GET /api/me", json!({"id": "bot:tos", "kind": "silicon", "org": "tos", "app": "https://app.example"})),
+        ("GET /api/me", json!({"id": "si:bot", "kind": "silicon", "org": "tos", "app": "https://app.example"})),
     ]);
     let home = home("auth");
 
@@ -865,8 +865,8 @@ fn auth_takes_a_short_lived_token_from_the_argument_stdin_or_the_environment_and
 
     let help = Command::new(BIN).args(["auth", "--help"]).output().unwrap();
     let help = String::from_utf8_lossy(&help.stdout);
-    assert!(help.contains("iam login --app-id 'tos>spacestation' --org <org>"), "{help}");
-    assert!(help.contains("iam silicon-login --app-id 'tos>spacestation'"), "{help}");
+    assert!(help.contains("iam login --app-id 'spacestation' --org <org>"), "{help}");
+    assert!(help.contains("iam silicon-login --app-id 'spacestation'"), "{help}");
     assert!(help.contains("never prompts"), "{help}");
     for word in ["stk", "sat_", "refresh"] {
         assert!(!help.to_lowercase().contains(word), "{word} has no place in the help: {help}");

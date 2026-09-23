@@ -29,9 +29,9 @@ From a terminal, the same two steps — a session is bound to the one org it sig
 
 ```
 spacestation login --org tos       a carbon with a browser
-spacestation auth <slt> --org tos  instead, with a short-lived token the iam CLI minted: `iam login --app-id 'tos>spacestation' --org tos`
-                                    for a carbon, `iam silicon-login --app-id 'tos>spacestation'` for a silicon (see the CLI page)
-spacestation tables create orders --access @alice,tech
+spacestation auth <slt> --org tos  instead, with a short-lived token the iam CLI minted: `iam login --app-id 'spacestation' --org tos`
+                                    for a carbon, `iam silicon-login --app-id 'spacestation'` for a silicon (see the CLI page)
+spacestation tables create orders --access @c:alice,tech
 ```
 
 A table id is unique in the org and matches `^[a-z0-9]{1,50}$`. You are shown the **table key**
@@ -45,10 +45,10 @@ It is stored hashed. There is one key per table; rotating it (`spacestation tabl
 orders`, or Tables → rotate key) invalidates the old one at once. Access to a table is a list of
 `@actor` ids and IAM tag names — the union of them can see it; whoever creates it is added to the
 list. Tags come with the login itself — IAM reports them when Space Station verifies your session
-— and IAM's webhooks keep them current; see [Credentials](/docs/credentials). An access list is
-**matched, never validated**: Space Station cannot ask IAM whether `tech` or `@bob` exist, so a
-mistyped entry is accepted and simply grants nobody anything. Check spelling and case (`tech`,
-not `Tech`) when someone who should see a table does not.
+— and IAM's webhooks keep them current; see [Credentials](/docs/credentials). Actor entries must
+use complete IDs such as `@c:alice` or `@si:bot`. Space Station validates that syntax but does
+not look up whether `tech` or `@c:bob` exists, so a well-formed, mistyped entry grants nobody
+anything. Check spelling and case (`tech`, not `Tech`) when someone who should see a table does not.
 
 Use `spacestation tables retire orders` to stop writes and move the table behind **Retired**.
 Its records remain queryable and existing Space Windows keep their references. Use

@@ -1,5 +1,5 @@
 //! A local Silicon IAM look-alike for development and tests, written against the live contract
-//! observed on 2026-09-05 (docs/ARCHITECTURE.md, "IAM stub"). One seeded Application signs
+//! with canonical identifiers from IAM SDK 4 (docs/ARCHITECTURE.md, "IAM stub"). One seeded Application signs
 //! people in through short-lived tokens: `GET /api/v1/login` stands in for IAM's login page,
 //! `POST /api/v1/app-auth/short-lived-tokens` mints one for a signed-in carbon or silicon, and
 //! `POST /api/v1/app-auth/tokens` exchanges or refreshes it with rotating, reuse-fatal refresh
@@ -47,7 +47,7 @@ use space_station_shared::secrets::sha256_hex;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use crate::crypto::hmac_sha256_hex;
+use crate::{crypto::hmac_sha256_hex, iam::Kind};
 
 /// Everything the stub knows about the world. Loaded once, never mutated.
 #[derive(Clone, Serialize, Deserialize)]
@@ -66,7 +66,7 @@ fn default_ttl() -> i64 {
     1800
 }
 
-/// The one registered Application: its canonical `{org}>{handle}` id, the `ask_` secret it
+/// The one registered Application: its bare handle, the `ask_` secret it
 /// presents as HTTP Basic, the secret its webhooks are signed with, and the key a testing
 /// environment stamps into the `test` envelope (without one the stub cannot send that envelope).
 #[derive(Clone, Serialize, Deserialize)]
@@ -86,7 +86,7 @@ pub struct Org {
     pub tags: Vec<String>,
 }
 
-/// A human; `memberships` is keyed by `org_id`. Any `{carbon_id}@…` address signs them in.
+/// A human; `memberships` is keyed by `org_id`. Any `{handle}@…` address signs them in.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Carbon {
     pub carbon_id: String,
@@ -100,10 +100,11 @@ pub struct Membership {
     pub org_role: String,
 }
 
-/// A machine identity `handle:org_id`: its org is the suffix, its role is always `member`.
+/// A machine identity `si:<handle>` with an explicit owning org; its role is always `member`.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Silicon {
     pub silicon_id: String,
+    pub org_id: String,
     pub name: String,
     pub token: String,
     pub tags: Vec<String>,
@@ -121,6 +122,17 @@ pub fn seed_from_file(path: impl AsRef<std::path::Path>) -> io::Result<Seed> {
 /// Binds `addr` (port 0 picks a free one) and serves on a background task until that task is
 /// aborted. Returns the bound address.
 pub async fn serve(seed: Seed, addr: SocketAddr) -> io::Result<(SocketAddr, JoinHandle<()>)> {
+    if seed.carbons.iter().any(|c| Kind::of(&c.carbon_id) != Some(Kind::Carbon))
+        || seed
+            .silicons
+            .iter()
+            .any(|s| Kind::of(&s.silicon_id) != Some(Kind::Silicon) || !seed.orgs.iter().any(|o| o.org_id == s.org_id))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "seed requires canonical actor IDs and explicit Silicon org_id",
+        ));
+    }
     let stub = Stub { seed, http: reqwest::Client::new(), state: Mutex::default() };
     listen(router(Arc::new(stub)), addr).await
 }
@@ -313,23 +325,19 @@ fn org_uuid(org: &str) -> Uuid {
     stable_id(&format!("org:{org}"))
 }
 
-fn principal_id(actor: &str) -> Uuid {
-    stable_id(&format!("principal:{actor}"))
-}
-
 /// The membership row IAM would have: the same id from introspection and from a webhook.
-fn membership_id(org: &str, actor: &str) -> Uuid {
-    stable_id(&format!("membership:{org}:{actor}"))
+fn membership_id(org: &str, actor: &str) -> String {
+    format!("{actor}[{org}]")
 }
 
-/// The kind comes from the colon, as everywhere in Space Station.
+/// Seed loading and delivery validation require a canonical actor namespace.
 fn kind(actor: &str) -> &'static str {
-    if actor.contains(':') { "silicon" } else { "carbon" }
+    Kind::of(actor).expect("validated canonical actor ID").as_str()
 }
 
 /// An `ActorRef`.
 fn actor_json(actor: &str) -> Value {
-    json!({"principal_id": principal_id(actor), "type": kind(actor), "public_id": actor})
+    json!({"type": kind(actor), "public_id": actor})
 }
 
 /// A `TagSummary`; tags belong to an org.
@@ -346,7 +354,8 @@ fn is_org_id(value: &[u8]) -> bool {
 /// The `resource` reference every member row carries: the membership, its principal, its version.
 fn resource(org: &str, actor: &str, status: &str, version: u64) -> Value {
     json!({
-        "id": membership_id(org, actor), "principal_id": principal_id(actor), "principal_type": kind(actor),
+        "id": membership_id(org, actor), "membership_id": membership_id(org, actor),
+        "principal_id": actor, "principal_type": kind(actor),
         "status": status, "type": "organization_membership", "version": version,
     })
 }
@@ -455,16 +464,12 @@ impl Stub {
 
     /// `actor`'s seeded membership in `org`: display name, org role and tag names.
     fn member(&self, org: &str, actor: &str) -> Option<(&str, &str, &[String])> {
-        match actor.rsplit_once(':') {
-            Some((_, suffix)) => {
-                let s = self.seed.silicons.iter().find(|s| s.silicon_id == actor)?;
-                (suffix == org).then_some((s.name.as_str(), "member", s.tags.as_slice()))
-            }
-            None => {
-                let c = self.carbon(actor)?;
-                let m = c.memberships.get(org)?;
-                Some((c.name.as_str(), m.org_role.as_str(), m.tags.as_slice()))
-            }
+        if let Some(s) = self.seed.silicons.iter().find(|s| s.silicon_id == actor) {
+            (s.org_id == org).then_some((s.name.as_str(), "member", s.tags.as_slice()))
+        } else {
+            let c = self.carbon(actor)?;
+            let m = c.memberships.get(org)?;
+            Some((c.name.as_str(), m.org_role.as_str(), m.tags.as_slice()))
         }
     }
 
@@ -499,7 +504,7 @@ impl Stub {
         let seeded = self.member(org, &row.actor);
         let name = row.display_name.as_deref().or(seeded.map(|m| m.0)).unwrap_or(&row.actor);
         let role = seeded.map_or("member", |m| m.1);
-        let (k, pid, mid) = (kind(&row.actor), principal_id(&row.actor), membership_id(org, &row.actor));
+        let (k, mid) = (kind(&row.actor), membership_id(org, &row.actor));
         let trust = json!({"boundary": "internal", "level": "not_trusted"});
         json!({
             "membership": {
@@ -516,7 +521,7 @@ impl Stub {
                 "updated_at": EPOCH, "version": 1,
             },
             "principal": {
-                "created_at": EPOCH, "description": null, "display_name": name, "principal_id": pid,
+                "created_at": EPOCH, "description": null, "display_name": name, "principal_id": row.actor,
                 "profile_photo": format!("https://iam.invalid/pfp/{k}?id={}", row.actor), "public_id": row.actor,
                 "status": "active", "timezone": "UTC", "type": k, "updated_at": at, "version": version,
             },
@@ -688,7 +693,9 @@ async fn login(State(stub): State<Shared>, uri: Uri, Query(q): Params) -> Respon
     let Some(carbon) = get("as") else {
         let query = escape(uri.query().unwrap_or_default());
         let link = |c: &Carbon| {
-            format!("<li><a href=\"?{query}&amp;as={0}\">{1} (@{0})</a></li>", c.carbon_id, escape(&c.name))
+            let selector =
+                url::form_urlencoded::Serializer::new(String::new()).append_pair("as", &c.carbon_id).finish();
+            format!("<li><a href=\"?{query}&amp;{selector}\">{} (@{})</a></li>", escape(&c.name), c.carbon_id)
         };
         let links: String = stub.seed.carbons.iter().map(link).collect();
         let page = format!("<!doctype html><title>Silicon IAM stub</title><h1>Sign in to {app}</h1><ul>{links}</ul>");
@@ -722,8 +729,11 @@ async fn login(State(stub): State<Shared>, uri: Uri, Query(q): Params) -> Respon
 async fn challenge(State(stub): State<Shared>, headers: HeaderMap, body: Bytes) -> Response {
     stub.lock().idempotent(&headers, digest("challenges", &body), |st| {
         let input: Value = json_body(&headers, &body)?;
-        let id = input["carbon_id"].as_str().or_else(|| input["email"].as_str()?.split('@').next());
-        let carbon = id.and_then(|id| stub.carbon(id)).ok_or(NOT_FOUND)?;
+        let id = input["carbon_id"]
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| Some(format!("c:{}", input["email"].as_str()?.split_once('@')?.0)));
+        let carbon = id.as_deref().and_then(|id| stub.carbon(id)).ok_or(NOT_FOUND)?;
         let (session, expires_at) = (Uuid::now_v7(), now() + 600);
         st.challenges.insert(session, (carbon.carbon_id.clone(), expires_at));
         Ok((StatusCode::CREATED, json!({"session_id": session, "expires_at": rfc3339(expires_at)})))
@@ -797,7 +807,7 @@ async fn short_lived(State(stub): State<Shared>, headers: HeaderMap, body: Bytes
         if input["app_id"] != stub.seed.app.app_id {
             return Err(UNKNOWN_APP);
         }
-        let own = || actor.rsplit_once(':').map(|(_, org)| org.to_owned());
+        let own = || stub.seed.silicons.iter().find(|s| s.silicon_id == actor).map(|s| s.org_id.clone());
         let org = input["org_id"].as_str().map_or_else(own, |o| Some(o.to_owned()));
         if let Some(org) = &org
             && stub.member(org, &actor).is_none()
@@ -860,7 +870,7 @@ async fn introspect(State(stub): State<Shared>, headers: HeaderMap, body: Bytes)
     let version = delivered.map_or(1, |d| d.version);
     let app = &stub.seed.app.app_id;
     let mut body = json!({
-        "active": true, "principal_id": principal_id(&f.actor), "actor_type": kind(&f.actor), "client_id": app,
+        "active": true, "public_id": f.actor, "actor_type": kind(&f.actor), "client_id": app,
         "session_id": f.session, "scope": SCOPE, "audience": app, "issued_at": t.issued_at,
         "expires_at": t.expires_at, "authorization_epoch": version,
     });
@@ -870,7 +880,7 @@ async fn introspect(State(stub): State<Shared>, headers: HeaderMap, body: Bytes)
         if let (true, Some((_, role, seeded))) = (st.access.contains_key(token), stub.member(org, &f.actor)) {
             let tags = delivered.map_or(seeded, |d| d.tags.as_slice());
             body["authorization"] = json!({
-                "principal_id": principal_id(&f.actor), "actor_type": kind(&f.actor), "public_id": f.actor,
+                "actor_type": kind(&f.actor), "public_id": f.actor,
                 "organization_id": org_uuid(org), "org_id": org, "membership_id": membership_id(org, &f.actor),
                 "membership_version": version, "authorization_epoch": version, "audience": app,
                 "testing_environment_id": stub.seed.app.testing_key.as_ref().map(|_| stable_id("testing-environment")),
@@ -905,9 +915,9 @@ async fn me(State(stub): State<Shared>, headers: HeaderMap) -> Result<Response, 
     let actor = stub.iam_actor(&headers)?;
     let c = stub.carbon(&actor).ok_or(FORBIDDEN)?;
     let body = json!({
-        "principal_id": principal_id(&c.carbon_id), "carbon_id": c.carbon_id, "display_name": c.name,
+        "carbon_id": c.carbon_id, "display_name": c.name,
         "description": null, "profile_photo": format!("https://iam.invalid/pfp/carbon?id={}", c.carbon_id),
-        "timezone": "UTC", "email": format!("{}@example.invalid", c.carbon_id), "phone_number": "",
+        "timezone": "UTC", "email": format!("{}@example.invalid", c.carbon_id.strip_prefix("c:").unwrap()), "phone_number": "",
         "status": "active", "version": 1, "created_at": EPOCH, "updated_at": EPOCH,
     });
     Ok(([(header::ETAG, "\"1\"")], Json(body)).into_response())
@@ -996,6 +1006,9 @@ fn active() -> String {
 /// assert on it.
 async fn deliver(State(stub): State<Shared>, headers: HeaderMap, body: Bytes) -> Result<Json<Value>, Fail> {
     let d: Delivery = json_body(&headers, &body)?;
+    if d.members.iter().any(|m| Kind::of(&m.actor).is_none()) {
+        return Err(INVALID);
+    }
     let removal = d.event_type.ends_with(".removed.v1");
     let ts = now();
     let at = rfc3339(ts);
@@ -1010,7 +1023,7 @@ async fn deliver(State(stub): State<Shared>, headers: HeaderMap, body: Bytes) ->
             st.record(&d.org, &m.actor, Delivered { status, tags: m.tags.clone(), version: d.version });
         }
     }
-    let aggregate = d.members.first().map_or(org_uuid(&d.org), |m| membership_id(&d.org, &m.actor));
+    let aggregate = d.members.first().map_or_else(|| org_uuid(&d.org).to_string(), |m| membership_id(&d.org, &m.actor));
     let metadata = json!({
         "spec_version": "1.0", "event_id": d.event_id, "event_type": d.event_type, "occurred_at": at,
         "organization_id": org_uuid(&d.org),
@@ -1057,8 +1070,8 @@ mod tests {
 
     use super::*;
 
-    const APP: &str = "tos>spacestation";
-    const APP_Q: &str = "tos%3Espacestation";
+    const APP: &str = "spacestation";
+    const APP_Q: &str = "spacestation";
     const SECRET: &str = "ask_stubstubstubstubstubstubstubstubstubstubabc";
     const WEBHOOK_SECRET: &str = "whs_stubstubstubstubstubstubstubstubstubstubabc";
     const STK: &str = "stk-0123456789abcdef0123456789abcdef";
@@ -1150,7 +1163,7 @@ mod tests {
     }
 
     async fn silicon_login(base: &str, token: &str) -> reqwest::Response {
-        let body = json!({"silicon_id": "bot:tos", "silicon_token": token});
+        let body = json!({"silicon_id": "si:bot", "silicon_token": token});
         post_json(base, "/api/v1/silicon-auth/token", Some(&key()), None, &body).await
     }
 
@@ -1232,9 +1245,9 @@ mod tests {
         let page = http().get(&login).send().await.unwrap();
         assert_eq!(page.status(), 200);
         let html = page.text().await.unwrap();
-        assert!(html.contains("as=alice") && html.contains("as=bob"), "{html}");
+        assert!(html.contains("as=c%3Aalice") && html.contains("as=c%3Abob"), "{html}");
 
-        let res = http().get(format!("{login}&as=alice")).send().await.unwrap();
+        let res = http().get(format!("{login}&as=c%3Aalice")).send().await.unwrap();
         assert_eq!(res.status(), 302);
         let location = res.headers()[header::LOCATION].to_str().unwrap().to_owned();
         let (redirect_uri, slt) = location.split_once("&slt=").unwrap();
@@ -1251,23 +1264,21 @@ mod tests {
         assert_eq!(tokens["token_type"], "Bearer");
         assert_eq!(tokens["expires_in"], 1800);
         assert_eq!(tokens["scope"], SCOPE);
-        assert_eq!(
-            tokens["actor"],
-            json!({"principal_id": principal_id("alice"), "type": "carbon", "public_id": "alice"})
-        );
+        assert_eq!(tokens["actor"], json!({"type": "carbon", "public_id": "c:alice"}));
         assert_eq!(tokens["org_id"], "tos", "the login was bound to tos");
         let again = exchange(&base, &[("app_id", APP), ("slt", slt)]).await;
         assert_eq!(err(again).await, "400 invalid_grant", "an slt is good for exactly one exchange");
 
-        let unknown_app = format!("{base}/api/v1/login?app_id=tos%3Enope&redirect_uri=http%3A%2F%2Fx%2Fcb&as=alice");
+        let unknown_app =
+            format!("{base}/api/v1/login?app_id=tos%3Enope&redirect_uri=http%3A%2F%2Fx%2Fcb&as=c%3Aalice");
         assert_eq!(err(http().get(unknown_app).send().await.unwrap()).await, "400 invalid_request");
         assert_eq!(err(http().get(format!("{login}&as=mallory")).send().await.unwrap()).await, "404 not_found");
         let outsider =
-            format!("{base}/api/v1/login?app_id={APP_Q}&redirect_uri=http%3A%2F%2Fx%2Fcb&org_id=acme&as=bob");
+            format!("{base}/api/v1/login?app_id={APP_Q}&redirect_uri=http%3A%2F%2Fx%2Fcb&org_id=acme&as=c%3Abob");
         assert_eq!(err(http().get(outsider).send().await.unwrap()).await, "403 organization_context_forbidden");
 
         // With nowhere to redirect, the token is shown on a page, as for a terminal.
-        let shown = http().get(format!("{base}/api/v1/login?app_id={APP_Q}&as=bob")).send().await.unwrap();
+        let shown = http().get(format!("{base}/api/v1/login?app_id={APP_Q}&as=c%3Abob")).send().await.unwrap();
         assert_eq!(shown.status(), 200);
         assert!(shown.text().await.unwrap().contains("<code>oac_"));
     }
@@ -1275,7 +1286,7 @@ mod tests {
     #[tokio::test]
     async fn exchange_wants_a_form_body_basic_auth_and_an_idempotency_key() {
         let base = start(default_seed()).await;
-        let alice = carbon_login(&base, "alice").await;
+        let alice = carbon_login(&base, "c:alice").await;
         let cat = alice["access_token"].as_str().unwrap();
         let slt = slt(&base, cat, Some("tos")).await;
         let url = format!("{base}/api/v1/app-auth/tokens");
@@ -1298,7 +1309,7 @@ mod tests {
         let bad_basic = bad_basic.form(&form).send().await.unwrap();
         assert_eq!(bad_basic.headers()[header::WWW_AUTHENTICATE], "Basic realm=\"silicon-iam\"");
         assert_eq!(err(bad_basic).await, "401 invalid_client");
-        let mismatch = exchange(&base, &[("app_id", "tos>nope"), ("slt", &slt)]).await;
+        let mismatch = exchange(&base, &[("app_id", "nope"), ("slt", &slt)]).await;
         assert_eq!(err(mismatch).await, "401 invalid_client", "the form's app_id must be the Basic user");
         let both = exchange(&base, &[("app_id", APP), ("slt", &slt), ("refresh_token", "ort_x")]).await;
         assert_eq!(err(both).await, "400 invalid_request");
@@ -1326,13 +1337,13 @@ mod tests {
         let slt = slt(&base, sat, None).await;
         let first: Value = exchange(&base, &[("app_id", APP), ("slt", &slt)]).await.json().await.unwrap();
         assert_eq!(first["org_id"], "tos", "a silicon's login is bound to its own org by default");
-        assert_eq!(first["actor"]["public_id"], "bot:tos");
+        assert_eq!(first["actor"]["public_id"], "si:bot");
         let (oat1, ort1) = (token(&first, "access_token", "oat_"), token(&first, "refresh_token", "ort_"));
         let intro = introspect(&base, oat1).await;
         assert_eq!(intro["active"], true);
         assert_eq!(intro["actor_type"], "silicon");
         assert_eq!(intro["org_id"], "tos");
-        assert_eq!(intro["membership_id"], json!(membership_id("tos", "bot:tos")));
+        assert_eq!(intro["membership_id"], json!(membership_id("tos", "si:bot")));
         assert_eq!(intro["session_id"], bot["session_id"], "an Application session descends from the IAM session");
 
         let second = refresh_app(&base, ort1).await;
@@ -1355,7 +1366,7 @@ mod tests {
     #[tokio::test]
     async fn introspection_has_the_real_field_set_and_revocation_takes_effect() {
         let base = start(default_seed()).await;
-        let alice = carbon_login(&base, "alice").await;
+        let alice = carbon_login(&base, "c:alice").await;
         let mut keys = sorted_keys(&alice);
         keys.sort_unstable();
         assert_eq!(
@@ -1386,7 +1397,7 @@ mod tests {
                 "issued_at",
                 "membership_id",
                 "org_id",
-                "principal_id",
+                "public_id",
                 "scope",
                 "session_id",
             ]
@@ -1395,8 +1406,8 @@ mod tests {
         assert_eq!(intro["audience"], APP);
         assert_eq!(intro["actor_type"], "carbon");
         assert_eq!(intro["org_id"], "acme");
-        assert_eq!(intro["membership_id"], json!(membership_id("acme", "alice")));
-        assert_eq!(intro["principal_id"], json!(principal_id("alice")));
+        assert_eq!(intro["membership_id"], json!(membership_id("acme", "c:alice")));
+        assert_eq!(intro["public_id"], "c:alice");
         assert_eq!(intro["session_id"], alice["session_id"]);
         assert_eq!(intro["expires_at"].as_i64().unwrap() - intro["issued_at"].as_i64().unwrap(), 1800);
         let snapshot = &intro["authorization"];
@@ -1413,19 +1424,18 @@ mod tests {
                 "org_id",
                 "org_role",
                 "organization_id",
-                "principal_id",
                 "public_id",
                 "scopes",
                 "tags",
                 "testing_environment_id",
             ]
         );
-        assert_eq!(snapshot["public_id"], "alice");
+        assert_eq!(snapshot["public_id"], "c:alice");
         assert_eq!(snapshot["actor_type"], "carbon");
         assert_eq!(snapshot["org_id"], "acme");
         assert_eq!(snapshot["organization_id"], json!(org_uuid("acme")));
         assert_eq!(snapshot["membership_id"], intro["membership_id"]);
-        assert_eq!(snapshot["principal_id"], intro["principal_id"]);
+        assert_eq!(snapshot["public_id"], intro["public_id"]);
         assert_eq!(
             (snapshot["membership_version"].clone(), snapshot["authorization_epoch"].clone()),
             (json!(1), json!(1))
@@ -1495,9 +1505,9 @@ mod tests {
     #[tokio::test]
     async fn directory_routes_forbid_application_tokens_and_serve_iam_bearers() {
         let base = start(default_seed()).await;
-        let alice = carbon_login(&base, "alice").await;
+        let alice = carbon_login(&base, "c:alice").await;
         let cat = alice["access_token"].as_str().unwrap();
-        let bob = carbon_login(&base, "bob").await;
+        let bob = carbon_login(&base, "c:bob").await;
         let bot: Value = silicon_login(&base, STK).await.json().await.unwrap();
         let sat = bot["access_token"].as_str().unwrap();
         let slt = slt(&base, cat, Some("tos")).await;
@@ -1518,20 +1528,20 @@ mod tests {
         let me = get(&base, "/api/v1/me", cat).await;
         assert_eq!(me.headers()[header::ETAG], "\"1\"");
         let me: Value = me.json().await.unwrap();
-        assert_eq!((me["carbon_id"].clone(), me["display_name"].clone()), (json!("alice"), json!("Alice")));
+        assert_eq!((me["carbon_id"].clone(), me["display_name"].clone()), (json!("c:alice"), json!("Alice")));
         let orgs = get_json(&base, "/api/v1/organizations?limit=100", cat).await;
         let ids: Vec<_> = orgs["items"].as_array().unwrap().iter().map(|o| o["org_id"].clone()).collect();
         assert_eq!(ids, ["tos", "acme"]);
-        assert_eq!(orgs["items"][0]["owner_membership_id"], json!(membership_id("tos", "alice")));
+        assert_eq!(orgs["items"][0]["owner_membership_id"], json!(membership_id("tos", "c:alice")));
         assert_eq!(orgs["page"], json!({"next_cursor": null, "has_more": false}));
         let sparse = get_json(&base, &format!("{directory}/self?fields=id,tags"), cat).await;
-        assert_eq!(sparse, json!({"id": "alice", "tags": [tag_json("tos", "tech")]}));
+        assert_eq!(sparse, json!({"id": "c:alice", "tags": [tag_json("tos", "tech")]}));
         let full = get_json(&base, &format!("{directory}/self"), cat).await;
         assert_eq!(full["role"], json!({"org_role": "owner", "job_role": ""}));
         assert_eq!(full["org"], json!({"id": "tos", "name": "Team of Silicons"}));
         assert_eq!((full["name"].clone(), full["trust"].clone()), (json!("Alice"), Value::Null));
         let members = get_json(&base, &format!("{directory}/members?fields=id"), cat).await;
-        assert_eq!(members["items"], json!([{"id": "alice"}, {"id": "bob"}, {"id": "bot:tos"}]));
+        assert_eq!(members["items"], json!([{"id": "c:alice"}, {"id": "c:bob"}, {"id": "si:bot"}]));
         assert_eq!(
             err(get(&base, &format!("{directory}/self?fields=bogus"), cat).await).await,
             "422 validation_failed"
@@ -1543,7 +1553,7 @@ mod tests {
         assert_eq!(err(get(&base, "/api/v1/me", sat).await).await, "403 forbidden", "silicons have no /me");
         assert_eq!(err(get(&base, "/api/v1/organizations", sat).await).await, "403 forbidden");
         let own = get_json(&base, &format!("{directory}/self"), sat).await;
-        assert_eq!(own["id"], "bot:tos");
+        assert_eq!(own["id"], "si:bot");
         assert_eq!(own["tags"], json!([tag_json("tos", "ops")]));
         assert_eq!(own["role"]["org_role"], "member");
         assert_eq!(err(get(&base, "/api/v1/organizations/acme/directory/self", sat).await).await, "404 not_found");
@@ -1552,7 +1562,7 @@ mod tests {
     #[tokio::test]
     async fn short_lived_tokens_need_an_iam_bearer_a_known_app_and_a_membership() {
         let base = start(default_seed()).await;
-        let alice = carbon_login(&base, "alice").await;
+        let alice = carbon_login(&base, "c:alice").await;
         let cat = alice["access_token"].as_str().unwrap();
         let bot: Value = silicon_login(&base, STK).await.json().await.unwrap();
         let sat = bot["access_token"].as_str().unwrap();
@@ -1564,13 +1574,12 @@ mod tests {
         assert_eq!(err(res).await, "401 unauthenticated");
         let res = post_json(&base, path, None, Some(cat), &body).await;
         assert_eq!(err(res).await, "428 precondition_required");
-        let res =
-            post_json(&base, path, Some(&key()), Some(cat), &json!({"app_id": "tos>nope", "org_id": "tos"})).await;
+        let res = post_json(&base, path, Some(&key()), Some(cat), &json!({"app_id": "nope", "org_id": "tos"})).await;
         assert_eq!(err(res).await, "400 invalid_request", "an unknown application");
         let res = post_json(&base, path, Some(&key()), Some(cat), &json!({"app_id": APP, "org_id": "nope"})).await;
         assert_eq!(err(res).await, "403 organization_context_forbidden");
         let res = post_json(&base, path, Some(&key()), Some(sat), &json!({"app_id": APP, "org_id": "acme"})).await;
-        assert_eq!(err(res).await, "403 organization_context_forbidden", "bot:tos is not in acme");
+        assert_eq!(err(res).await, "403 organization_context_forbidden", "si:bot is not in acme");
         let form = http().post(format!("{base}{path}")).bearer_auth(cat).header("idempotency-key", key());
         assert_eq!(err(form.form(&[("app_id", APP)]).send().await.unwrap()).await, "415 request_rejected");
 
@@ -1593,9 +1602,20 @@ mod tests {
     async fn carbon_and_silicon_logins_answer_with_the_real_codes() {
         let base = start(default_seed()).await;
         let challenges = "/api/v1/login/challenges";
+        let legacy = post_json(&base, challenges, Some(&key()), None, &json!({"carbon_id": "alice"})).await;
+        assert_eq!(err(legacy).await, "404 not_found", "legacy handles are not authentication aliases");
+        let legacy = post_json(
+            &base,
+            "/api/v1/silicon-auth/token",
+            Some(&key()),
+            None,
+            &json!({"silicon_id": "bot:tos", "silicon_token": STK}),
+        )
+        .await;
+        assert_eq!(err(legacy).await, "401 unauthenticated");
         let res = post_json(&base, challenges, Some(&key()), None, &json!({"carbon_id": "mallory"})).await;
         assert_eq!(err(res).await, "404 not_found");
-        let res = post_json(&base, challenges, None, None, &json!({"carbon_id": "alice"})).await;
+        let res = post_json(&base, challenges, None, None, &json!({"carbon_id": "c:alice"})).await;
         assert_eq!(err(res).await, "428 precondition_required");
         let res = post_json(&base, challenges, Some(&key()), None, &json!({"email": "alice@spacestation.test"})).await;
         assert_eq!(res.status(), 201, "an email signs in the carbon it is addressed to");
@@ -1607,7 +1627,7 @@ mod tests {
         assert_eq!(err(form.send().await.unwrap()).await, "415 request_rejected");
         let right = post_json(&base, &verify, Some(&key()), None, &json!({"code": "000000"})).await;
         assert_eq!(right.status(), 200, "a wrong code does not spend the challenge");
-        assert_eq!(right.json::<Value>().await.unwrap()["actor"]["public_id"], "alice");
+        assert_eq!(right.json::<Value>().await.unwrap()["actor"]["public_id"], "c:alice");
         let spent = post_json(&base, &verify, Some(&key()), None, &json!({"code": "000000"})).await;
         assert_eq!(err(spent).await, "410 challenge_expired");
         let nope = format!("{challenges}/{}/verify", Uuid::now_v7());
@@ -1620,10 +1640,7 @@ mod tests {
         assert_eq!(wrong_stk.headers()[header::WWW_AUTHENTICATE], "Bearer");
         assert_eq!(err(wrong_stk).await, "401 unauthenticated");
         let bot: Value = silicon_login(&base, STK).await.json().await.unwrap();
-        assert_eq!(
-            bot["actor"],
-            json!({"principal_id": principal_id("bot:tos"), "type": "silicon", "public_id": "bot:tos"})
-        );
+        assert_eq!(bot["actor"], json!({"type": "silicon", "public_id": "si:bot"}));
         let rft = token(&bot, "refresh_token", "rft_");
         let rotated: Value = refresh_iam(&base, rft).await.json().await.unwrap();
         assert_eq!(rotated["session_id"], bot["session_id"]);
@@ -1645,7 +1662,7 @@ mod tests {
         let own = "/api/v1/organizations/tos/directory/self";
         assert_eq!(err(logout(Some(sat)).await.unwrap()).await, "403 forbidden", "a silicon logout is local");
         assert_eq!(get(&base, own, sat).await.status(), 200, "so the silicon's session lives on");
-        let alice = carbon_login(&base, "alice").await;
+        let alice = carbon_login(&base, "c:alice").await;
         let cat = alice["access_token"].as_str().unwrap();
         assert_eq!(logout(Some(cat)).await.unwrap().status(), 204, "a carbon's logout ends the session");
         assert_eq!(err(get(&base, own, cat).await).await, "401 unauthenticated");
@@ -1673,12 +1690,12 @@ mod tests {
         assert_eq!(snapshot(introspect(&base, oat).await), seeded, "the seed, before any delivery");
 
         let updated = "organization.membership.updated.v1";
-        deliver(updated, 5, json!([{"actor": "bot:tos", "tags": ["ops", "tech"]}])).await.unwrap();
+        deliver(updated, 5, json!([{"actor": "si:bot", "tags": ["ops", "tech"]}])).await.unwrap();
         let retagged = (json!([tag_json("tos", "ops"), tag_json("tos", "tech")]), json!(5));
         assert_eq!(snapshot(introspect(&base, oat).await), retagged, "the snapshot repeats the delivered row");
-        deliver(updated, 2, json!([{"actor": "bot:tos", "tags": []}])).await.unwrap();
+        deliver(updated, 2, json!([{"actor": "si:bot", "tags": []}])).await.unwrap();
         assert_eq!(snapshot(introspect(&base, oat).await), retagged, "an older version never wins");
-        deliver("organization.silicon.removed.v1", 6, json!([{"actor": "bot:tos"}])).await.unwrap();
+        deliver("organization.silicon.removed.v1", 6, json!([{"actor": "si:bot"}])).await.unwrap();
         assert_eq!(introspect(&base, oat).await, json!({"active": false}), "a removed member's token is inactive");
     }
 
@@ -1700,7 +1717,7 @@ mod tests {
 
         // The browser's half by hand: IAM's login page 302s back with the slt.
         let login = format!(
-            "{base}/api/v1/login?app_id={APP_Q}&redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2Fcb&org_id=tos&as=alice"
+            "{base}/api/v1/login?app_id={APP_Q}&redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2Fcb&org_id=tos&as=c%3Aalice"
         );
         let res = http().get(&login).send().await.unwrap();
         let location = res.headers()[header::LOCATION].to_str().unwrap().to_owned();
@@ -1708,7 +1725,7 @@ mod tests {
         let tokens = client.oauth().login(APP, slt, &Mutation::new()).await.unwrap();
         assert_eq!(
             (tokens.actor.as_ref().unwrap().public_id.as_str(), tokens.org_id.as_deref()),
-            ("alice", Some("tos"))
+            ("c:alice", Some("tos"))
         );
         assert_eq!(tokens.expires_in, 1800);
         let oat = tokens.access_token.as_str();
@@ -1721,13 +1738,10 @@ mod tests {
         let names =
             |tags: Option<Vec<AuthorizationTag>>| tags.map(|t| t.into_iter().map(|t| t.name).collect::<Vec<_>>());
         let snapshot = client.oauth().authorization(oat, None).await.unwrap().expect("an org-bound access token");
-        assert_eq!((snapshot.public_id.as_deref().unwrap(), snapshot.org_id.as_str()), ("alice", "tos"));
+        assert_eq!((snapshot.public_id.as_deref().unwrap(), snapshot.org_id.as_str()), ("c:alice", "tos"));
         assert_eq!(snapshot.org_role.as_deref(), Some("owner"));
         assert_eq!(names(snapshot.tags), Some(vec!["tech".to_owned()]));
-        assert_eq!(
-            (snapshot.membership_id, snapshot.membership_version),
-            (membership_id("tos", "alice").to_string(), 1)
-        );
+        assert_eq!((snapshot.membership_id, snapshot.membership_version), (membership_id("tos", "c:alice"), 1));
         assert!(client.oauth().authorization(&tokens.refresh_token, None).await.unwrap().is_none());
         let request = TokenIntrospectionRequest { token: tokens.refresh_token.clone(), token_type_hint: None };
         let inspected = client.oauth().introspect(&request, None).await.unwrap();
@@ -1745,7 +1759,7 @@ mod tests {
         let verifier = WebhookVerifier::new(keyring);
         let key = EnvironmentKey::new(default_seed().app.testing_key.unwrap()).unwrap();
         let deliver = |body: Value| http().post(format!("{base}/_stub/deliver")).json(&body).send();
-        let updated = json!({"url": url, "event_type": "organization.membership.updated.v1", "org": "tos", "version": 2, "members": [{"actor": "alice", "tags": []}]});
+        let updated = json!({"url": url, "event_type": "organization.membership.updated.v1", "org": "tos", "version": 2, "members": [{"actor": "c:alice", "tags": []}]});
         assert_eq!(deliver(updated).await.unwrap().status(), 200);
         let (headers, bytes) = got.lock().unwrap().remove(0);
         let verified = verifier.verify(&headers, &bytes).unwrap();
@@ -1756,7 +1770,7 @@ mod tests {
         let snapshot = client.oauth().authorization(oat, None).await.unwrap().unwrap();
         assert_eq!((names(snapshot.tags), snapshot.membership_version), (Some(vec![]), 2), "as the webhook said");
 
-        let removed = json!({"url": url, "event_type": "organization.silicon.removed.v1", "org": "tos", "envelope": "test", "version": 3, "members": [{"actor": "bot:tos"}]});
+        let removed = json!({"url": url, "event_type": "organization.silicon.removed.v1", "org": "tos", "envelope": "test", "version": 3, "members": [{"actor": "si:bot"}]});
         assert_eq!(deliver(removed).await.unwrap().status(), 200);
         let (headers, bytes) = got.lock().unwrap().remove(0);
         let verified = verifier.verify(&headers, &bytes).unwrap();
@@ -1764,7 +1778,7 @@ mod tests {
         verified.verify_testing_environment(&key).unwrap();
         let other = EnvironmentKey::new("x".repeat(32)).unwrap();
         assert_eq!(verified.verify_testing_environment(&other), Err(WebhookError::TestingEnvironmentMismatch));
-        assert_eq!(verified.event().data["current"]["members"], json!([tombstone("tos", "bot:tos", 3)]));
+        assert_eq!(verified.event().data["current"]["members"], json!([tombstone("tos", "si:bot", 3)]));
 
         // Refresh rotates, the same key replays, revocation shows at once, reuse kills the family.
         let key = IdempotencyKey::generate();
@@ -1796,8 +1810,8 @@ mod tests {
         let (url, got) = receiver().await;
         let deliver = |body: Value| http().post(format!("{base}/_stub/deliver")).json(&body).send();
         let members = json!([
-            {"actor": "bot:tos", "status": "active", "tags": ["ops"]},
-            {"actor": "alice", "status": "removed", "display_name": "Alice A."},
+            {"actor": "si:bot", "status": "active", "tags": ["ops"]},
+            {"actor": "c:alice", "status": "removed", "display_name": "Alice A."},
         ]);
         let body = json!({"url": url, "event_type": "organization.membership.updated.v1", "org": "tos", "members": members, "version": 4});
         let res = deliver(body).await.unwrap();
@@ -1814,13 +1828,13 @@ mod tests {
         assert_eq!(event["organization_id"], json!(org_uuid("tos")));
         assert_eq!(
             event["aggregate"],
-            json!({"type": "organization_membership", "id": membership_id("tos", "bot:tos"), "version": 4})
+            json!({"type": "organization_membership", "id": membership_id("tos", "si:bot"), "version": 4})
         );
         assert!(DateTime::parse_from_rfc3339(event["occurred_at"].as_str().unwrap()).is_ok());
         let rows = event["data"]["current"]["members"].as_array().unwrap();
         assert_eq!(rows.len(), 2);
         let bot = &rows[0];
-        assert_eq!(bot["membership"]["id"], json!(membership_id("tos", "bot:tos")));
+        assert_eq!(bot["membership"]["id"], json!(membership_id("tos", "si:bot")));
         assert_eq!(bot["membership"]["status"], "active");
         assert_eq!(bot["membership"]["removed_at"], Value::Null);
         assert_eq!(bot["membership"]["tags"], json!([tag_json("tos", "ops")]));
@@ -1829,10 +1843,10 @@ mod tests {
             (bot["organization"]["org_id"].clone(), bot["organization"]["name"].clone()),
             (json!("tos"), json!("Team of Silicons"))
         );
-        assert_eq!(bot["principal"]["public_id"], "bot:tos");
+        assert_eq!(bot["principal"]["public_id"], "si:bot");
         assert_eq!(bot["principal"]["type"], "silicon");
         assert_eq!(bot["principal"]["display_name"], "Bot", "the seeded name fills in");
-        assert_eq!(bot["principal"]["principal_id"], json!(principal_id("bot:tos")));
+        assert_eq!(bot["principal"]["principal_id"], json!("si:bot"));
         assert_eq!(bot["resource"]["type"], "organization_membership");
         assert_eq!(bot["resource"]["principal_type"], "silicon");
         assert_eq!(bot["roles"]["org_role"], "member");
@@ -1845,7 +1859,7 @@ mod tests {
         assert_eq!(alice["resource"]["status"], "removed");
 
         let event_id = Uuid::now_v7();
-        let body = json!({"url": url, "event_type": "organization.silicon.removed.v1", "org": "tos", "envelope": "test", "event_id": event_id, "members": [{"actor": "bot:tos", "status": "removed"}]});
+        let body = json!({"url": url, "event_type": "organization.silicon.removed.v1", "org": "tos", "envelope": "test", "event_id": event_id, "members": [{"actor": "si:bot", "status": "removed"}]});
         let reply: Value = deliver(body).await.unwrap().json().await.unwrap();
         assert_eq!(reply["event_id"], json!(event_id));
         let (headers, bytes) = got.lock().unwrap().remove(0);
@@ -1860,14 +1874,14 @@ mod tests {
         assert_eq!(event["test"]["metadata"]["event_type"], "organization.silicon.removed.v1");
         assert_eq!(event["test"]["metadata"]["event_id"], json!(event_id));
         assert_eq!(event["test"]["metadata"]["aggregate"]["version"], 1);
-        assert_eq!(event["test"]["metadata"]["aggregate"]["id"], json!(membership_id("tos", "bot:tos")));
+        assert_eq!(event["test"]["metadata"]["aggregate"]["id"], json!(membership_id("tos", "si:bot")));
         let rows = event["test"]["data"]["current"]["members"].as_array().unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(sorted_keys(&rows[0]), ["authorization", "resource"], "a removal carries tombstones, not rows");
         assert_eq!(
             rows[0],
             json!({"authorization": "removed", "resource": {
-                "id": membership_id("tos", "bot:tos"), "principal_id": principal_id("bot:tos"),
+                "id": membership_id("tos", "si:bot"), "membership_id": membership_id("tos", "si:bot"), "principal_id": "si:bot",
                 "principal_type": "silicon", "status": "removed", "type": "organization_membership", "version": 1,
             }})
         );
@@ -1907,6 +1921,20 @@ mod tests {
         assert_eq!(seed.app.testing_key.as_deref().map(str::len), Some(32));
         assert_eq!(seed.carbons.len(), 2);
         assert_eq!(seed.silicons[0].token, STK);
+        assert_eq!(seed.silicons[0].org_id, "tos");
         assert_eq!(seed.access_ttl_secs, 1800);
+    }
+
+    #[tokio::test]
+    async fn seed_requires_canonical_ids_and_explicit_silicon_ownership() {
+        let mut seed = default_seed();
+        seed.carbons[0].carbon_id = "alice".into();
+        assert!(serve(seed, "127.0.0.1:0".parse().unwrap()).await.is_err());
+        let mut seed = default_seed();
+        seed.silicons[0].org_id = "missing".into();
+        assert!(serve(seed, "127.0.0.1:0".parse().unwrap()).await.is_err());
+        let mut seed = serde_json::to_value(default_seed()).unwrap();
+        seed["silicons"][0].as_object_mut().unwrap().remove("org_id");
+        assert!(serde_json::from_value::<Seed>(seed).is_err());
     }
 }

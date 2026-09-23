@@ -32,12 +32,15 @@ The third rule is about credentials. **Never ask for a credential; always ask fo
 token.** Nothing in the package, the CLI or the app prompts for, receives or stores a silicon's
 `stk-`, an IAM bearer (`sat_`, `cat_`), a refresh token or the Application secret. A person or a
 silicon obtains a short-lived token (`slt`) from IAM by their own means — the browser, `iam login
---app-id 'tos>spacestation' --org <org>`, `iam silicon-login --app-id 'tos>spacestation'` — and hands
+--app-id 'spacestation' --org <org>`, `iam silicon-login --app-id 'spacestation'` — and hands
 it over; the backend exchanges it once (`POST /api/v1/app-auth/tokens`, HTTP Basic with the
 canonical Application id, a form body) and holds the resulting Application session itself. The
-backend is the **only** thing in the repo that talks to IAM, and it does so through the official
-**`silicon-iam-client`** (1.4.1): `crates/backend/src/iam/client.rs` builds it with
-`auto_update(false)` — the crate would otherwise run `cargo update` on *our* manifest at runtime —
+backend is the **only** thing in the repo that talks to IAM. It uses a vendored snapshot of the
+published **`silicon-iam-client`** 4.0.0 with one
+[documented patch](../vendor/silicon-iam-client/SPACE-STATION-PATCH.md): webhook `aggregate.id`
+accepts a nonempty string, including canonical membership IDs, while event IDs remain UUIDs
+and signature/envelope checks are retained. `crates/backend/src/iam/client.rs` builds it with
+`auto_update(false)` for compatibility (SDK 4 disables runtime dependency updates unconditionally)
 and an explicit `User-Agent` (IAM's edge answers an HTML 403 without one), and wraps the calls the
 contract in `docs/ARCHITECTURE.md`, "Identity", names: a fail-closed version handshake at boot,
 exchange, refresh, introspection (with the `authorization` snapshot), revocation, and the webhook
@@ -122,10 +125,10 @@ answer `403 forbidden` to an Application token exactly like the real thing. It s
 the file, `IAM_STUB_ADDR` the address) and prints what it seeded:
 
 ```
-application       tos>spacestation  (HTTP Basic user; the ask_ secret is in the seed)
-carbon            @alice        Alice  acme:owner[sales] tos:owner[tech]
-carbon            @bob          Bob  tos:member[ops]
-silicon           @bot:tos      Bot  tags: ops  stk: stk-0123456789abcdef0123456789abcdef
+application       spacestation  (HTTP Basic user; the ask_ secret is in the seed)
+carbon            @c:alice        Alice  acme:owner[sales] tos:owner[tech]
+carbon            @c:bob          Bob  tos:member[ops]
+silicon           @si:bot      Bot  tags: ops  stk: stk-0123456789abcdef0123456789abcdef
 ```
 
 The tags in brackets are what access lists are matched against; the snapshot at login is how the
@@ -146,14 +149,14 @@ cargo run -p space-station-cli -- auth "$slt" --org tos   # anyone: a short-live
 `login` binds a loopback port, sends you through the backend to IAM's login page, receives the
 short-lived token on the redirect (`?slt=…&state=…`) and spends it at `POST /api/auth/session` —
 the `sscli-` session never appears in a URL. `auth` takes an slt and never a credential; the slt comes from
-the `iam` CLI (`iam login --app-id 'tos>spacestation' --org tos`, `iam silicon-login --app-id
-tos>spacestation`) against the real IAM, and from two curls — or the same `iam` CLI with `--url
+the `iam` CLI (`iam login --app-id 'spacestation' --org tos`, `iam silicon-login --app-id
+spacestation`) against the real IAM, and from two curls — or the same `iam` CLI with `--url
 http://127.0.0.1:8099` — against the stub, both in `infra/local/README.md`. Either way the
 credential lands in `~/.space-station/auth.json` (0600). `SPACE_STATION_HOME` moves that
 directory, which is how to keep a test identity — and a test spool — out of your own.
 
 In a browser: open http://localhost:3000, pick an org, and the stub's page lists the seeded
-carbons — pick one, or add `&as=alice` to that URL to skip the page. The session is the
+carbons — pick one, or add `&as=c:alice` to that URL to skip the page. The session is the
 `ss_session` cookie, so `SS_ORIGIN` must be the page's own origin or every mutating request and
 every WS upgrade is refused. A terminal session and a browser session are separate rows on the
 same account: signing out of one leaves the other alone.
@@ -202,8 +205,7 @@ is root authority over the environment: env or secret store only, never a URL, a
 name, a fixture or a report.
 
 Everything for it — `SILICON_IAM_URL`, `SILICON_IAM_AUTH_URL` (`https://auth.iam.teamofsilicons.com`
-for hosted browser login), `SILICON_IAM_APP_ID` (quoted: `'tos>spacestation'`, or
-`. ./.env.test` creates a file named `spacestation`), `SILICON_IAM_APP_SECRET`,
+for hosted browser login), `SILICON_IAM_APP_ID` (bare `spacestation`), `SILICON_IAM_APP_SECRET`,
 `SILICON_IAM_WEBHOOK_SECRET`, `SILICON_IAM_TEST_KEY` (the key), `SILICON_IAM_TEST` (the
 environment id, what `iam --test` takes) and `SS_ORIGIN` — lives in `.env.test` (mode 0600), which
 `.gitignore` keeps out of the repo (`.env.*`). Load it over `.env` when you need it and never
@@ -219,17 +221,19 @@ screen lets a carbon choose one or more organizations; `+` in the sidebar starts
 
 ```sh
 iam --test "$SILICON_IAM_TEST" login --email <you> --code 000000        # once; ~3 logins per carbon per 10 min
-iam --test "$SILICON_IAM_TEST" login --app-id 'tos>spacestation' --org tos -o json   # reuses that session: prints the slt
+iam --test "$SILICON_IAM_TEST" login --app-id 'spacestation' --org tos -o json   # reuses that session: prints the slt
 spacestation auth <slt> --org tos
-iam --test "$SILICON_IAM_TEST" silicon-login --app-id 'tos>spacestation'             # a silicon (stk at the prompt, or a stored session)
+iam --test "$SILICON_IAM_TEST" silicon-login --app-id 'spacestation'             # a silicon (stk at the prompt, or a stored session)
 ```
 
-Registering the Application is done once, by an org owner, with the `iam` CLI (1.5.0). There are no redirect URIs to register. A login names its redirect URI, requests the app's declared
+Register the Application once through Honeycomb using the [application configuration](../infra/honeycomb/README.md).
+The underlying IAM registration requires an explicit owning organization; in an IAM environment
+that permits direct registration, the CLI equivalent is below. There are no redirect URIs to register. A login names its redirect URI, requests the app's declared
 IAM permissions, and lets the person choose organizations; the webhook subscribes to the full event scope. The webhook secret is **caller-chosen**, 32–512
 non-whitespace ASCII characters; IAM never generates it. The `ask_` secret is shown once:
 
 ```sh
-iam app create spacestation --name "Space Station" \
+iam app create spacestation --org tos --name "Space Station" \
   --base-url https://spacestation.teamofsilicons.com \
   --webhook-url https://spacestation.teamofsilicons.com/webhooks/api/ \
   --webhook-secret "$SILICON_IAM_WEBHOOK_SECRET"
@@ -240,16 +244,15 @@ its webhook pointed wherever the test backend is reachable (IAM must resolve and
 HTTPS URL, so a tunnel in development):
 
 ```sh
-iam --test "$SILICON_IAM_TEST" app import 'tos>spacestation'          # quoted: `>` is a redirect to the shell
-iam --test "$SILICON_IAM_TEST" app set-webhook 'tos>spacestation' \
+iam --test "$SILICON_IAM_TEST" app import 'spacestation'
+iam --test "$SILICON_IAM_TEST" app set-webhook 'spacestation' \
   --webhook-url https://<public host>/webhooks/api/ --webhook-secret "$SILICON_IAM_WEBHOOK_SECRET"
 ```
 
 `--test` takes the environment's id (never its key), also read from `SILICON_IAM_TEST`. Three
 things about the `iam` CLI to respect: give a script its own home (`SILICON_IAM_HOME`, mode 0700,
-with `SILICON_IAM_AUTO_UPDATE=false`) rather than your own — 1.2.x locks the store, so parallel
-commands are safe, but a script's sessions do not belong next to yours; the CLI updates itself
-after a command unless told not to; and the Application's base URL must be a public `https://`
+with `SILICON_IAM_AUTO_UPDATE=false` for older CLI versions) rather than your own — a script's
+sessions do not belong next to yours; current IAM CLI updates belong to Honeycomb; and the Application's base URL must be a public `https://`
 origin — a loopback one is refused at IAM's edge.
 
 ## The vendored runtime
@@ -266,8 +269,9 @@ or `spacestation windows run` ships a version nobody else has. `apps/web` needs 
 
 ## Publishing
 
-Versions live in one place each: `[workspace.package] version` in the root `Cargo.toml` for the
-crates, `packages/space-station/package.json` for npm. Bump, then publish in dependency order —
+Versions live in `[workspace.package] version` and the matching workspace dependency requirements
+in the root `Cargo.toml`, `crates/cli/Cargo.toml` for the CLI, and each npm package's `package.json`.
+The canonical identifier release is Rust version `0.2.0`. Bump, then publish in dependency order —
 unchanged, because the layering is the dependency order: crates.io resolves the `version` next to
 each `path` dependency, so a crate cannot go out before the one under it.
 
@@ -278,9 +282,9 @@ git commit -am "…"                                          # cargo package re
 cargo package --workspace --exclude space-station-backend   # pre-flight: builds all three as published
 npm pack ./packages/space-station --dry-run                 # pre-flight: the published file list
 
-cargo publish -p space-station-shared
-cargo publish -p space-station                              # once shared is live on crates.io
-cargo publish -p space-station-cli                          # once the package is live
+cargo publish --locked -p space-station-shared
+cargo publish --locked -p space-station                     # once shared is live on crates.io
+cargo publish --locked -p space-station-cli                 # once the package is live
 npm publish ./packages/space-station --access public
 ```
 
@@ -291,6 +295,8 @@ the three against each other. Check that the client's `.crate` really carries
 entries.
 
 `space-station-backend` is `publish = false` and `apps/web` is private; neither goes out.
+The CLI's matching Git tag (`v0.2.0` for this cutover) starts `.github/workflows/release.yml`,
+which tests and builds all six platforms and publishes signed GitHub release archives.
 
 ## House style
 
