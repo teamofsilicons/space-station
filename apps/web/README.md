@@ -15,7 +15,11 @@ the application session with the direct WebSocket host and permits CLI login to 
 through the frontend. Login-state cookies remain restricted to `/api/auth`. WebSockets use `VITE_WS_URL` when supplied, otherwise the production backend
 (or `ws://localhost:8080/api/ws` locally).
 
-The pages cover organization login/switching, tables and key rotation, Space Windows and
-versioned code, the sandboxed live runtime, notifications and tests, API keys and webhooks.
+The app is a workspace of tabs, like a browser's: a sidebar, a strip of tabs over up to three
+panes, ⌘K search, a developer-errors drawer (⌥⇧D). Every tab stays mounted, so live windows keep
+running behind others. `lib/tabs.ts` is the pure tab model (tested in `lib/tabs.test.ts`);
+`src/tabs.tsx` puts it on screen and `src/workspace.tsx` lays out the station. One module per
+page: `home` (the new tab page), `tables`, `windows`, `notifications`, `settings`, `docs`; `ui` holds
+the shared pieces, `palette` the search, `icons` the icon set, `theme` light/dark.
 `docs/*.md` is bundled into `/docs`. `public/mission-control.js` is copied from the runtime
 package by the build script. No application credentials are included in frontend assets.

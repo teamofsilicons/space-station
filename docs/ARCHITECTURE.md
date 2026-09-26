@@ -107,7 +107,7 @@ Application, and the Application exchanges it. Three ways to obtain one, one way
 
 The hosted browser login uses `SILICON_IAM_AUTH_URL`; local IAM runtimes keep the `/api/v1/login`
 compatibility path when that variable is omitted. IAM's consent screen selects the organizations
-shared with this application, and the sidebar can start another consent flow with `+`.
+shared with this application, and the sidebar's org menu can start another consent flow.
 
 The backend spends it at `POST {IAM}/api/v1/app-auth/tokens` with HTTP Basic `{APP}:{ask_ secret}`,
 an `Idempotency-Key`, and a **form-encoded** body `app_id={APP}&slt={slt}` (JSON is refused with
@@ -178,7 +178,7 @@ belongs to. Membership itself is never taken from the mirror; the login proved i
 introspection re-proves it. `org_name` feeds `GET /orgs`.
 
 **Org list.** The sidebar shows the orgs where the mirror holds an active membership for the
-actor, plus the session's own org, and an "add organization" affordance that starts an org-bound
+actor, plus the session's own org, and an "Add an organization" item that starts an org-bound
 login. A session is bound to one org; switching orgs is another login, which IAM completes
 without a prompt when its own session is still good. A browser holds one session at a time: the
 callback that opens the new one **ends the session the presented `ss_session` cookie belonged
@@ -665,22 +665,41 @@ Errors: `{"error": {"code": "…", "message": "…"}}`; codes are snake_case and
 
 ## Frontend (`apps/web`)
 
-The landing page is an **org picker**: signed out it asks for an org handle and starts the
-org-bound login; signed in it lists the orgs the mirror knows the actor in, the session's own
-first, and any other org by its handle. Choosing an org and switching org are the same act — a link
-to `/api/auth/login?org=…&next=…`, which IAM completes without a prompt while its own session is
-good — and a page of another org than the session's shows that switch offer instead of its tabs
-(the API answers `403 not_a_member`). The sidebar lists the same orgs. An org shows tabs Space
-Windows · Tables · Notifications · Settings (Tables is the default tab when no table exists). Tables: overview (count, records, top 5
-tables over `1m 5m 15m 1h 5h 1d 7d 30d`, default `5h`, polled every 5 s; average
-event→registered lag over the last 100 records), the list, create (asks only for the id; the key
-shown once), rotate, access. An empty Tables tab is one big "create your first table" button. Space
-Windows: an empty tab reads "Create your first Space Window"; create (name < 20 chars) → the prompt
-for an agent + "add code"; versions with `created_by`; the window view runs the processor sandbox
-and the renderer iframe through the runtime's host role and shows the access token and its last
-use up top. Notifications: list, create, events, subscribe. Settings: webhooks, API keys.
-Option+Shift+D toggles the dev panel (local processor/renderer errors + `GET /dev-errors`). `/docs`
-holds the documentation and states Vue 3 + D3 via CDN as the default and preferred renderer stack.
+Signed out, the app offers one login: `/api/auth/login?next=…`, where IAM's consent screen selects
+the organization. Signed in, it is a **workspace of tabs**, the way a browser is. The sidebar holds
+the org menu (the orgs the mirror knows the actor in, the session's own first; choosing one, or
+"Add an organization", is a link to `/api/auth/login?org=…&next=…`, which IAM completes without a
+prompt while its own session is good), search, the pages (Space Windows · Tables · Notifications ·
+Settings) and the org's windows and tables. A page of another org than the session's shows that
+switch offer instead of the workspace (the API answers `403 not_a_member`).
+
+Every page opens in a tab. The strip keeps pinned tabs first, reorders by drag, closes on middle
+click, and has a menu per tab (duplicate, pin, split, close others/right, reopen closed). One to
+three panes show tabs side by side (split view: drag a tab onto a pane, ⇧-click a link, or ⌥\).
+**Every tab stays mounted**, so a live window keeps running behind other tabs: its tab shows the
+window's status and a dot when its JSON changed unseen, and its notifications become toasts. Each
+tab has its own back and forward; the address bar is the focused tab's path, so a link to any page
+opens (or focuses) its tab, and browser back/forward walk the same history. Links open like a
+browser's — click here, ⌘/Ctrl-click or middle-click behind, ⌘⇧-click in front, ⇧-click in a split —
+and the sidebar and search switch to a tab already showing a thing or open it in a new one (a new
+tab page is reused). ⌘K searches tabs, windows, tables, pages, docs and actions; the new tab page is
+the same search. Keys: ⌥T new tab, ⌥W close, ⌥⇧T reopen, ⌥1–9, ⌥[ ⌥] previous/next, ⌥← ⌥→ back/
+forward, ⌥\ split. The strip and panes are kept per org in the browser (`ss-tabs:{org}`). The tab
+model is pure and tested (`lib/tabs.ts`); `src/tabs.tsx` puts it on screen.
+
+A first visit opens Space Windows, or Tables when no table exists. Tables: overview (count,
+records, top 5 tables over `1m 5m 15m 1h 5h 1d 7d 30d`, default `5h`, polled every 5 s while on
+screen; average event→registered lag over the last 100 records), the list, create (asks only for
+the id; the key shown once), rotate, retire, access; one table's records as a snapshot, newest
+first. An empty Tables tab is one big "create your first table" button. Space Windows: an empty tab
+reads "Create your first Space Window"; create (name < 20 chars) → the prompt for an agent + "add
+code"; versions with `created_by`; the window view runs the processor sandbox and the renderer
+iframe through the runtime's host role, with the access token and its last use up top and a code
+workbench beside the live view. Notifications: list, create, test, events, subscribe. Settings:
+access token, webhooks, API keys, appearance (light/dark follow the system unless chosen) and
+frontend telemetry. Option+Shift+D toggles the developer-errors drawer (processor/renderer errors of
+the windows open in this browser + `GET /dev-errors`). `/docs` holds the documentation, public and
+as a tab, and states Vue 3 + D3 via CDN as the default and preferred renderer stack.
 The frontend talks to the backend through a same-origin `/api` rewrite.
 
 ## The Rust package (`space-station`) — the primary interface
