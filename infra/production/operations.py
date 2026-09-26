@@ -16,7 +16,8 @@ if role=='api':
  write('/etc/systemd/system/space-station.service.d/logging.conf','[Service]\nStandardOutput=append:/var/log/space-station/api.log\nStandardError=append:/var/log/space-station/api.log\n')
  write('/etc/logrotate.d/space-station','/var/log/space-station/api.log {\n daily\n maxsize 50M\n rotate 7\n compress\n delaycompress\n missingok\n notifempty\n copytruncate\n}\n')
  run('systemctl','daemon-reload')
- run('systemctl','restart','space-station')
+ # try-restart: on a fresh host the executable is not installed yet; install-backend.sh starts it.
+ run('systemctl','try-restart','space-station')
 cfg={'agent':{'metrics_collection_interval':60,'run_as_user':'root'},'metrics':{'namespace':'SpaceStation','append_dimensions':{'InstanceId':'${aws:InstanceId}'},'aggregation_dimensions':[['InstanceId']],'metrics_collected':{'mem':{'measurement':['mem_used_percent']},'disk':{'measurement':['used_percent'],'resources':['/']},'swap':{'measurement':['swap_used_percent']}}},'logs':{'logs_collected':{'files':{'collect_list':[{'file_path':log,'log_group_name':'/space-station/production/'+role,'log_stream_name':'{instance_id}'}]}}}}
 write('/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json',json.dumps(cfg))
 run('/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl','-a','fetch-config','-m','ec2','-s','-c','file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json')
