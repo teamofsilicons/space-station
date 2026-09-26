@@ -10,7 +10,8 @@ There are no containers or virtualized application runtimes. Both EC2 instances 
 managed through SSM, and require IMDSv2. Only the dedicated HTTPS load balancer can reach the
 API, and only the API security group can reach ClickHouse. PostgreSQL and Redis bind locally.
 Docker Compose in `infra/local/` supplies local development and integration-test dependencies
-only; production deployment builds and runs the native backend executable.
+only. Production runs one prebuilt backend executable: it is compiled off the servers, and no
+server has a Rust toolchain in the deploy path.
 
 Verified live on 2026-09-16: both native application services and backup timers are active,
 neither host has a Docker or containerd service, the ALB target is healthy, and the public
@@ -35,19 +36,49 @@ Do not delete retained instances, volumes, secrets or the artifact bucket during
 ```sh
 python3 infra/production/template.py > infra/production/stack.json
 # After the infrastructure is CREATE_COMPLETE or UPDATE_COMPLETE:
-python3 infra/production/deploy.py
+python3 infra/production/deploy.py              # build, ship and install the backend executable
+python3 infra/production/deploy.py --setup      # also converge both hosts' native services
+python3 infra/production/deploy.py --rollback   # put the previous executable back
 ```
 
-`deploy.py` uploads a source archive to the private artifact bucket and dispatches native setup
-through SSM. The initial deployment alone uses `--initialize`; it refuses existing secrets.
-Runtime credentials are fetched using each instance role from its own Secrets Manager secret,
-and written only to root-readable `/etc/space-station/runtime.env`. No credentials are in
-CloudFormation or SSM command strings. Rust 1.98 builds the API with two build jobs.
-The API executable is installed atomically and the service is restarted. Schema migrations run
-at startup. Future schema changes must preserve rollback compatibility before replacing a binary.
+**The backend ships as one executable.** `deploy.py` builds it on the machine you run it from —
+`cargo zigbuild -p space-station-backend --release --locked --target aarch64-unknown-linux-gnu.2.31`,
+which needs Rust 1.98, Zig and `cargo-zigbuild`, the same tools as `scripts/build-cli-release.sh` —
+or ships the one `--binary PATH` names, after checking it is an aarch64 Linux ELF. The result
+links only glibc (2.31 or newer, so any Ubuntu from 20.04), with rustls instead of OpenSSL.
+It goes into one release archive with this directory's host scripts, uploaded to the artifact
+bucket under `releases/<sha256>.tar.gz`. Each host downloads it, checks that digest, and unpacks it
+to `/opt/space-station/release`; nothing is compiled there.
 
-Command IDs are written to `.local/production-commands.json`. Use AWS SSM command status/output
-to inspect completion. `ssm.py api <script>` or `ssm.py clickhouse <script>` runs an operator script.
+On the API host `install-backend.sh` keeps the running executable as
+`/opt/space-station/bin/space-station-backend.previous`, installs the new one atomically, restarts
+`space-station.service` and waits up to a minute for `/api/health`. If the API is not healthy, it
+puts the previous executable back and the deploy fails. `--rollback` (or `install-backend.sh
+--rollback` on the host) swaps the previous one back by hand. Schema migrations run at startup,
+so a schema change must stay compatible with the previous executable before it ships.
+
+`--setup` first runs `setup-native.sh` on each host, ClickHouse first: apt packages (PostgreSQL
+and Redis on the API host, ClickHouse from its LTS repository), `configure-native.py`
+(configuration, the Postgres role and database, the systemd unit) and `operations.py` (logging,
+CloudWatch, daily backups). The initial deployment alone uses `--initialize`, which implies
+`--setup` and refuses existing secrets. Runtime credentials are fetched using each instance role
+from its own Secrets Manager secret, and written only to root-readable
+`/etc/space-station/runtime.env`. No credentials are in CloudFormation or SSM command strings.
+
+`deploy.py` waits for each SSM command and prints its output; command IDs are also written to
+`.local/production-commands.json`. `ssm.py api <script>` or `ssm.py clickhouse <script>` runs an
+operator script.
+
+By hand, the same deploy is: build the executable as above, then on the API host (as root) put it
+at `/opt/space-station/release/space-station-backend` next to this directory's scripts and run
+`bash /opt/space-station/release/infra/production/install-backend.sh`.
+
+Hosts deployed before 2026-09-26 compiled the backend in place. After the first executable deploy
+passes, their build leftovers can go: `/opt/space-station/source` (with its Cargo target cache),
+`/root/.cargo` and `/root/.rustup`. The instances' first-boot user data still installs
+`build-essential`, `pkg-config` and `libssl-dev`; they are unused, but changing EC2 user data
+stops and restarts the instance on the next stack update, so remove them only with a planned
+restart.
 Do not put secrets in those scripts or print the runtime environment.
 
 For the frontend, run `npm --prefix apps/web run check-all`. Vercel uses `apps/web` as the project

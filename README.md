@@ -286,8 +286,9 @@ The completed local v1 acceptance, manual user walkthroughs, startup commands an
 public-login dependency are recorded in [V1 readiness](docs/V1-READINESS.md).
 
 What is built is what `scripts/test.sh` covers, end to end against the local stack. Production
-runs native Rust, PostgreSQL, Redis and ClickHouse services on AWS under systemd;
-Docker is used only for local development and integration-test databases. See
+runs native Rust, PostgreSQL, Redis and ClickHouse services on AWS under systemd; the backend
+ships as one prebuilt Linux executable, never compiled on a server. Docker is used only for local
+development and integration-test databases. See
 [production operations](infra/production/README.md) and [Honeycomb releases](infra/honeycomb/README.md).
 
 [MIT](LICENSE).

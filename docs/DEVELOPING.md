@@ -217,7 +217,8 @@ cargo run -p space-station-backend
 ```
 
 The test environment uses the same browser and terminal login paths as production. IAM's consent
-screen lets a carbon choose one or more organizations; `+` in the sidebar starts that flow again:
+screen lets a carbon choose one or more organizations; "Add an organization" in the sidebar's org
+menu starts that flow again:
 
 ```sh
 iam --test "$SILICON_IAM_TEST" login --email <you> --code 000000        # once; ~3 logins per carbon per 10 min
