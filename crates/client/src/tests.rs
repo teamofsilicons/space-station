@@ -61,6 +61,10 @@ fn serve(handler: impl Fn(&str, &str, &str, &str) -> (u16, String) + Send + Sync
                 let head = format!("HTTP/1.1 {status} X\r\nConnection: close\r\n{extra}");
                 let head = format!("{head}Content-Length: {}\r\n\r\n", answer.len());
                 let _ = stream.write_all((head + &answer).as_bytes());
+                // Drain the chunked terminator of a body-less POST before closing, or the
+                // socket can reset and discard the response (notably during logout).
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+                let _ = stream.read_to_end(&mut Vec::new());
             });
         }
     });
