@@ -2519,11 +2519,11 @@ dependencies = [
 
 [[package]]
 name = "space-station"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
- "space-station-shared 0.2.0",
+ "space-station-shared 0.3.0",
  "sysinfo",
  "tungstenite 0.30.0",
  "uds_windows",
@@ -2534,7 +2534,7 @@ dependencies = [
 
 [[package]]
 name = "space-station-backend"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "aes-gcm",
  "axum",
@@ -2549,8 +2549,8 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "silicon-iam-client",
- "space-station 0.2.0",
- "space-station-shared 0.2.0",
+ "space-station 0.3.0",
+ "space-station-shared 0.3.0",
  "sqlparser",
  "sqlx",
  "tempfile",
@@ -2564,7 +2564,7 @@ dependencies = [
 
 [[package]]
 name = "space-station-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -2573,7 +2573,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "space-station 0.2.0",
+ "space-station 0.3.0",
  "tar",
  "ureq",
  "windows-sys 0.61.2",
@@ -2593,7 +2593,7 @@ dependencies = [
 
 [[package]]
 name = "space-station-shared"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
