@@ -77,6 +77,15 @@
           "value": "no-store"
         }
       ]
+    },
+    {
+      "source": "/api/auth/:path*",
+      "headers": [
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        }
+      ]
     }
   ]
 }
