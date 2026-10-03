@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, TcpListener};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -85,6 +85,7 @@ struct Api {
     base: String,
     origin: String,
     bearer: Option<String>,
+    context: Arc<Mutex<Option<String>>>,
 }
 
 impl Api {
@@ -92,11 +93,15 @@ impl Api {
         let jar = Arc::new(Jar::default());
         let http =
             Client::builder().cookie_provider(jar.clone()).redirect(reqwest::redirect::Policy::none()).build().unwrap();
-        Api { http, jar, base: format!("{origin}/api"), origin: origin.into(), bearer: None }
+        Api { http, jar, base: format!("{origin}/api"), origin: origin.into(), bearer: None, context: Arc::default() }
     }
 
     fn with_bearer(&self, token: &str) -> Api {
         Api { bearer: Some(token.into()), http: self.http.clone(), jar: self.jar.clone(), ..Api::new(&self.origin) }
+    }
+
+    fn context(&self) -> String {
+        self.context.lock().unwrap().clone().expect("browser login context")
     }
 
     fn cookie(&self) -> String {
@@ -107,6 +112,9 @@ impl Api {
         let mut req = self.http.request(method, format!("{}{path}", self.base)).header("Origin", &self.origin);
         if let Some(bearer) = &self.bearer {
             req = req.bearer_auth(bearer);
+        }
+        if let Some(context) = self.context.lock().unwrap().clone() {
+            req = req.header("X-SpaceStation-Context", context);
         }
         if let Some(body) = body {
             req = req.json(&body);
@@ -148,6 +156,7 @@ async fn login(api: &Api, carbon: &str, org: &str) {
     let res = api.http.get(authorize).send().await.unwrap();
     let callback = res.headers()["location"].to_str().unwrap().to_owned();
     assert!(api.http.get(&callback).send().await.unwrap().status().is_redirection(), "the callback lands on next");
+    *api.context.lock().unwrap() = Some(api.get("/me").await["context_id"].as_str().unwrap().to_owned());
 }
 
 type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
@@ -297,7 +306,7 @@ async fn a_notification_fires_delivers_and_cools_down() {
     // One matching record: flush → trigger → delay → run → one event, on the socket and the hook.
     let mut mc = ws(
         &format!("ws://127.0.0.1:{port}/api/ws/mission-control?org={org}"),
-        &[("Cookie", &api.cookie()), ("Origin", &origin)],
+        &[("Cookie", &api.cookie()), ("Origin", &origin), ("X-SpaceStation-Context", &api.context())],
     )
     .await;
     let mut ingest = ws(&format!("ws://127.0.0.1:{port}/api/ws/ingest"), &[]).await;

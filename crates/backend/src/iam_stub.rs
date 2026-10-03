@@ -1,5 +1,5 @@
 //! A local Silicon IAM look-alike for development and tests, written against the live contract
-//! with canonical identifiers from IAM SDK 4 (docs/ARCHITECTURE.md, "IAM stub"). One seeded Application signs
+//! with canonical identifiers and ordinary-session contracts from IAM SDK 5. One seeded Application signs
 //! people in through short-lived tokens: `GET /api/v1/login` stands in for IAM's login page,
 //! `POST /api/v1/app-auth/short-lived-tokens` mints one for a signed-in carbon or silicon, and
 //! `POST /api/v1/app-auth/tokens` exchanges or refreshes it with rotating, reuse-fatal refresh
@@ -7,7 +7,8 @@
 //! with the real service's statuses, codes and wording, including the `403 forbidden` every
 //! directory route gives an Application token and a silicon's own bearer gets at `/logout`.
 //! Introspecting an org-bound access token returns the `authorization` snapshot (public id, role,
-//! tags, membership version); a refresh token, an unscoped token or a dead one carries none. Like
+//! tags, membership version); a refresh token or a dead one carries none. Direct IAM Carbon
+//! sessions may remain unscoped, but every Application login requires one selected org. Like
 //! the live service, introspection answers `400 invalid_request` to a malformed or duplicated
 //! `X-Org-ID` (or an unsupported `token_type_hint`) and `{"active": false}` to a well-formed one
 //! that is not the token's org. `POST /_stub/deliver` signs and posts a webhook in either
@@ -16,8 +17,8 @@
 //! delivery says about a member (status, tags, version) is what the snapshot reports from then on,
 //! because IAM's snapshot is never older than its webhooks. Identity comes from a JSON seed
 //! (`fixtures/iam-seed.json` by default); tokens, idempotency records and delivered changes live in
-//! memory and die with the process. `X-Testing-Environment-Key` is accepted and ignored: there is
-//! one plane. The official `silicon-iam-client` drives it end to end (a test proves it).
+//! memory and die with the process. There is one seeded plane; its testing-context route checks
+//! the selected testing key and application credential. The official `silicon-iam-client` drives it end to end (a test proves it).
 //! `cargo run -p space-station-backend --example iam-stub`.
 
 use std::{
@@ -31,7 +32,7 @@ use axum::{
     Json, Router,
     body::Bytes,
     extract::{Path, Query, State},
-    http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
@@ -152,6 +153,7 @@ fn router(stub: Shared) -> Router {
     let directory = "/api/v1/organizations/{org}/directory";
     Router::new()
         .route("/api/version", get(version))
+        .route("/api/v1/application/testing-context", get(testing_context))
         .route("/api/v1/login", get(login))
         .route("/api/v1/login/challenges", post(challenge))
         .route("/api/v1/login/challenges/{session}/verify", post(verify))
@@ -177,6 +179,32 @@ type Params = Query<HashMap<String, String>>;
 type Minted = (String, String, Uuid);
 /// Token prefixes of a family: (access, refresh).
 type Pair = (&'static str, &'static str);
+
+/// The SDK resolves a configured testing world before opening ordinary sessions.
+/// Keep this stamp stable across reads and consistent with introspection's world.
+async fn testing_context(State(stub): State<Shared>, headers: HeaderMap) -> Result<Json<Value>, Fail> {
+    stub.app_auth(&headers)?;
+    let key = stub.seed.app.testing_key.as_deref().ok_or(NOT_FOUND)?;
+    if headers.get("x-testing-environment-key").and_then(|v| v.to_str().ok()) != Some(key) {
+        return Err(FORBIDDEN);
+    }
+    let org = stub.seed.orgs.first().ok_or(NOT_FOUND)?;
+    let creator = stub.seed.carbons.first().ok_or(NOT_FOUND)?;
+    let environment_id = stable_id("testing-environment");
+    Ok(Json(json!({
+        "environment_id": environment_id,
+        "application": {
+            "app_id": stub.seed.app.app_id, "base_url": "http://127.0.0.1",
+            "app_scope": {"iam": ["self.identity.read", "self.membership.read", "self.tags.read"], "external": []},
+            "webhook_scope": ["membership"], "testing_idle_days": 30
+        },
+        "environment": {
+            "environment_id": environment_id, "org_id": org.org_id, "name": "Local IAM fixture",
+            "version": 1, "key_generation": 1, "cleaned_at": null,
+            "created_at": "2026-01-01T00:00:00Z", "creator_type": "carbon", "creator_id": creator.carbon_id
+        }
+    })))
+}
 
 struct Stub {
     seed: Seed,
@@ -238,7 +266,7 @@ const CARBON: Pair = ("cat_", "rft_");
 const SILICON: Pair = ("sat_", "rft_");
 const OAUTH: Pair = ("oat_", "ort_");
 /// The whole catalogue: an Application login has no scope to negotiate.
-const SCOPE: &str = "email memberships.read obo.issue offline_access organizations.read phone profile roles.read";
+const SCOPE: &str = "self.identity.read self.membership.read self.tags.read";
 /// When everything seeded was "created".
 const EPOCH: &str = "2026-01-01T00:00:00Z";
 const NO_STORE: [(header::HeaderName, &str); 2] = [(header::CACHE_CONTROL, "no-store"), (header::PRAGMA, "no-cache")];
@@ -263,6 +291,11 @@ const BAD_CONTEXT: Fail = Fail(
     StatusCode::BAD_REQUEST,
     "invalid_request",
     "The token-type hint or X-Org-ID header is malformed or duplicated.",
+);
+const ORG_SELECTION: Fail = Fail(
+    StatusCode::BAD_REQUEST,
+    "organization_selection_required",
+    "Select exactly one organization for this application login.",
 );
 const BAD_SLT: Fail = Fail(StatusCode::BAD_REQUEST, "invalid_grant", "The short-lived token is invalid.");
 const BAD_REFRESH: Fail = Fail(StatusCode::BAD_REQUEST, "invalid_grant", "The refresh token is invalid.");
@@ -605,7 +638,8 @@ impl Ledger {
     /// Spends a short-lived token on a new Application family.
     fn exchange(&mut self, slt: &str, ttl: i64) -> Result<Minted, Fail> {
         let s = self.slts.remove(slt).filter(|s| now() < s.expires_at).ok_or(BAD_SLT)?;
-        Ok(self.open(&s.actor, s.org, Some(s.session), OAUTH, ttl))
+        let org = s.org.ok_or(ORG_SELECTION)?;
+        Ok(self.open(&s.actor, Some(org), Some(s.session), OAUTH, ttl))
     }
 
     /// Remembers what a delivery said about a member; an older version never overwrites a newer one.
@@ -684,33 +718,41 @@ async fn version(headers: HeaderMap) -> Response {
 /// IAM's login page, minus the login: a list of the seeded carbons, or with `?as=<carbon>` the
 /// short-lived token appended to `redirect_uri` as `slt` (shown on a page when there is no
 /// `redirect_uri`, as for a terminal). `org_id` binds the token to a membership the carbon must hold.
-async fn login(State(stub): State<Shared>, uri: Uri, Query(q): Params) -> Response {
+async fn login(State(stub): State<Shared>, Query(q): Params) -> Response {
     let get = |k: &str| q.get(k).map(String::as_str);
     let app = escape(&stub.seed.app.app_id);
     if get("app_id") != Some(&stub.seed.app.app_id) {
         return UNKNOWN_APP.into_response();
     }
     let Some(carbon) = get("as") else {
-        let query = escape(uri.query().unwrap_or_default());
-        let link = |c: &Carbon| {
-            let selector =
-                url::form_urlencoded::Serializer::new(String::new()).append_pair("as", &c.carbon_id).finish();
-            format!("<li><a href=\"?{query}&amp;{selector}\">{} (@{})</a></li>", escape(&c.name), c.carbon_id)
-        };
-        let links: String = stub.seed.carbons.iter().map(link).collect();
+        let mut links = String::new();
+        for carbon in &stub.seed.carbons {
+            for org in carbon.memberships.keys().filter(|org| get("org_id").is_none_or(|selected| selected == *org)) {
+                let mut selector = url::form_urlencoded::Serializer::new(String::new());
+                selector.extend_pairs(q.iter().filter(|(key, _)| !matches!(key.as_str(), "as" | "org_id")));
+                selector.append_pair("as", &carbon.carbon_id).append_pair("org_id", org);
+                links.push_str(&format!(
+                    "<li><a href=\"?{}\">{} (@{}) · {}</a></li>",
+                    escape(&selector.finish()),
+                    escape(&carbon.name),
+                    carbon.carbon_id,
+                    escape(org)
+                ));
+            }
+        }
         let page = format!("<!doctype html><title>Silicon IAM stub</title><h1>Sign in to {app}</h1><ul>{links}</ul>");
         return Html(page).into_response();
     };
     if stub.carbon(carbon).is_none() {
         return NOT_FOUND.into_response();
     }
-    let org = get("org_id").map(str::to_owned);
-    if let Some(org) = &org
-        && stub.member(org, carbon).is_none()
-    {
+    let Some(org) = get("org_id").map(str::to_owned) else {
+        return ORG_SELECTION.into_response();
+    };
+    if stub.member(&org, carbon).is_none() {
         return ORG_FORBIDDEN.into_response();
     }
-    let slt = stub.lock().slt(carbon, org, Uuid::now_v7());
+    let slt = stub.lock().slt(carbon, Some(org), Uuid::now_v7());
     match get("redirect_uri") {
         Some(redirect_uri) => {
             let separator = if redirect_uri.contains('?') { '&' } else { '?' };
@@ -794,8 +836,8 @@ async fn silicon_auth(State(stub): State<Shared>, headers: HeaderMap, body: Byte
     })
 }
 
-/// `POST /app-auth/short-lived-tokens {app_id, org_id?}` with an IAM bearer: how a silicon, or a
-/// carbon who is already signed in, gets a short-lived token. A silicon's own org is the default.
+/// `POST /app-auth/short-lived-tokens {app_id, org_ids: [org]}` with a direct IAM bearer.
+/// Both actor kinds explicitly select exactly one membership; no implicit Silicon org fallback.
 async fn short_lived(State(stub): State<Shared>, headers: HeaderMap, body: Bytes) -> Response {
     let mut st = stub.lock();
     let iam = st.bearer(&headers).filter(|(_, f)| f.prefixes != OAUTH);
@@ -807,14 +849,15 @@ async fn short_lived(State(stub): State<Shared>, headers: HeaderMap, body: Bytes
         if input["app_id"] != stub.seed.app.app_id {
             return Err(UNKNOWN_APP);
         }
-        let own = || stub.seed.silicons.iter().find(|s| s.silicon_id == actor).map(|s| s.org_id.clone());
-        let org = input["org_id"].as_str().map_or_else(own, |o| Some(o.to_owned()));
-        if let Some(org) = &org
-            && stub.member(org, &actor).is_none()
-        {
+        if !input["org_id"].is_null() {
+            return Err(ORG_SELECTION);
+        }
+        let selected = input["org_ids"].as_array().filter(|orgs| orgs.len() == 1).ok_or(ORG_SELECTION)?;
+        let org = selected[0].as_str().ok_or(ORG_SELECTION)?;
+        if stub.member(org, &actor).is_none() {
             return Err(ORG_FORBIDDEN);
         }
-        Ok((StatusCode::CREATED, json!({"slt": st.slt(&actor, org, session), "expires_in": 120})))
+        Ok((StatusCode::CREATED, json!({"slt": st.slt(&actor, Some(org.to_owned()), session), "expires_in": 120})))
     })
 }
 
@@ -1171,7 +1214,7 @@ mod tests {
     async fn slt(base: &str, bearer: &str, org: Option<&str>) -> String {
         let mut body = json!({"app_id": APP});
         if let Some(org) = org {
-            body["org_id"] = json!(org);
+            body["org_ids"] = json!([org]);
         }
         let res = post_json(base, "/api/v1/app-auth/short-lived-tokens", Some(&key()), Some(bearer), &body).await;
         assert_eq!(res.status(), 201);
@@ -1278,7 +1321,8 @@ mod tests {
         assert_eq!(err(http().get(outsider).send().await.unwrap()).await, "403 organization_context_forbidden");
 
         // With nowhere to redirect, the token is shown on a page, as for a terminal.
-        let shown = http().get(format!("{base}/api/v1/login?app_id={APP_Q}&as=c%3Abob")).send().await.unwrap();
+        let shown =
+            http().get(format!("{base}/api/v1/login?app_id={APP_Q}&as=c%3Abob&org_id=tos")).send().await.unwrap();
         assert_eq!(shown.status(), 200);
         assert!(shown.text().await.unwrap().contains("<code>oac_"));
     }
@@ -1334,9 +1378,9 @@ mod tests {
         let base = start(default_seed()).await;
         let bot: Value = silicon_login(&base, STK).await.json().await.unwrap();
         let sat = token(&bot, "access_token", "sat_");
-        let slt = slt(&base, sat, None).await;
+        let slt = slt(&base, sat, Some("tos")).await;
         let first: Value = exchange(&base, &[("app_id", APP), ("slt", &slt)]).await.json().await.unwrap();
-        assert_eq!(first["org_id"], "tos", "a silicon's login is bound to its own org by default");
+        assert_eq!(first["org_id"], "tos", "a silicon's login is bound to the explicitly selected org");
         assert_eq!(first["actor"]["public_id"], "si:bot");
         let (oat1, ort1) = (token(&first, "access_token", "oat_"), token(&first, "refresh_token", "ort_"));
         let intro = introspect(&base, oat1).await;
@@ -1468,15 +1512,16 @@ mod tests {
             post_form(&base, introspect_path, None, &[("token", oat), ("token_type_hint", "access_token")]).await;
         assert_eq!(hinted.json::<Value>().await.unwrap()["active"], true);
 
-        let unscoped = slt(&base, cat, None).await;
-        let tokens: Value = exchange(&base, &[("app_id", APP), ("slt", &unscoped)]).await.json().await.unwrap();
-        assert_eq!(tokens.get("org_id"), None, "an unscoped login has no org");
-        let intro = introspect(&base, tokens["access_token"].as_str().unwrap()).await;
-        assert_eq!(
-            (intro["active"].clone(), intro.get("org_id"), intro.get("membership_id"), intro.get("authorization")),
-            (json!(true), None, None, None),
-            "an unscoped token has no org and no snapshot"
-        );
+        let unscoped = post_json(
+            &base,
+            "/api/v1/app-auth/short-lived-tokens",
+            Some(&key()),
+            Some(cat),
+            &json!({"app_id": APP, "org_ids": []}),
+        )
+        .await;
+        assert_eq!(err(unscoped).await, "400 organization_selection_required");
+        assert!(alice["access_token"].as_str().unwrap().starts_with("cat_"), "direct Carbon login remains unscoped");
 
         let revoked = revoke(&base, oat).await;
         assert_eq!(revoked.status(), 200);
@@ -1567,18 +1612,18 @@ mod tests {
         let bot: Value = silicon_login(&base, STK).await.json().await.unwrap();
         let sat = bot["access_token"].as_str().unwrap();
         let path = "/api/v1/app-auth/short-lived-tokens";
-        let body = json!({"app_id": APP, "org_id": "tos"});
+        let body = json!({"app_id": APP, "org_ids": ["tos"]});
         let res = post_json(&base, path, Some(&key()), None, &body).await;
         assert_eq!(err(res).await, "401 unauthenticated");
         let res = post_json(&base, path, Some(&key()), Some("cat_nope"), &body).await;
         assert_eq!(err(res).await, "401 unauthenticated");
         let res = post_json(&base, path, None, Some(cat), &body).await;
         assert_eq!(err(res).await, "428 precondition_required");
-        let res = post_json(&base, path, Some(&key()), Some(cat), &json!({"app_id": "nope", "org_id": "tos"})).await;
+        let res = post_json(&base, path, Some(&key()), Some(cat), &json!({"app_id": "nope", "org_ids": ["tos"]})).await;
         assert_eq!(err(res).await, "400 invalid_request", "an unknown application");
-        let res = post_json(&base, path, Some(&key()), Some(cat), &json!({"app_id": APP, "org_id": "nope"})).await;
+        let res = post_json(&base, path, Some(&key()), Some(cat), &json!({"app_id": APP, "org_ids": ["nope"]})).await;
         assert_eq!(err(res).await, "403 organization_context_forbidden");
-        let res = post_json(&base, path, Some(&key()), Some(sat), &json!({"app_id": APP, "org_id": "acme"})).await;
+        let res = post_json(&base, path, Some(&key()), Some(sat), &json!({"app_id": APP, "org_ids": ["acme"]})).await;
         assert_eq!(err(res).await, "403 organization_context_forbidden", "si:bot is not in acme");
         let form = http().post(format!("{base}{path}")).bearer_auth(cat).header("idempotency-key", key());
         assert_eq!(err(form.form(&[("app_id", APP)]).send().await.unwrap()).await, "415 request_rejected");
@@ -1594,7 +1639,7 @@ mod tests {
         let replay = post_json(&base, path, Some(&key), Some(cat), &body).await;
         assert_eq!(replay.headers()["idempotency-replayed"], "true");
         assert_eq!(replay.json::<Value>().await.unwrap(), first);
-        let other = post_json(&base, path, Some(&key), Some(cat), &json!({"app_id": APP, "org_id": "acme"})).await;
+        let other = post_json(&base, path, Some(&key), Some(cat), &json!({"app_id": APP, "org_ids": ["acme"]})).await;
         assert_eq!(err(other).await, "409 idempotency_conflict");
     }
 
@@ -1680,7 +1725,7 @@ mod tests {
             http().post(format!("{base}/_stub/deliver")).json(&body).send()
         };
         let bot: Value = silicon_login(&base, STK).await.json().await.unwrap();
-        let slt = slt(&base, bot["access_token"].as_str().unwrap(), None).await;
+        let slt = slt(&base, bot["access_token"].as_str().unwrap(), Some("tos")).await;
         let tokens: Value = exchange(&base, &[("app_id", APP), ("slt", &slt)]).await.json().await.unwrap();
         let oat = tokens["access_token"].as_str().unwrap();
         let snapshot = |intro: Value| {
@@ -1697,6 +1742,46 @@ mod tests {
         assert_eq!(snapshot(introspect(&base, oat).await), retagged, "an older version never wins");
         deliver("organization.silicon.removed.v1", 6, json!([{"actor": "si:bot"}])).await.unwrap();
         assert_eq!(introspect(&base, oat).await, json!({"active": false}), "a removed member's token is inactive");
+    }
+
+    #[tokio::test]
+    async fn testing_context_matches_introspection_and_requires_both_credentials() {
+        use silicon_iam_client::{Client, Credential, EnvironmentKey};
+
+        let seed = default_seed();
+        let testing_key = seed.app.testing_key.clone().unwrap();
+        let base = start(seed).await;
+        let path = format!("{base}/api/v1/application/testing-context");
+        assert_eq!(http().get(&path).send().await.unwrap().status(), 401);
+        assert_eq!(http().get(&path).basic_auth(APP, Some(SECRET)).send().await.unwrap().status(), 403);
+        assert_eq!(
+            http()
+                .get(&path)
+                .basic_auth(APP, Some(SECRET))
+                .header("X-Testing-Environment-Key", "wrong")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            403
+        );
+        let client = Client::builder(&base)
+            .unwrap()
+            .credential(Credential::application(APP, SECRET))
+            .environment(EnvironmentKey::new(testing_key).unwrap())
+            .auto_update(false)
+            .build()
+            .unwrap();
+        let context = client.applications().testing_context().await.unwrap();
+        assert_eq!(context.application.app_id, APP);
+        assert_eq!(context.environment_id, stable_id("testing-environment"));
+        let metadata = context.environment.unwrap();
+        assert_eq!(metadata.environment_id, context.environment_id);
+        assert_eq!((metadata.version, metadata.key_generation), (1, 1));
+        assert!(metadata.cleaned_at.is_none());
+        let again = client.applications().testing_context().await.unwrap();
+        assert_eq!(again.environment_id, context.environment_id);
+        assert_eq!(again.environment.unwrap().created_at, metadata.created_at);
     }
 
     /// The official client, end to end: negotiation, login, the snapshot, the error envelope,

@@ -416,7 +416,8 @@ mod tests {
             );
             ch.insert(row.into_bytes(), &Uuid::new_v4().to_string()).await
         };
-        if land(5).await.is_err() {
+        if let Err(error) = land(5).await {
+            assert!(std::env::var("CLICKHOUSE_URL").is_err(), "configured ClickHouse insert failed: {error}");
             return eprintln!("skipping: no ClickHouse with a `records` table at {url}");
         }
         let stale = Duration::from_millis(FLUSH_INTERVAL_MS + 50);

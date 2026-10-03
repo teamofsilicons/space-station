@@ -601,8 +601,11 @@ mod errors {
 /// answers on `CLICKHOUSE_URL` (default `http://dev:dev@localhost:8123`).
 #[test]
 fn rendered_sql_runs_on_clickhouse_and_the_row_policy_holds() {
-    let admin: reqwest::Url =
+    let mut admin: reqwest::Url =
         std::env::var("CLICKHOUSE_URL").unwrap_or_else(|_| "http://dev:dev@localhost:8123".into()).parse().unwrap();
+    // Application configuration includes /space_station; ClickHouse HTTP accepts
+    // SQL at / and these guard queries already fully qualify the physical table.
+    admin.set_path("/");
     let rt = tokio::runtime::Runtime::new().unwrap();
     let client = reqwest::Client::new();
     let run = |url: &reqwest::Url, params: &[(&str, &str)], sql: String| -> Result<String, String> {
@@ -616,6 +619,7 @@ fn rendered_sql_runs_on_clickhouse_and_the_row_policy_holds() {
         })
     };
     if let Err(e) = run(&admin, &[], "SELECT 1".into()) {
+        assert!(std::env::var("CLICKHOUSE_URL").is_err(), "configured ClickHouse is unavailable: {e}");
         eprintln!("skipping: no ClickHouse at {admin}: {e}");
         return;
     }
@@ -713,7 +717,10 @@ fn rendered_sql_runs_on_clickhouse_and_the_row_policy_holds() {
     user.set_password(Some(&std::env::var("CLICKHOUSE_QUERY_PASSWORD").unwrap_or_else(|_| "ss_query".into()))).unwrap();
     let physical = "SELECT DISTINCT org_id FROM space_station.records WHERE org_id LIKE 'guardtest-%' ORDER BY org_id FORMAT JSONEachRow";
     match run(&user, &[("SQL_org", &a)], "SELECT 1".into()) {
-        Err(e) => eprintln!("skipping the row-policy proof: ss_query cannot log in: {e}"),
+        Err(e) => {
+            assert!(std::env::var("CLICKHOUSE_URL").is_err(), "configured ss_query cannot log in: {e}");
+            eprintln!("skipping the row-policy proof: ss_query cannot log in: {e}");
+        }
         Ok(_) => {
             let as_org = |org: &str, sql: String| run(&user, &[("SQL_org", org)], sql);
             let none = BTreeMap::new();
