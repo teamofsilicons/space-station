@@ -79,7 +79,7 @@ jobs:
         env:
           HONEYCOMB_NO_MODIFY_PATH: '1'
           HONEYCOMB_NO_SERVICE: '1'
-          HONEYCOMB_VERSION: '0.4.0'
+          HONEYCOMB_VERSION: '0.6.1'
         run: |
           curl -fsSL https://raw.githubusercontent.com/teamofsilicons/silicon-honeycomb/main/install.sh -o /tmp/install-honeycomb.sh
           bash /tmp/install-honeycomb.sh
@@ -116,7 +116,7 @@ jobs:
           version=$(python3 -c 'import tomllib; print(tomllib.load(open("crates/cli/Cargo.toml", "rb"))["package"]["version"])')
           test "$GITHUB_REF_NAME" = "v$version"
           gh release create "v$version" \
-            apps/web/public/downloads/spacestation-*.tar.gz \
+            apps/web/public/downloads/spacestation-{darwin,linux,windows}-*.tar.gz \
             dist/spacestation-honeycomb-*.tar.gz \
             apps/web/public/downloads/*.tgz \
             apps/web/public/install.sh \
