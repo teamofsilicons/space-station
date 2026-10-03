@@ -1,3 +1,4 @@
+import { ArcButton, ArcInput } from './arc';
 // Tables: the overview (count, records, average lag, the most active over a period, polled every
 // 5 s), the list with access, key rotation and retirement, the create dialog that shows the key
 // once, and one table's records — a snapshot, newest first, paged by cursor.
@@ -37,13 +38,13 @@ export function NewTable(p: { close: () => void; rotated?: { table: string; key:
           >
             <label>
               Table ID
-              <input required pattern="[a-z0-9]{1,50}" maxlength={50} placeholder="orders" value={id()} onInput={(e) => setId(e.currentTarget.value.toLowerCase())} autofocus />
+              <ArcInput required pattern="[a-z0-9]{1,50}" maxlength={50} placeholder="orders" value={id()} onInput={(e) => setId(e.currentTarget.value.toLowerCase())} autofocus />
             </label>
             <p class="hint">Lowercase letters and digits, unique in {ws.org}. Records sent with the table's key land here.</p>
             <ErrorText message={a.error()} />
             <div class="dialog-foot">
-              <button type="button" onClick={p.close}>Cancel</button>
-              <button class="primary" disabled={a.busy()}>Create table</button>
+              <ArcButton type="button" onClick={p.close}>Cancel</ArcButton>
+              <ArcButton class="primary" disabled={a.busy()}>Create table</ArcButton>
             </div>
           </form>
         }
@@ -58,7 +59,7 @@ export function NewTable(p: { close: () => void; rotated?: { table: string; key:
               <a class="button ghost" href="/docs/getting-started" target="_blank">
                 Send your first records <Icon name="external" />
               </a>
-              <button
+              <ArcButton
                 class="primary"
                 onClick={() => {
                   p.close();
@@ -66,7 +67,7 @@ export function NewTable(p: { close: () => void; rotated?: { table: string; key:
                 }}
               >
                 Open {m().table}
-              </button>
+              </ArcButton>
             </div>
           </>
         )}
@@ -120,9 +121,9 @@ export function Tables() {
           <p class="muted">Records arrive with a table's key. Space Windows and notifications read them with SQL.</p>
         </div>
         <Show when={!retired()}>
-          <button class="primary" onClick={() => ws.create("table")}>
+          <ArcButton class="primary" onClick={() => ws.create("table")}>
             <Icon name="plus" /> New table
-          </button>
+          </ArcButton>
         </Show>
       </header>
       <Show when={!retired() && rows() && !rows()!.length} fallback={
@@ -197,9 +198,9 @@ export function Tables() {
                         <span class="wide muted" title={when(t.created_at)}>
                           @{t.created_by} · {ago(t.created_at)}
                         </span>
-                        <button class="icon" aria-label={`Actions for ${t.id}`} disabled={a.busy()} onClick={(e) => menu(e, t)}>
+                        <ArcButton class="icon" aria-label={`Actions for ${t.id}`} disabled={a.busy()} onClick={(e) => menu(e, t)}>
                           <Icon name="more" />
-                        </button>
+                        </ArcButton>
                       </div>
                     )}
                   </For>
@@ -212,12 +213,12 @@ export function Tables() {
         <div class="hero-empty">
           <Empty icon="table" title="No tables yet">
             <p>A table is where an app's records land. It only needs an id; its key is shown once.</p>
-            <button class="primary large" onClick={() => ws.create("table")}>
+            <ArcButton class="primary large" onClick={() => ws.create("table")}>
               <Icon name="plus" /> Create your first table
-            </button>
+            </ArcButton>
           </Empty>
           <p class="hero-foot">
-            <button class="link" onClick={() => setRetired(true)}>Show retired tables</button>
+            <ArcButton class="link" onClick={() => setRetired(true)}>Show retired tables</ArcButton>
           </p>
         </div>
       </Show>
@@ -359,9 +360,9 @@ export function TableView() {
             )}
           </Show>
         </div>
-        <button disabled={busy()} onClick={() => void enter()} title="Take a new snapshot to see records that arrived since">
+        <ArcButton disabled={busy()} onClick={() => void enter()} title="Take a new snapshot to see records that arrived since">
           <Icon name="reload" /> Refresh
-        </button>
+        </ArcButton>
       </header>
       <Show when={snapshot()}>
         {(s) => (
@@ -383,7 +384,7 @@ export function TableView() {
         >
           <label class="inline">
             Last
-            <input aria-label="Last N records" type="number" min="1" max="10000" step="1" value={draftLimit()} onInput={(e) => setDraftLimit(e.currentTarget.value)} onBlur={() => draftLimit() !== String(limit()) && apply()} disabled={busy()} />
+            <ArcInput aria-label="Last N records" type="number" min="1" max="10000" step="1" value={draftLimit()} onInput={(e) => setDraftLimit(e.currentTarget.value)} onBlur={() => draftLimit() !== String(limit()) && apply()} disabled={busy()} />
             records
           </label>
           <label class="inline">
@@ -396,12 +397,12 @@ export function TableView() {
             <span class="muted">
               {total() ? page() * size() + 1 : 0}–{Math.min(page() * size() + rows().length, total())} of {total().toLocaleString()}
             </span>
-            <button type="button" class="icon" aria-label="Previous page" disabled={busy() || page() === 0} onClick={() => void go(page() - 1)}>
+            <ArcButton type="button" class="icon" aria-label="Previous page" disabled={busy() || page() === 0} onClick={() => void go(page() - 1)}>
               <Icon name="back" />
-            </button>
-            <button type="button" class="icon" aria-label="Next page" disabled={busy() || page() + 1 >= pageCount() || rows().length < size()} onClick={() => void go(page() + 1)}>
+            </ArcButton>
+            <ArcButton type="button" class="icon" aria-label="Next page" disabled={busy() || page() + 1 >= pageCount() || rows().length < size()} onClick={() => void go(page() + 1)}>
               <Icon name="forward" />
-            </button>
+            </ArcButton>
           </span>
         </form>
         <Show when={rows().length} fallback={<Show when={!busy() && !error()}><p class="empty-line">No records in this snapshot.</p></Show>}>
@@ -414,11 +415,11 @@ export function TableView() {
             <For each={rows()}>
               {(row) => (
                 <div class="rec" classList={{ open: open() === row.record_id }} role="row">
-                  <button type="button" class="rec-line" onClick={() => setOpen(open() === row.record_id ? undefined : row.record_id)} aria-expanded={open() === row.record_id}>
+                  <ArcButton type="button" class="rec-line" onClick={() => setOpen(open() === row.record_id ? undefined : row.record_id)} aria-expanded={open() === row.record_id}>
                     <span title={time(row.registered_ts_ms).toLocaleString()}>{time(row.registered_ts_ms).toLocaleTimeString()}<small>{time(row.registered_ts_ms).toLocaleDateString()}</small></span>
                     <span title={time(row.event_ts_ms).toLocaleString()}>{time(row.event_ts_ms).toLocaleTimeString()}<small>+{Math.max(0, Number(row.registered_ts_ms) - Number(row.event_ts_ms)).toLocaleString()} ms</small></span>
                     <Preview value={row.record} />
-                  </button>
+                  </ArcButton>
                   <Show when={open() === row.record_id}>
                     <div class="rec-detail">
                       <div>
@@ -442,7 +443,7 @@ export function TableView() {
         </Show>
         <ErrorText message={error()} />
         <Show when={error() && !busy() && (!snapshot() || retryPage() !== undefined)}>
-          <button onClick={() => (snapshot() ? void go(retryPage()!) : void enter())}>Retry</button>
+          <ArcButton onClick={() => (snapshot() ? void go(retryPage()!) : void enter())}>Retry</ArcButton>
         </Show>
       </section>
     </div>

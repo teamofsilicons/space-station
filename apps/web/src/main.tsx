@@ -9,6 +9,7 @@ import { Inspirations, PublicDocs } from "./docs";
 import { Icon, Mark } from "./icons";
 import "./theme";
 import "./style.css";
+import "./refinement.css";
 
 const orNull = async <T,>(call: Promise<T>, empty: T) => {
   try {

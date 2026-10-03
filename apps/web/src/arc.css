@@ -1,0 +1,68 @@
+/* Adapted from UIArc free MIT components. See UIARC.md and UIARC-LICENSE. */
+:root {
+ --arc-space-2:.5rem; --arc-space-3:.75rem; --arc-space-4:1rem; --arc-space-5:1.25rem;
+ --arc-radius-control:10px; --arc-radius-panel:16px; --arc-radius-pill:9999px;
+ --arc-control-height-sm:32px; --arc-control-height-md:38px; --arc-control-height-lg:44px;
+ --arc-text-xs:12px; --arc-text-sm:13px; --arc-text-lg:18px; --arc-leading-body:1.4; --arc-tracking-body:-.01em;
+ --arc-duration-fast:160ms; --arc-duration-standard:240ms; --arc-duration-instant:.01ms; --arc-ease-standard:cubic-bezier(.22,1,.36,1);
+ --arc-background:#fff; --arc-surface:#fff; --arc-surface-muted:#f5f6f8; --arc-foreground:#20242c;
+ --arc-border:#e4e7ec; --arc-border-strong:#bdc4ce; --arc-text-secondary:#566170; --arc-text-muted:#677384;
+ --arc-focus-ring:#2468d5; --arc-danger:#b42334; --arc-success:#19734f; --arc-warning:#946000;
+ --arc-accent:#2468d5; --arc-accent-strong:#1c54af; --arc-accent-subtle:#edf3ff;
+ --arc-shadow-resting:0 1px 2px #14213b08; --arc-shadow-raised:0 6px 18px #14213b10;
+}
+.arc-button { position: relative; display: inline-flex; min-height: var(--arc-control-height-md); align-items: center; justify-content: center; gap: var(--arc-space-2); border: 1px solid transparent; border-radius: var(--arc-radius-control); padding: 0 var(--arc-space-4); font: inherit; font-size: var(--arc-text-sm); font-weight: 500; line-height: var(--arc-leading-body); white-space: nowrap; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: color var(--arc-duration-fast) var(--arc-ease-standard), background var(--arc-duration-fast) var(--arc-ease-standard), border-color var(--arc-duration-fast) var(--arc-ease-standard), opacity var(--arc-duration-fast) var(--arc-ease-standard), box-shadow var(--arc-duration-fast) var(--arc-ease-standard); }
+.arc-button:focus-visible { outline: 2px solid var(--arc-focus-ring); outline-offset: 3px; }
+.arc-button:disabled { cursor: not-allowed; opacity: .52; }
+.arc-button[aria-busy="true"] { cursor: progress; }
+.arc-button-primary { color: var(--arc-background); background: var(--arc-foreground); border-color: var(--arc-foreground); }
+.arc-button-secondary { color: var(--arc-foreground); background: var(--arc-surface); border-color: var(--arc-border); }
+.arc-button-ghost { color: var(--arc-text-secondary); background: transparent; border-color: transparent; }
+.arc-button-danger { color: var(--arc-danger); background: var(--arc-surface); border-color: var(--arc-border); }
+.arc-card { position: relative; min-width: 0; overflow: hidden; isolation: isolate; border: 1px solid var(--arc-border); border-radius: var(--arc-radius-panel); background: var(--arc-surface); color: var(--arc-foreground); transition: border-color var(--arc-duration-fast) var(--arc-ease-standard), box-shadow var(--arc-duration-standard) var(--arc-ease-standard); }
+.arc-card-content { padding: var(--arc-space-5); }
+.arc-card-title { width: fit-content; max-width: 100%; margin: 0; font-size: var(--arc-text-lg); font-weight: 500; letter-spacing: var(--arc-tracking-body); line-height: 1.3; text-wrap: balance; }
+.arc-card-description { max-width: 34ch; margin: var(--arc-space-2) 0 0; color: var(--arc-text-secondary); font-size: var(--arc-text-sm); line-height: var(--arc-leading-body); text-wrap: pretty; }
+.arc-card-footer { display: flex; align-items: center; justify-content: space-between; gap: var(--arc-space-3); margin-top: var(--arc-space-5); }
+.arc-input { width: 100%; min-height: var(--arc-control-height-md); padding: 0 var(--arc-space-3); border: 1px solid var(--arc-border-strong); border-radius: var(--arc-radius-control); background: var(--arc-surface); color: var(--arc-foreground); font: inherit; font-size: var(--arc-text-sm); line-height: var(--arc-leading-body); letter-spacing: var(--arc-tracking-body); outline: none; box-shadow: 0 0 0 6px transparent; transition: border-color var(--arc-duration-fast) var(--arc-ease-standard), box-shadow var(--arc-duration-standard) var(--arc-ease-standard), background-color var(--arc-duration-fast) var(--arc-ease-standard); }
+.arc-input::placeholder { color: var(--arc-text-muted); }
+.arc-input:focus-visible { border-color: var(--arc-foreground); box-shadow: 0 0 0 3px var(--arc-focus-ring); outline: 2px solid transparent; outline-offset: 2px; }
+.arc-input[aria-invalid="true"] { border-color: var(--arc-danger); }
+.arc-input:disabled { cursor: not-allowed; opacity: .5; background: var(--arc-surface-muted); }
+.arc-badge {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  border: 1px solid var(--arc-badge-border, var(--arc-border));
+  border-radius: var(--arc-radius-pill);
+  padding: 0 10px;
+  color: var(--arc-badge-foreground, var(--arc-foreground));
+  background: var(--arc-badge-background, var(--arc-surface));
+  font-size: var(--arc-text-xs);
+  font-weight: 500;
+  letter-spacing: -.01em;
+  line-height: 1;
+  white-space: nowrap;
+  /* Clip keeps the inline baseline while the pill morphs around swapped text. */
+  overflow: clip;
+  transition: border-color var(--arc-duration-standard) var(--arc-ease-standard), background-color var(--arc-duration-standard) var(--arc-ease-standard), color var(--arc-duration-standard) var(--arc-ease-standard);
+}
+.arc-badge-neutral { --arc-badge-color: var(--arc-text-secondary); --arc-badge-foreground: var(--arc-text-secondary); --arc-badge-background: var(--arc-surface-muted); --arc-badge-border: var(--arc-border); }
+.arc-badge-success { --arc-badge-color: var(--arc-success); --arc-badge-foreground: var(--arc-success); --arc-badge-background: color-mix(in oklch, var(--arc-success) 10%, var(--arc-surface)); --arc-badge-border: color-mix(in oklch, var(--arc-success) 25%, var(--arc-border)); }
+.arc-badge-info { --arc-badge-color: var(--arc-accent); --arc-badge-foreground: var(--arc-accent-strong); --arc-badge-background: var(--arc-accent-subtle); --arc-badge-border: color-mix(in oklch, var(--arc-accent) 24%, var(--arc-border)); }
+.arc-badge-warning { --arc-badge-color: var(--arc-warning); --arc-badge-foreground: var(--arc-warning); --arc-badge-background: color-mix(in oklch, var(--arc-warning) 11%, var(--arc-surface)); --arc-badge-border: color-mix(in oklch, var(--arc-warning) 27%, var(--arc-border)); }
+.arc-badge-danger { --arc-badge-color: var(--arc-danger); --arc-badge-foreground: var(--arc-danger); --arc-badge-background: color-mix(in oklch, var(--arc-danger) 10%, var(--arc-surface)); --arc-badge-border: color-mix(in oklch, var(--arc-danger) 26%, var(--arc-border)); }
+
+.arc-button { min-width:0; }
+.arc-button.primary,.arc-button-primary { color:white; background:var(--arc-accent); border-color:var(--arc-accent); }
+.arc-button.text-button,.arc-button.link,.arc-button.icon-button,.arc-button.ghost { min-height:unset; padding:inherit; background:transparent; border-color:transparent; }
+.arc-button:focus-visible,.arc-input:focus-visible { outline:2px solid var(--arc-focus-ring); outline-offset:3px; }
+.arc-button:disabled { cursor:not-allowed; }
+@media(hover:hover) and (pointer:fine) {
+ .arc-button:hover:not(:disabled) { box-shadow:var(--arc-shadow-resting); }
+ .arc-button.primary:hover:not(:disabled) { background:var(--arc-accent-strong); border-color:var(--arc-accent-strong); }
+ .arc-card:hover { border-color:var(--arc-border-strong); }
+}
+@media(prefers-reduced-motion:reduce) { .arc-button,.arc-card,.arc-input,.arc-badge { transition:none; } }
+
+.arc-input:focus-visible { border-color:var(--arc-focus-ring); box-shadow:0 0 0 3px color-mix(in srgb,var(--arc-focus-ring) 14%,transparent); outline:2px solid var(--arc-focus-ring); outline-offset:1px; }
