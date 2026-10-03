@@ -35,12 +35,11 @@ silicon obtains a short-lived token (`slt`) from IAM by their own means — the 
 --app-id 'spacestation' --org <org>`, `iam silicon-login --app-id 'spacestation'` — and hands
 it over; the backend exchanges it once (`POST /api/v1/app-auth/tokens`, HTTP Basic with the
 canonical Application id, a form body) and holds the resulting Application session itself. The
-backend is the **only** thing in the repo that talks to IAM. It uses a vendored snapshot of the
-published **`silicon-iam-client`** 4.0.0 with one
-[documented patch](../vendor/silicon-iam-client/SPACE-STATION-PATCH.md): webhook `aggregate.id`
-accepts a nonempty string, including canonical membership IDs, while event IDs remain UUIDs
-and signature/envelope checks are retained. `crates/backend/src/iam/client.rs` builds it with
-`auto_update(false)` for compatibility (SDK 4 disables runtime dependency updates unconditionally)
+backend is the **only** thing in the repo that talks to IAM. It vendors the published **`silicon-iam-client`** 5.2.1 with the
+[canonical webhook ID patch](../vendor/silicon-iam-client/SPACE-STATION-PATCH.md), preserving
+signature and envelope verification.
+`crates/backend/src/iam/client.rs` builds it with
+`auto_update(false)` for compatibility (SDK 5 disables runtime dependency updates unconditionally)
 and an explicit `User-Agent` (IAM's edge answers an HTML 403 without one), and wraps the calls the
 contract in `docs/ARCHITECTURE.md`, "Identity", names: a fail-closed version handshake at boot,
 exchange, refresh, introspection (with the `authorization` snapshot), revocation, and the webhook

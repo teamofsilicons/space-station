@@ -31,7 +31,7 @@ The split is also one of state. The crate is stateless: `Auth` is a value the ca
 `Space` is a function of `(url, Auth)`, nothing reads the environment or the home directory, and
 the one thing that rotates — the Application session IAM issued — lives in the backend, which is
 the only party that ever holds it. The CLI is the stateful shell: it owns
-`~/.space-station/auth.json`, the current org, and the browser.
+`<home>/iam5/<server-hash>/<profile>/auth.json`, the selected account context, and the browser.
 
 ## The smallest real thing
 
@@ -152,11 +152,15 @@ existing saved org overrides that default. A session is bound to exactly one org
 a prompt while its own session is good. Space Station never sees an IAM bearer of any kind — not a
 silicon's `stk-`, not a `sat_` or a `cat_`, not a refresh token, not the Application's `ask_`
 secret outside the backend — and nothing in the crate or the CLI ever prompts for one. The backend
-speaks to IAM through a vendored snapshot of the published `silicon-iam-client` 4.0.0. Its
-[documented local patch](vendor/silicon-iam-client/SPACE-STATION-PATCH.md) accepts string
-webhook `aggregate.id` values, including canonical membership IDs, while retaining signature
-and envelope verification. The backend needs Rust 1.98; the published Space Station crates
-require 1.89 for portable file locking and carry no IAM dependency.
+speaks to IAM through a vendored copy of the published `silicon-iam-client` 5.2.1, with the
+[canonical webhook ID patch](vendor/silicon-iam-client/SPACE-STATION-PATCH.md). The backend needs Rust 1.98;
+the published Space Station crates require 1.89 for portable file locking and carry no IAM dependency.
+
+The website offers **Continue as Carbon** and **Continue as Silicon**, then verifies the returned
+identity against that choice. Each saved account/organization context has its own encrypted
+session. Use the account menu to switch; use `spacestation --profile work login` and
+`spacestation --profile personal login` for separate CLI contexts. IAM 5 requires a fresh login
+for old sessions; application data is retained. See [IAM 5 contexts](docs/IAM5-CONTEXTS.md).
 
 An Application may read nothing about the directory, but IAM tells it who just signed in: the
 introspection of an org-bound session carries the member's id, membership and **tags**, so tags are

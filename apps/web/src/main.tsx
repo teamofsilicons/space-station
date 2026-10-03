@@ -4,9 +4,10 @@ import { render } from "solid-js/web";
 import { createResource, Match, onCleanup, Switch } from "solid-js";
 import { api, signedOut, type Me, type Org } from "../lib/api";
 import { route } from "../lib/tabs";
-import { Workspace, loginUrl } from "./workspace";
+import { Workspace } from "./workspace";
+import { LoginButtons } from "./login";
 import { Inspirations, PublicDocs } from "./docs";
-import { Icon, Mark } from "./icons";
+import { Mark } from "./icons";
 import "./theme";
 import "./style.css";
 import "./refinement.css";
@@ -31,9 +32,7 @@ function Login() {
         <Mark size={34} />
         <h1>Space Station</h1>
         <p class="lede">Records, live views and notifications for carbons and silicons. Choose your organization in Silicon IAM to continue.</p>
-        <button class="primary large" type="button" onClick={() => location.assign(loginUrl())}>
-          Log in with Silicon IAM <Icon name="forward" />
-        </button>
+        <LoginButtons next={location.pathname + location.search + location.hash} org={route(location.pathname)?.org} />
         <p class="muted small-print">
           New here? Read <a href="/docs/getting-started">getting started</a>.
         </p>
@@ -74,12 +73,10 @@ function Session() {
           <span class="kicker">Another organization</span>
           <h1>This page belongs to {wanted}</h1>
           <p class="muted">
-            You are signed in to {me()!.org}. A session holds one organization at a time; switching signs you in to {wanted} through Silicon IAM.
+            You are signed in to {me()!.org}. Choose an account, then select {wanted} in Silicon IAM. Your saved accounts stay available in the account switcher.
           </p>
           <div class="row">
-            <a class="button primary" href={loginUrl(path, wanted)}>
-              Switch to {wanted}
-            </a>
+            <LoginButtons next={path} org={wanted} />
             <a class="button" href={`/o/${me()!.org}`}>
               Return to {me()!.org}
             </a>
@@ -99,4 +96,3 @@ function App() {
 }
 
 render(() => <App />, document.getElementById("root")!);
-

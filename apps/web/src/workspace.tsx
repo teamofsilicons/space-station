@@ -5,6 +5,7 @@ import { api, type DevError, type Me, type Org, type SpaceWindow, type Table, ty
 import type { RunError } from "../lib/runtime";
 import * as T from "../lib/tabs";
 import { trackFrontendEvent } from "../lib/telemetry";
+import { beginLogin, cancelLogin, type IdentityKind } from "../lib/login";
 import { createTabs, Link, Panes, TabStrip, useWorkspace, WorkspaceContext, type Toast, type Workspace as W } from "./tabs";
 import { closeMenu, count, Loading, MenuHost, openMenu, resource, when, type MenuItem } from "./ui";
 import { Icon, Mark } from "./icons";
@@ -28,8 +29,6 @@ const PAGES: Record<T.Kind, Component> = {
   settings: Settings,
   docs: DocsPage,
 };
-
-export const loginUrl = (next = "/", org?: string) => `/api/auth/login?next=${encodeURIComponent(next)}${org ? `&org=${encodeURIComponent(org)}` : ""}`;
 
 export function Workspace(p: { me: Me; orgs: Accessor<Org[]>; path: string }) {
   const org = p.me.org,
@@ -199,6 +198,11 @@ function Sidebar(p: { collapsed: boolean; toggle: () => void; dev: boolean }) {
   const o = `/o/${ws.org}`;
   const here = () => ws.tabs.active()?.path;
   const open = (path: string) => ws.tabs.state().tabs.some((t) => t.path === path);
+  const addAccount = async (kind: IdentityKind) => {
+    try { await beginLogin(kind); }
+    catch (error) { ws.toast({ tone: "bad", title: "Sign-in not completed", text: (error as Error).message }); }
+  };
+  onCleanup(cancelLogin);
   const item = (path: string, icon: string, label: string, extra?: any) => (
     <Link href={path} reuse class="side-link" classList={{ on: here() === path, open: open(path) && here() !== path }} title={label}>
       <Icon name={icon} />
@@ -218,7 +222,8 @@ function Sidebar(p: { collapsed: boolean; toggle: () => void; dev: boolean }) {
           } catch (error) { ws.toast({ tone: "bad", title: "Account switch failed", text: (error as Error).message }); }
         } })),
         "-",
-        { label: "Add an account or organization", icon: "plus", run: () => location.assign(loginUrl()) },
+        { label: "Continue as Carbon", icon: "plus", run: () => addAccount("carbon") },
+        { label: "Continue as Silicon", icon: "plus", run: () => addAccount("silicon") },
       ]);
     } catch (error) { ws.toast({ tone: "bad", title: "Accounts unavailable", text: (error as Error).message }); }
   };
@@ -253,7 +258,7 @@ function Sidebar(p: { collapsed: boolean; toggle: () => void; dev: boolean }) {
           <Icon name="panel" />
         </button>
       </div>
-      <button class="org-button" onClick={orgMenu} title="Switch organization">
+      <button class="org-button" onClick={orgMenu} title="Switch account or organization">
         <span class="org-badge">{ws.org.slice(0, 1).toUpperCase()}</span>
         <span class="side-label">{ws.orgs().find((x) => x.id === ws.org)?.name || ws.org}</span>
         <Icon name="chevron" />

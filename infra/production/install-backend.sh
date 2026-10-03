@@ -8,6 +8,7 @@ bin=/opt/space-station/bin
 release=$(cd "$(dirname "$0")/../.." && pwd)
 # The git revision of what is running, as the manual cutover recorded it; it follows the executable.
 revision=/opt/space-station/deployed-revision
+contract=/opt/space-station/deployed-auth-contract
 
 healthy() {
   for _ in $(seq 1 60); do
@@ -23,8 +24,14 @@ put() {
 }
 restore() {
   [ -x "$bin/space-station-backend.previous" ] || return 1
+  # IAM 5 invalidates legacy sessions. A pre-cutover binary would accept them again.
+  if [ "$(cat "$contract.previous" 2>/dev/null || true)" != 5 ]; then
+    printf 'Refusing rollback across the IAM 5 session boundary; deploy a repaired IAM 5 build\n' >&2
+    return 1
+  fi
   put "$bin/space-station-backend.previous"
   if [ -f "$revision.previous" ]; then cp -p "$revision.previous" "$revision"; fi
+  cp -p "$contract.previous" "$contract"
   systemctl restart space-station
   healthy
 }
@@ -38,7 +45,9 @@ fi
 mkdir -p "$bin"
 if [ -x "$bin/space-station-backend" ]; then cp -p "$bin/space-station-backend" "$bin/space-station-backend.previous"; fi
 if [ -f "$revision" ]; then cp -p "$revision" "$revision.previous"; fi
+if [ -f "$contract" ]; then cp -p "$contract" "$contract.previous"; else rm -f "$contract.previous"; fi
 put "$release/space-station-backend"
+printf '5\n' > "$contract"
 systemctl daemon-reload
 systemctl enable space-station
 systemctl restart space-station

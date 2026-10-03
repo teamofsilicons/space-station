@@ -53,9 +53,12 @@ to `/opt/space-station/release`; nothing is compiled there.
 On the API host `install-backend.sh` keeps the running executable as
 `/opt/space-station/bin/space-station-backend.previous`, installs the new one atomically, restarts
 `space-station.service` and waits up to a minute for `/api/health`. If the API is not healthy, it
-puts the previous executable back and the deploy fails. `--rollback` (or `install-backend.sh
+restores the previous executable only when it also enforces IAM 5; the deploy fails either way. `--rollback` (or `install-backend.sh
 --rollback` on the host) swaps the previous one back by hand. Schema migrations run at startup,
-so a schema change must stay compatible with the previous executable before it ships.
+so a schema change must stay compatible with an eligible rollback executable.
+The IAM 5 cutover invalidates legacy sessions without deleting application data. The installer
+records authentication contract 5 beside each binary and refuses to restore a pre-cutover
+executable. Repair an unsuccessful first cutover with another IAM 5 build; do not restore IAM 4.
 
 `--setup` first runs `setup-native.sh` on each host, ClickHouse first: apt packages (PostgreSQL
 and Redis on the API host, ClickHouse from its LTS repository), `configure-native.py`

@@ -24,7 +24,7 @@ see [the development guide](https://github.com/teamofsilicons/space-station/blob
 
 ## 1. Create a table
 
-In the app: name your organization, sign in with Silicon IAM, open **Tables** and create one.
+In the app: choose **Continue as Carbon** or **Continue as Silicon**, then select one organization in Silicon IAM. Sign-in opens in a popup, with a full-page fallback if your browser blocks it. Open **Tables** and create one. To add or switch a saved account and organization, use the organization button in the sidebar; each context keeps its own session and saved tabs.
 From a terminal, the same two steps — a session is bound to the one org it signs in to:
 
 ```

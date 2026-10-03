@@ -78,7 +78,7 @@ async fn slt(http: &reqwest::Client, state: &AppState, org: &str) -> String {
         state,
         "/api/v1/app-auth/short-lived-tokens",
         actor["access_token"].as_str(),
-        json!({"app_id": "spacestation", "org_id": org}),
+        json!({"app_id": "spacestation", "org_ids": [org]}),
     )
     .await["slt"]
         .as_str()
@@ -120,7 +120,7 @@ async fn saved_contexts_receipts_refresh_and_logout_remain_independent() {
         "login_expired"
     );
     query.insert("state".into(), nonce);
-    let callback_reply = callback(State(state.clone()), Query(query), landing_headers).await.unwrap();
+    let callback_reply = callback(State(state.clone()), Query(query.clone()), landing_headers.clone()).await.unwrap();
     let a = callback_reply
         .headers()
         .get_all(header::SET_COOKIE)
@@ -129,11 +129,28 @@ async fn saved_contexts_receipts_refresh_and_logout_remain_independent() {
         .find_map(|v| v.strip_prefix("ss_session=").and_then(|v| v.split(';').next()))
         .unwrap()
         .to_owned();
-    assert_eq!(a, open(&state, &code_a, Some("tos"), false, Some(&group)).await.unwrap());
+    assert_eq!(a, open(&state, &code_a, Some("tos"), false, Some(&group), None).await.unwrap());
+    assert_eq!(
+        open(&state, &code_a, Some("tos"), false, Some(&group), Some(Kind::Silicon)).await.unwrap_err().code,
+        "identity_kind_mismatch",
+    );
+    // Even a copied sealed login cookie cannot redeem a different SLT with the same state.
+    query.insert("slt".into(), slt(&http, &state, "tos").await);
+    assert_eq!(callback(State(state.clone()), Query(query), landing_headers).await.unwrap_err().code, "login_expired",);
     // A spent code cannot create another session row or adopt another browser's group.
-    assert!(open(&state, &code_a, Some("tos"), true, None).await.is_err());
-    assert!(open(&state, &code_a, Some("tos"), false, Some("another-browser")).await.is_err());
-    let b = open(&state, &slt(&http, &state, "acme").await, Some("acme"), false, Some(&group)).await.unwrap();
+    assert!(open(&state, &code_a, Some("tos"), true, None, None).await.is_err());
+    assert!(open(&state, &code_a, Some("tos"), false, Some("another-browser"), None).await.is_err());
+    let cli_code = slt(&http, &state, "tos").await;
+    let cli_secret = open(&state, &cli_code, None, true, None, None).await.unwrap();
+    assert_eq!(cli_secret, open(&state, &cli_code, None, true, None, None).await.unwrap());
+    sqlx::query("UPDATE iam_login_receipts SET created_at = now() - interval '3 minutes' WHERE id_hash = $1")
+        .bind(sha256_hex(&cli_secret))
+        .execute(&state.store.pg)
+        .await
+        .unwrap();
+    assert!(open(&state, &cli_code, None, true, None, None).await.is_err(), "spent SLTs cannot authenticate forever");
+    assert!(load(&state, &cli_secret).await.unwrap().is_some(), "the established session remains usable");
+    let b = open(&state, &slt(&http, &state, "acme").await, Some("acme"), false, Some(&group), None).await.unwrap();
     assert_eq!(load(&state, &a).await.unwrap().unwrap().org, "tos");
     assert_eq!(load(&state, &b).await.unwrap().unwrap().org, "acme");
     let rows = contexts(State(state.clone()), browser_headers(&state, &group, &b)).await.unwrap().0;
@@ -200,8 +217,76 @@ async fn saved_contexts_receipts_refresh_and_logout_remain_independent() {
     let out = logout(State(state.clone()), browser_headers(&state, &group, &a)).await.unwrap();
     assert!(out.headers()[header::SET_COOKIE].to_str().unwrap().starts_with(&format!("{COOKIE}={b};")));
     assert!(load(&state, &a).await.unwrap().is_none());
-    assert!(open(&state, &code_a, Some("tos"), false, Some(&group)).await.is_err(), "logout must survive replay");
+    assert!(open(&state, &code_a, Some("tos"), false, Some(&group), None).await.is_err(), "logout must survive replay");
     assert!(load(&state, &b).await.unwrap().is_some());
+    state.lease.release().await;
+    stub.abort();
+}
+
+#[tokio::test]
+#[ignore = "requires isolated Postgres and Redis URLs in SS_CONTEXT_TEST_DATABASE and SS_CONTEXT_TEST_REDIS"]
+async fn popup_checks_identity_before_reporting_success() {
+    let (state, stub, http, _stop) = fixture().await;
+    for (requested, actual, expected) in
+        [("silicon", "carbon", "error"), ("carbon", "carbon", "success"), ("silicon", "silicon", "success")]
+    {
+        let attempt = Uuid::new_v4();
+        let login_reply = login(
+            State(state.clone()),
+            Query(HashMap::from([
+                ("identity_kind".into(), requested.into()),
+                ("attempt_id".into(), attempt.to_string()),
+                ("display".into(), "popup".into()),
+            ])),
+            HeaderMap::new(),
+        )
+        .await
+        .unwrap();
+        let cookie = login_reply.headers()[header::SET_COOKIE].to_str().unwrap().split(';').next().unwrap();
+        let auth_url = url::Url::parse(login_reply.headers()[header::LOCATION].to_str().unwrap()).unwrap();
+        assert!(auth_url.query_pairs().any(|(key, value)| key == "identity_kind" && value == requested));
+        let callback_url = auth_url.query_pairs().find(|(key, _)| key == "redirect_uri").unwrap().1.into_owned();
+        let callback_url = url::Url::parse(&callback_url).unwrap();
+        let nonce = callback_url.query_pairs().find(|(key, _)| key == "state").unwrap().1.into_owned();
+        let code = if actual == "carbon" {
+            slt(&http, &state, "tos").await
+        } else {
+            let actor = post(
+                &http,
+                &state,
+                "/api/v1/silicon-auth/token",
+                None,
+                json!({"silicon_id": "si:bot", "silicon_token": "stk-0123456789abcdef0123456789abcdef"}),
+            )
+            .await;
+            post(
+                &http,
+                &state,
+                "/api/v1/app-auth/short-lived-tokens",
+                actor["access_token"].as_str(),
+                json!({"app_id": "spacestation", "org_ids": ["tos"]}),
+            )
+            .await["slt"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        let reply = callback(
+            State(state.clone()),
+            Query(HashMap::from([("state".into(), nonce), ("slt".into(), code.clone())])),
+            HeaderMap::from_iter([(header::COOKIE, cookie.parse().unwrap())]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(reply.headers()[header::CACHE_CONTROL], "no-store");
+        assert_eq!(reply.headers().contains_key(header::SET_COOKIE), expected == "success");
+        let body = axum::body::to_bytes(reply.into_body(), 10000).await.unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body.contains(&format!("\"status\":\"{expected}\"")), "{body}");
+        assert!(body.contains(&attempt.to_string()));
+        assert!(body.contains("\"http://localhost:3000\""));
+        assert!(!body.contains(&code) && !body.contains("oat_") && !body.contains("ort_"));
+    }
     state.lease.release().await;
     stub.abort();
 }
@@ -214,7 +299,7 @@ async fn idle_browser_socket_closes_after_its_session_ends() {
 
     let (state, stub, http, _stop) = fixture().await;
     let group = URL_SAFE_NO_PAD.encode(crypto::random::<32>());
-    let secret = open(&state, &slt(&http, &state, "tos").await, Some("tos"), false, Some(&group)).await.unwrap();
+    let secret = open(&state, &slt(&http, &state, "tos").await, Some("tos"), false, Some(&group), None).await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let router = crate::live::routes().with_state(state.clone());

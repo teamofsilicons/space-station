@@ -899,6 +899,25 @@ pub enum OboConsentNodeAdditionalWarnings {
 /// Closed vocabulary from the contract.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum OboConsentNodeIamDisclosures {
+    /// `self.identity.read`
+    #[serde(rename = "self.identity.read")]
+    SelfIdentityRead,
+    /// `self.membership.read`
+    #[serde(rename = "self.membership.read")]
+    SelfMembershipRead,
+    /// `self.tags.read`
+    #[serde(rename = "self.tags.read")]
+    SelfTagsRead,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum OboGrantRevokedStatus {
     /// `revoked`
     Revoked,
@@ -1254,6 +1273,46 @@ pub enum SiliconWebhookSubscriptionTopic {
     MemberUpdates,
     /// `trust_updates`
     TrustUpdates,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SocialLoginLinkResultProvider {
+    /// `google`
+    Google,
+    /// `apple`
+    Apple,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SocialLoginStatusStatus {
+    /// `pending`
+    Pending,
+    /// `verified`
+    Verified,
+    /// `already_registered`
+    AlreadyRegistered,
+    /// `login_ready`
+    LoginReady,
+    /// `link_required`
+    LinkRequired,
+    /// `completed`
+    Completed,
+    /// `failed`
+    Failed,
+    /// `expired`
+    Expired,
     /// A value this crate predates. Held verbatim rather than
     /// failing the response it arrived in.
     #[serde(untagged)]
@@ -4129,6 +4188,12 @@ pub struct OboAuthorizedEndpoint {
 /// Contract type `OboConsentDecision`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OboConsentDecision {
+    /// Explicit acknowledgement of the displayed IAM disclosures for the
+    /// reviewed graph and selected provider accounts. Required true for
+    /// approval when any node requests disclosures; older clients must review
+    /// using an updated IAM interface.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iam_disclosures_reviewed: Option<bool>,
     /// One authenticated account and organization per provider; omitted
     /// providers use the root account and organization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4201,6 +4266,11 @@ pub struct OboConsentDetail {
 /// Contract type `OboConsentNode`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OboConsentNode {
+    /// Explicit IAM disclosures for this provider’s selected account and
+    /// organization, intersected with every application’s declared and
+    /// approved scopes along this path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iam_disclosures: Option<Vec<OboConsentNodeIamDisclosures>>,
     /// Globally unique `[app:obo:local]` identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub obo_id: Option<String>,
@@ -5182,6 +5252,31 @@ pub struct SiliconWebhookTagFilter {
     /// The contract's `additional_tag_ids`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub additional_tag_ids: Option<Vec<Uuid>>,
+}
+
+/// Contract type `SocialLoginLinkResult`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SocialLoginLinkResult {
+    /// The contract's `linked`.
+    pub linked: bool,
+    /// The contract's `provider`.
+    pub provider: SocialLoginLinkResultProvider,
+}
+
+/// Contract type `SocialLoginStatus`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SocialLoginStatus {
+    /// The contract's `status`.
+    pub status: SocialLoginStatusStatus,
+    /// Present only for a verified new email; resume ordinary signup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signup_session_id: Option<Uuid>,
+    /// The contract's `email`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    /// The contract's `display_name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
 }
 
 /// Contract type `SocialSignupStart`.

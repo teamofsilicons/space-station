@@ -400,7 +400,11 @@ async fn the_client_speaks_the_contract_end_to_end() {
         access_introspection.client_id.as_deref(),
         Some(public_app_id.as_str())
     );
-    assert_eq!(access_introspection.org_id, None);
+    assert_eq!(
+        access_introspection.org_id.as_deref(),
+        Some(org_id.as_str()),
+        "application login remains bound to the explicitly selected organization"
+    );
 
     let refresh_mutation = Mutation::new();
     let refreshed_tokens = application_client
@@ -1382,6 +1386,7 @@ async fn application_testing_imports_cycles_and_preserves_obo_authority() {
         .decide(
             shown.id,
             &models::OboConsentDecision {
+                iam_disclosures_reviewed: Some(true),
                 contexts: None,
                 decision: models::OboConsentDecisionDecision::Approve,
                 version: shown.version,

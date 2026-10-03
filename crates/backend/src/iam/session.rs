@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use axum::Router;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
-use axum::response::{AppendHeaders, IntoResponse, Redirect, Response};
+use axum::response::{AppendHeaders, Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -138,6 +138,8 @@ fn inconsistent() -> ApiError {
 struct Landing {
     nonce: String,
     expires_at: i64,
+    identity_kind: Kind,
+    attempt_id: Option<Uuid>,
     browser_group: Option<String>,
     org: Option<String>,
     next: String,
@@ -150,9 +152,22 @@ struct Landing {
 impl Landing {
     /// The query as a landing, or the one clear reason it is not one.
     fn read(q: &HashMap<String, String>) -> Result<Landing, ApiError> {
+        let identity_kind = match q.get("identity_kind").map(String::as_str).unwrap_or("carbon") {
+            "carbon" => Kind::Carbon,
+            "silicon" => Kind::Silicon,
+            _ => return Err(ApiError::bad_request("invalid_identity_kind", "choose carbon or silicon")),
+        };
+        let attempt_id = match (q.get("display").map(String::as_str), q.get("attempt_id")) {
+            (None, None) => None,
+            (Some("popup"), Some(id)) => Some(
+                Uuid::parse_str(id)
+                    .map_err(|_| ApiError::bad_request("invalid_attempt", "a popup attempt_id must be a UUID"))?,
+            ),
+            _ => return Err(ApiError::bad_request("invalid_attempt", "a popup needs display=popup and attempt_id")),
+        };
         let org = q.get("org").filter(|o| valid_org(o)).cloned();
         // A same-origin path that fits in a Location header; anything else lands on `/`.
-        let path = |n: &&String| n.starts_with('/') && !n.starts_with("//") && n.len() <= 1024;
+        let path = |n: &&String| n.starts_with('/') && !n.starts_with("//") && !n.contains('\\') && n.len() <= 1024;
         let next = q.get("next").filter(path).filter(|n| n.bytes().all(|b| b.is_ascii_graphic()));
         let port = |p: &String| p.parse::<u16>().ok().filter(|p| *p >= 1024);
         let cli = match q.get("cli") {
@@ -176,6 +191,8 @@ impl Landing {
         Ok(Landing {
             nonce: URL_SAFE_NO_PAD.encode(crypto::random::<32>()),
             expires_at: Utc::now().timestamp() + 600,
+            identity_kind,
+            attempt_id,
             browser_group: None,
             org: org.clone(),
             next: next.cloned().unwrap_or_else(|| "/".into()),
@@ -200,27 +217,39 @@ async fn login(
     );
     // IAM owns account and organization selection. A caller-selected org is checked against
     // the single org IAM returned; it never retargets an existing credential.
-    let url = login_url(&state.cfg.iam_auth_url, &state.cfg.iam_app_id, &callback_url(&state), &landing.nonce);
+    let url = login_url(&state.cfg.iam_auth_url, &state.cfg.iam_app_id, &callback_url(&state), &landing);
     let location = HeaderValue::from_str(&url).map_err(|e| ApiError::internal("login_redirect", e))?;
     let sealed = crypto::seal(&state.cfg.key, &json!(landing).to_string());
+    sqlx::query("DELETE FROM iam_login_attempts WHERE expires_at <= now()").execute(&state.store.pg).await?;
+    sqlx::query("INSERT INTO iam_login_attempts (state_hash, identity_kind, expires_at) VALUES ($1, $2, $3)")
+        .bind(sha256_hex(&landing.nonce))
+        .bind(landing.identity_kind.as_str())
+        .bind(DateTime::from_timestamp(landing.expires_at, 0).ok_or_else(expired)?)
+        .execute(&state.store.pg)
+        .await?;
     let cookie = set_cookie(&state, LOGIN_COOKIE, &sealed, "/api/auth", 600);
-    Ok((StatusCode::FOUND, [cookie, (header::LOCATION, location)]).into_response())
+    Ok((
+        StatusCode::FOUND,
+        [cookie, (header::LOCATION, location), (header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
+    )
+        .into_response())
 }
 
-fn login_url(auth_url: &str, app_id: &str, callback: &str, nonce: &str) -> String {
+fn login_url(auth_url: &str, app_id: &str, callback: &str, landing: &Landing) -> String {
     let mut query = form_urlencoded::Serializer::new(String::new());
     query.append_pair("app_id", app_id);
     let mut callback = url::Url::parse(callback).expect("configured callback URL");
-    callback.query_pairs_mut().append_pair("state", nonce);
+    callback.query_pairs_mut().append_pair("state", &landing.nonce);
     query.append_pair("redirect_uri", callback.as_str());
+    query.append_pair("identity_kind", landing.identity_kind.as_str());
+    query.append_pair("display", "popup");
     format!("{auth_url}?{}", query.finish())
 }
 
 /// IAM brings the browser back with `?slt=` and the state embedded in its callback URL. A
-/// browser login adds an independent account context and lands on `next`. A terminal login exchanges
-/// nothing: the slt is forwarded to the loopback listener, which spends it at `POST /auth/session`
-/// itself, so what crosses the browser (and its history) is a token IAM minted single-use for two
-/// minutes, never the long-lived `sscli-` secret.
+/// browser login adds an independent account context and lands on `next`. A terminal login verifies
+/// the selected identity before forwarding the SLT; its loopback exchange recovers the same session
+/// receipt. The browser never receives the terminal's long-lived `sscli-` secret.
 async fn callback(
     State(state): State<AppState>,
     Query(q): Query<HashMap<String, String>>,
@@ -235,12 +264,43 @@ async fn callback(
     {
         return Err(ApiError::unauthorized("login_expired", "login state expired or did not match; start again"));
     }
+    let result = complete_login(&state, &landing, &q).await;
+    let mut response = match result {
+        Err(error) if landing.attempt_id.is_some() => {
+            tracing::info!(code = %error.code, "popup login did not complete");
+            Ok(popup_completion(&state.cfg.origin, &landing, false))
+        }
+        other => other,
+    }?;
+    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response.headers_mut().insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    Ok(response)
+}
+
+async fn complete_login(
+    state: &AppState,
+    landing: &Landing,
+    q: &HashMap<String, String>,
+) -> Result<Response, ApiError> {
     let slt = q
         .get("slt")
         .filter(|s| !s.is_empty())
         .ok_or_else(|| ApiError::bad_request("slt_required", "IAM did not bring back a short-lived token"))?;
-    let done = set_cookie(&state, LOGIN_COOKIE, "", "/api/auth", 0);
+    let reserved = sqlx::query(
+        "UPDATE iam_login_attempts SET slt_hash = $2 WHERE state_hash = $1 AND expires_at > now() \
+         AND identity_kind = $3 AND (slt_hash IS NULL OR slt_hash = $2)",
+    )
+    .bind(sha256_hex(&landing.nonce))
+    .bind(sha256_hex(slt))
+    .bind(landing.identity_kind.as_str())
+    .execute(&state.store.pg)
+    .await?;
+    if reserved.rows_affected() != 1 {
+        return Err(ApiError::unauthorized("login_expired", "this login attempt expired or was already used"));
+    }
+    let done = set_cookie(state, LOGIN_COOKIE, "", "/api/auth", 0);
     if let Some(port) = landing.cli {
+        open(state, slt, landing.org.as_deref(), true, None, Some(landing.identity_kind)).await?;
         // RFC 8252 loopback: `port` is a bare number, so 127.0.0.1 is the only reachable target.
         let mut query = form_urlencoded::Serializer::new(String::new());
         query.append_pair("slt", slt);
@@ -251,14 +311,42 @@ async fn callback(
         return Ok(([done], Redirect::to(&listener)).into_response());
     }
     let group = landing.browser_group.as_deref().filter(|s| valid_group(s)).ok_or_else(expired)?;
-    let id = open(&state, slt, landing.org.as_deref(), false, Some(group)).await?;
+    let id = open(state, slt, landing.org.as_deref(), false, Some(group), Some(landing.identity_kind)).await?;
     let cookies = [
-        set_cookie(&state, COOKIE, &id, "/", 30 * 86_400),
-        set_cookie(&state, GROUP_COOKIE, group, "/", 30 * 86_400),
+        set_cookie(state, COOKIE, &id, "/", 30 * 86_400),
+        set_cookie(state, GROUP_COOKIE, group, "/", 30 * 86_400),
         done,
     ];
+    if landing.attempt_id.is_some() {
+        return Ok((AppendHeaders(cookies), popup_completion(&state.cfg.origin, landing, true)).into_response());
+    }
     let next = format!("{}{}", state.cfg.origin, landing.next);
     Ok((AppendHeaders(cookies), Redirect::to(&next)).into_response())
+}
+
+fn popup_completion(origin: &str, landing: &Landing, success: bool) -> Response {
+    let nonce = URL_SAFE_NO_PAD.encode(crypto::random::<16>());
+    let message = json!({
+        "type": "spacestation:login", "attempt_id": landing.attempt_id,
+        "status": if success { "success" } else { "error" },
+    });
+    let origin = json!(origin).to_string().replace('<', "\\u003c");
+    let heading = if success { "Signed in" } else { "Sign-in did not complete" };
+    let next = landing.next.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
+    let body = format!(
+        "<!doctype html><meta charset=utf-8><title>Space Station</title><h1>{heading}</h1>\
+         <p>You can close this window and return to Space Station.</p><a href=\"{next}\">Return to Space Station</a>\
+         <script nonce=\"{nonce}\">if(window.opener){{window.opener.postMessage({message},{origin});window.close();}}</script>"
+    );
+    let headers = [
+        (header::CACHE_CONTROL, "no-store".to_owned()),
+        (header::REFERRER_POLICY, "no-referrer".to_owned()),
+        (
+            header::CONTENT_SECURITY_POLICY,
+            format!("default-src 'none'; script-src 'nonce-{nonce}'; frame-ancestors 'none'"),
+        ),
+    ];
+    (headers, Html(body)).into_response()
 }
 
 #[derive(Deserialize)]
@@ -273,7 +361,7 @@ async fn session(State(state): State<AppState>, Json(body): Json<Exchange>) -> R
     if body.org.as_deref().is_some_and(|o| !valid_org(o)) {
         return Err(invalid_org());
     }
-    Ok(Json(json!({"token": open(&state, &body.slt, body.org.as_deref(), true, None).await?})))
+    Ok(Json(json!({"token": open(&state, &body.slt, body.org.as_deref(), true, None, None).await?})))
 }
 
 /// Exchanges `slt`, proves the membership and reads the snapshot once, and writes the row and the
@@ -285,6 +373,7 @@ async fn open(
     requested_org: Option<&str>,
     cli: bool,
     group: Option<&str>,
+    requested_kind: Option<Kind>,
 ) -> Result<String, ApiError> {
     state.iam.verify_world().await?;
     // Recover both the IAM mutation and the local result after an interrupted response. The
@@ -298,18 +387,22 @@ async fn open(
         .bind(login_key.to_string())
         .execute(&mut *tx)
         .await?;
-    let receipt: Option<String> = sqlx::query_scalar("SELECT id_hash FROM iam_login_receipts WHERE request_key = $1")
-        .bind(login_key)
-        .fetch_optional(&mut *tx)
-        .await?;
-    if let Some(receipt) = receipt {
-        if receipt != id_hash {
+    let receipt: Option<(String, DateTime<Utc>)> =
+        sqlx::query_as("SELECT id_hash, created_at FROM iam_login_receipts WHERE request_key = $1")
+            .bind(login_key)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if let Some((receipt, created_at)) = receipt {
+        // A spent SLT can recover an interrupted response briefly; it must never become a
+        // permanent credential for the unauthenticated terminal exchange endpoint.
+        if receipt != id_hash || Utc::now() - created_at >= TimeDelta::minutes(2) {
             return Err(expired());
         }
         let stored = fetch_locked(state, &mut tx, &id_hash).await?;
         if requested_org.is_some_and(|org| org != stored.org) || stored.browser_group != group.map(sha256_hex) {
             return Err(inconsistent());
         }
+        check_kind(stored.kind, requested_kind)?;
         return Ok(id);
     }
     let tokens = state.iam.exchange(slt, &login_key.to_string()).await.map_err(|e| match e.is_invalid_grant() {
@@ -319,14 +412,17 @@ async fn open(
         ),
         false => e.into(),
     })?;
+    if let Err(error) = check_kind(tokens.kind, requested_kind) {
+        discard(state, &tokens).await;
+        return Err(error);
+    }
     // The freshly minted family is proved before it is stored; every refusal below discards it, so
     // a family this server will never use is not left alive at IAM.
     let proof = match state.iam.introspect(&tokens.oat).await {
         Ok(proof) => proof,
-        Err(e) => {
-            discard(state, &tokens).await;
-            return Err(e.into());
-        }
+        // The exchange may already have succeeded at IAM. Keep its idempotent result usable
+        // when introspection fails, so retrying the same protected callback can finish login.
+        Err(e) => return Err(e.into()),
     };
     let org = tokens
         .org
@@ -380,6 +476,16 @@ async fn open(
         access::forget(state, org);
     }
     Ok(id)
+}
+
+fn check_kind(actual: Kind, requested: Option<Kind>) -> Result<(), ApiError> {
+    if requested.is_some_and(|kind| kind != actual) {
+        return Err(ApiError::unauthorized(
+            "identity_kind_mismatch",
+            "IAM returned a different kind of account; start again",
+        ));
+    }
+    Ok(())
 }
 
 /// The exchange must have been bound to `org`: everything here lives inside one, and a session
@@ -801,12 +907,14 @@ mod tests {
         let landing = Landing::read(&HashMap::from([("org".into(), "tos".into())])).unwrap();
         assert_eq!(landing.org.as_deref(), Some("tos"));
         let url =
-            login_url("https://auth.iam.example", "spacestation", "https://ss.example/api/auth/callback", "nonce");
+            login_url("https://auth.iam.example", "spacestation", "https://ss.example/api/auth/callback", &landing);
         let parsed = url::Url::parse(&url).unwrap();
         let query = parsed.query_pairs().collect::<HashMap<_, _>>();
-        assert_eq!(query.len(), 2);
+        assert_eq!(query.len(), 4);
         assert_eq!(query["app_id"], "spacestation");
-        assert_eq!(query["redirect_uri"], "https://ss.example/api/auth/callback?state=nonce");
+        assert_eq!(query["redirect_uri"], format!("https://ss.example/api/auth/callback?state={}", landing.nonce));
+        assert_eq!(query["identity_kind"], "carbon");
+        assert_eq!(query["display"], "popup");
         assert!(!query.contains_key("org_id"));
     }
 
@@ -946,6 +1054,17 @@ mod tests {
         assert_eq!((landing.cli, landing.state.as_deref()), (Some(4242), Some("n0nce")));
         assert_eq!(Landing::read(&q(&[("org", "tos"), ("cli", "80")])).unwrap_err().code, "invalid_cli");
         assert_eq!(Landing::read(&q(&[("org", "tos"), ("state", "a b")])).unwrap_err().code, "invalid_state");
+        assert_eq!(Landing::read(&q(&[("next", "/\\evil.example")])).unwrap().next, "/");
+        assert!(Landing::read(&q(&[("identity_kind", "other")])).is_err());
+        assert!(Landing::read(&q(&[("display", "popup")])).is_err());
+        let silicon = Landing::read(&q(&[
+            ("identity_kind", "silicon"),
+            ("display", "popup"),
+            ("attempt_id", "624606a7-4f46-4123-bb31-3379ee015b97"),
+        ]))
+        .unwrap();
+        assert_eq!(silicon.identity_kind, Kind::Silicon);
+        assert!(silicon.attempt_id.is_some());
         let plain = Landing::read(&q(&[("org", "tos"), ("next", "/o/tos")])).unwrap();
         let value = json!(plain);
         assert!(value.get("cli").is_none() && value.get("state").is_none());
