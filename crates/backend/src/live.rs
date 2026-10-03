@@ -85,6 +85,10 @@ async fn upgrade(
     Query(q): Query<HashMap<String, String>>,
 ) -> Response {
     let org = q.get("org").cloned().unwrap_or_default();
+    let mut headers = headers;
+    if let Some(context) = q.get("account_context").and_then(|s| s.parse().ok()) {
+        headers.insert("x-spacestation-context", context);
+    }
     ws.max_message_size(WS_MAX_MESSAGE)
         .max_frame_size(WS_MAX_MESSAGE)
         .on_upgrade(move |socket| session(socket, state, headers, org))

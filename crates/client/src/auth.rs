@@ -26,7 +26,7 @@ const REDIRECT_TIMEOUT: Duration = Duration::from_secs(10);
 const SESSION: &str = "sscli-";
 
 /// One credential. Its prefix says what it is.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Auth {
     bearer: String,
 }

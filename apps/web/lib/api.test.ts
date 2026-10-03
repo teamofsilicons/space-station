@@ -3,7 +3,7 @@
 // and under the explicit override; the table id shape the create form checks; the 401 event.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ApiError, TABLE_ID, api, signedOut, wsUrl } from "./api.ts";
+import { ApiError, TABLE_ID, api, signedOut, wsUrl, establishContext } from "./api.ts";
 
 const answering = (status: number, body: string | null, type = "text/plain") => {
   globalThis.fetch = async () => new Response(body, { status, headers: { "content-type": type } });
@@ -72,4 +72,28 @@ test("session discovery does not recursively trigger its own reload on 401", asy
   await fails(api("/orgs"));
   signedOut.removeEventListener("signedout",on);
   assert.equal(fired,0);
+});
+
+
+test("a response body that finishes after identity discovery cannot populate the new account", async () => {
+  let finish!: (value: unknown) => void;
+  globalThis.fetch = async () => ({ status: 200, ok: true, json: () => new Promise(resolve => { finish = resolve; }) }) as Response;
+  const pending = fails(api("/orgs/tos/tables"));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  establishContext("context-a");
+  finish([{ id: "old-account-data" }]);
+  assert.equal((await pending).code, "context_changed");
+});
+
+test("a mounted page keeps its original account even when another tab changes the cookie", async () => {
+  let marker: string | null = null;
+  globalThis.fetch = async (_url, init) => {
+    marker = new Headers(init?.headers).get("x-spacestation-context");
+    return new Response(JSON.stringify({ id: "c:bob", org: "tos", context_id: "context-b" }));
+  };
+  const error = await fails(api("/me"));
+  assert.equal(marker, "context-a");
+  assert.equal(error.code, "context_changed");
+  assert.throws(() => establishContext("context-b"), /account changed/);
+  assert.match(wsUrl("tos"), /account_context=context-a/);
 });

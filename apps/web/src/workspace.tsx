@@ -1,7 +1,7 @@
 // The signed-in station: a sidebar of the org's windows and tables, a strip of tabs over up to
 // three panes, the ⌘K palette, a developer-errors drawer (⌥⇧D), toasts, and the keyboard.
 import { createEffect, createSignal, For, on, onCleanup, Show, type Accessor, type Component } from "solid-js";
-import { api, type DevError, type Me, type Org, type SpaceWindow, type Table } from "../lib/api";
+import { api, type DevError, type Me, type Org, type SpaceWindow, type Table, type SavedContext } from "../lib/api";
 import type { RunError } from "../lib/runtime";
 import * as T from "../lib/tabs";
 import { trackFrontendEvent } from "../lib/telemetry";
@@ -38,8 +38,8 @@ export function Workspace(p: { me: Me; orgs: Accessor<Org[]>; path: string }) {
   const tables = resource(() => api<Table[]>(`${root}/tables`), 15000);
   const windows = resource(() => api<SpaceWindow[]>(`${root}/windows`), 30000);
   const arrived = T.route(p.path);
-  const fresh = !localStorage.getItem(`ss-tabs:${org}`) && (!arrived || arrived.kind === "home");
-  const tabs = createTabs(org, home, arrived && arrived.kind !== "home" ? p.path : `${home}/windows`);
+  const fresh = !localStorage.getItem(`ss-tabs:${p.me.context_id}:${org}`) && (!arrived || arrived.kind === "home");
+  const tabs = createTabs(org, home, arrived && arrived.kind !== "home" ? p.path : `${home}/windows`, p.me.context_id);
   if (arrived) tabs.arrive(p.path);
   // A first visit opens Space Windows once tables exist, Tables before that — once, never again.
   let decided = !fresh;
@@ -206,14 +206,21 @@ function Sidebar(p: { collapsed: boolean; toggle: () => void; dev: boolean }) {
       {extra}
     </Link>
   );
-  const orgMenu = (e: MouseEvent) => {
-    const rows = ws.orgs();
-    const all = rows.some((x) => x.id === ws.org) ? rows : [{ id: ws.org, name: ws.org }, ...rows];
-    openMenu(e, [
-      ...all.map((x): MenuItem => ({ label: x.name || x.id, icon: x.id === ws.org ? "check" : "blank", run: () => x.id !== ws.org && location.assign(loginUrl(`/o/${x.id}`, x.id)) })),
-      "-",
-      { label: "Add an organization", icon: "plus", run: () => location.assign(loginUrl()) },
-    ]);
+  const orgMenu = async (e: MouseEvent) => {
+    try {
+      const rows = await api<SavedContext[]>("/auth/contexts");
+      openMenu(e, [
+        ...rows.map((x): MenuItem => ({ label: `${x.actor} · ${x.org}`, icon: x.selected ? "check" : "blank", run: async () => {
+          if (x.selected) return;
+          try {
+            await api("/auth/context", "POST", { context_id: x.context_id });
+            location.assign(`/o/${encodeURIComponent(x.org)}`);
+          } catch (error) { ws.toast({ tone: "bad", title: "Account switch failed", text: (error as Error).message }); }
+        } })),
+        "-",
+        { label: "Add an account or organization", icon: "plus", run: () => location.assign(loginUrl()) },
+      ]);
+    } catch (error) { ws.toast({ tone: "bad", title: "Accounts unavailable", text: (error as Error).message }); }
   };
   const account = (e: MouseEvent) =>
     openMenu(e, [

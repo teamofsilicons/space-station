@@ -43,7 +43,7 @@ function Login() {
 
 function Session() {
   const [me, { refetch }] = createResource(() => orNull(api<Me>("/me"), null));
-  const [orgs] = createResource(() => orNull(api<Org[]>("/orgs"), [] as Org[]));
+  const [orgs] = createResource(() => me()?.context_id, () => orNull(api<Org[]>("/orgs"), [] as Org[]));
   const out = () => refetch();
   signedOut.addEventListener("signedout", out);
   onCleanup(() => signedOut.removeEventListener("signedout", out));
@@ -60,7 +60,7 @@ function Session() {
         <div class="center-card">
           <h1>The station is not answering</h1>
           <p class="error">{(me.error as Error).message}</p>
-          <button class="primary" onClick={() => refetch()}>
+          <button class="primary" onClick={() => (me.error as {status?: number}).status === 409 ? location.reload() : refetch()}>
             Retry
           </button>
         </div>

@@ -18,6 +18,15 @@ type Envelope = { error?: { code: string; message: string } };
 
 /** Fires on every 401, whichever widget asked: the session is gone. The shell listens and re-checks /me. */
 export const signedOut = new EventTarget();
+let accountContext: string | undefined;
+export function currentContext() { return accountContext; }
+function contextChanged() { return new ApiError("context_changed", "The selected account changed. Reload this page before continuing.", 409); }
+// A page keeps its original identity for its entire lifetime. Account selection performs a full
+// navigation, which also destroys forms, caches, sockets and pending rendering work together.
+export function establishContext(context: string) {
+  if (accountContext && accountContext !== context) throw contextChanged();
+  accountContext = context;
+}
 
 /** The id shape a table may have; the backend refuses anything else. */
 export const TABLE_ID = /^[a-z0-9]{1,50}$/;
@@ -27,23 +36,26 @@ export async function api<T = void>(
   method = "GET",
   body?: unknown,
 ): Promise<T> {
+  const context = accountContext;
   const res = await fetch(`/api${path}`, {
     method,
-    headers:
-      body === undefined ? undefined : { "content-type": "application/json" },
+    headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...(context ? { "x-spacestation-context": context } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (res.status === 401 && path !== "/me" && path !== "/orgs")
-    signedOut.dispatchEvent(new Event("signedout"));
   const data =
     res.status === 204
       ? undefined
       : ((await res.json().catch(() => undefined)) as
           (T & Envelope) | undefined);
+  if (context !== accountContext) throw contextChanged();
+  if (res.status === 401 && path !== "/me" && path !== "/orgs") signedOut.dispatchEvent(new Event("signedout"));
   if (method !== "GET" && !path.endsWith("/query") && !path.startsWith("/web/telemetry")) {
     trackFrontendEvent("api_mutation", { method, path, status: res.status });
   }
-  if (res.ok) return data as T;
+  if (res.ok) {
+    if (path === "/me" && (data as Me | undefined)?.context_id) establishContext((data as unknown as Me).context_id);
+    return data as T;
+  }
   // Every backend error carries `{error}`; a bare status is the API proxy (or a proxy) answering for a backend that did not.
   const { code, message } = data?.error ?? {
     code: "backend_unreachable",
@@ -58,13 +70,15 @@ export function wsUrl(org: string, override?: string) {
     (location.hostname === "localhost"
       ? "ws://localhost:8080/api/ws"
       : "wss://backend.spacestation.teamofsilicons.com/api/ws");
-  return `${base}/mission-control?org=${encodeURIComponent(org)}`;
+  return `${base}/mission-control?org=${encodeURIComponent(org)}${accountContext ? `&account_context=${encodeURIComponent(accountContext)}` : ""}`;
 }
 
 /** An organization: the handle people type and URLs carry, and its name once IAM's events have told the mirror one. */
 export type Org = { id: string; name?: string };
 /** Who this session is: an actor, bound to one org; `app` is where the UI lives. */
+export type SavedContext = { context_id: string; actor: string; org: string; selected: boolean };
 export type Me = {
+  context_id: string;
   id: string;
   kind: "carbon" | "silicon";
   org: string;

@@ -61,7 +61,7 @@ Receivers bound the received text; nobody re-serialises to decide.
 | `spacewindow-{32hex}` | access token: dev server + CLI processors | AES-256-GCM under `SS_KEY` (viewable), plus sha256 for lookup, `last_used_at` | (org, actor). One live per (org, actor); rotatable |
 | `apikey-{32hex}` | programmatic read of tables / notifications | sha256, shown once | (org, scopes). No actor: acts for the org within its scope |
 | `whsec-{32hex}` | signing outgoing webhooks | AES-256-GCM under `SS_KEY` | shown once per (re)creation |
-| cookie `ss_session` | the browser | 32 random bytes; row keyed by sha256; holds the Application `oat_`/`ort_` encrypted | an actor, bound to one org |
+| cookie `ss_session` | the browser | opaque server-keyed secret; row keyed by sha256; holds the Application `oat_`/`ort_` encrypted | one account, organization and IAM world |
 | `sscli-{…}` | a terminal | the same session row, presented as a bearer | an actor, bound to one org |
 | `slt` | what a person or a silicon hands Space Station to sign in | never stored; exchanged once at IAM within 2 minutes | a session |
 
@@ -921,3 +921,5 @@ the environment; `processor` is spawned with `env: {}`.
 `GET /orgs/{org}/me → Identity {kind, id, org, tags}` gives a page the caller's id and tags
 inside the org its session is bound to; `GET /me → {id, kind, org, app}` needs no `?org=` for
 anyone, carbon or silicon, because the session already names its org.
+
+IAM 5 ordinary session isolation, browser account selection, local profile migration and retry receipts are described in [IAM5-CONTEXTS.md](IAM5-CONTEXTS.md).

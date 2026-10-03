@@ -1,6 +1,6 @@
 //! The one IAM client, the official `silicon-iam-client`. One `Client` is built at boot with the
 //! Application's Basic credential and, in a testing environment, its `X-Testing-Environment-Key`;
-//! SDK 4 never updates the consumer's dependencies at runtime. `system().negotiate()` is the
+//! SDK 5 never updates the consumer's dependencies at runtime. `system().negotiate()` is the
 //! boot handshake and is fail-closed.
 //! Everything Space Station asks IAM is here: exchanging a short-lived or refresh token at
 //! `app-auth/tokens`, introspecting a token — which since IAM 1.2.0 carries the `authorization`
@@ -21,13 +21,15 @@ use crate::http::ApiError;
 pub struct Client {
     inner: silicon_iam_client::Client,
     app_id: String,
+    testing_environment: Option<uuid::Uuid>,
+    pub world: String,
+    testing_stamp: Option<String>,
 }
 
 /// What `app-auth/tokens` answers to an exchange or a refresh.
 pub struct Tokens {
     pub oat: String,
     pub ort: String,
-    pub expires_in: i64,
     /// The actor's full public id: `c:alice`, `si:bot`.
     pub actor: String,
     pub kind: Kind,
@@ -41,6 +43,7 @@ pub struct Tokens {
 #[derive(Debug)]
 pub struct Introspection {
     pub active: bool,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
     pub org: Option<String>,
     pub membership_id: Option<String>,
     pub authorization: Option<Authorization>,
@@ -113,7 +116,7 @@ impl Client {
     pub async fn connect(cfg: &Config) -> Result<Client, Box<dyn std::error::Error + Send + Sync>> {
         let mut builder = silicon_iam_client::Client::builder(&cfg.iam_url)?
             .credential(Credential::application(cfg.iam_app_id.clone(), cfg.iam_app_secret.clone()))
-            // Explicit for older SDK compatibility; a no-op in SDK 4.
+            // Explicit for older SDK compatibility; a no-op in SDK 5.
             .auto_update(false)
             .user_agent(concat!("space-station-backend/", env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(10));
@@ -124,15 +127,45 @@ impl Client {
         // The handshake: fail closed if IAM does not agree on v1.
         let negotiated = inner.system().negotiate().await?;
         tracing::info!("IAM negotiated {} (build {})", negotiated.selected_api_version, negotiated.build);
-        Ok(Client { inner, app_id: cfg.iam_app_id.clone() })
+        let (testing_environment, testing_stamp) = if cfg.iam_test_key.is_some() {
+            let context = inner.applications().testing_context().await?;
+            if context.application.app_id != cfg.iam_app_id {
+                return Err("testing application mismatch".into());
+            }
+            (Some(context.environment_id), Some(testing_stamp_of(&context)?))
+        } else {
+            (None, None)
+        };
+        let world = space_station_shared::secrets::sha256_hex(
+            &serde_json::json!([cfg.iam_url.trim_end_matches('/'), cfg.iam_app_id, cfg.iam_test_key, testing_stamp])
+                .to_string(),
+        );
+        Ok(Client { inner, app_id: cfg.iam_app_id.clone(), testing_environment, world, testing_stamp })
+    }
+
+    /// A sandbox reset or key rotation invalidates cached session and directory context too.
+    pub async fn verify_world(&self) -> Result<(), IamError> {
+        if let Some(expected) = &self.testing_stamp {
+            let context =
+                self.inner.applications().testing_context().await.map_err(|e| map_error("testing context", e))?;
+            if context.application.app_id != self.app_id
+                || testing_stamp_of(&context).map_err(|e| IamError::Unavailable(e.into()))? != *expected
+            {
+                return Err(IamError::Unavailable(
+                    "testing environment changed; restart against the new environment and sign in again".into(),
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Spends a short-lived token: single-use, two minutes old at most.
-    pub async fn exchange(&self, slt: &str) -> Result<Tokens, IamError> {
+    pub async fn exchange(&self, slt: &str, key: &str) -> Result<Tokens, IamError> {
+        let key = IdempotencyKey::parse(key).map_err(|e| IamError::Unavailable(e.to_string()))?;
         let tokens = self
             .inner
             .oauth()
-            .login(&self.app_id, slt, &Mutation::new())
+            .login(&self.app_id, slt, &Mutation::with_key(key))
             .await
             .map_err(|e| map_error("the short-lived-token exchange", e))?;
         tokens_of(tokens)
@@ -161,8 +194,40 @@ impl Client {
         };
         let seen =
             self.inner.oauth().introspect(&request, None).await.map_err(|e| map_error("token introspection", e))?;
+        if seen.active {
+            let snapshot = seen
+                .authorization
+                .as_ref()
+                .ok_or_else(|| IamError::Unavailable("IAM 5 requires a single organization authorization".into()))?;
+            let same_actor = matches!(
+                (&seen.actor_type, &snapshot.actor_type),
+                (
+                    Some(models::TokenIntrospectionActorType::Carbon),
+                    Some(models::ApplicationAuthorizationActorType::Carbon)
+                ) | (
+                    Some(models::TokenIntrospectionActorType::Silicon),
+                    Some(models::ApplicationAuthorizationActorType::Silicon)
+                )
+            );
+            if seen.authorizations.is_some()
+                || seen.org_id.as_deref() != Some(snapshot.org_id.as_str())
+                || seen.public_id != snapshot.public_id
+                || !same_actor
+                || seen.client_id.as_deref() != Some(self.app_id.as_str())
+                || seen.audience.as_deref() != Some(self.app_id.as_str())
+                || seen.expires_at.is_none_or(|expiry| expiry <= chrono::Utc::now().timestamp())
+                || snapshot.testing_environment_id != self.testing_environment
+                || seen
+                    .scope
+                    .as_deref()
+                    .is_some_and(|scope| scope.split_whitespace().any(|scope| scope.starts_with("obo:")))
+            {
+                return Err(IamError::Unavailable("IAM returned a mismatched ordinary session context".into()));
+            }
+        }
         Ok(Introspection {
             active: seen.active,
+            expires_at: seen.expires_at.and_then(|v| chrono::DateTime::from_timestamp(v, 0)),
             org: seen.org_id,
             membership_id: seen.membership_id.map(|id| id.to_string()),
             authorization: seen.authorization.map(|a| authorization_of(a, &self.app_id)).transpose()?,
@@ -182,6 +247,15 @@ impl Client {
     }
 }
 
+fn testing_stamp_of(context: &models::ApplicationTestingContext) -> Result<String, &'static str> {
+    let metadata = context.environment.as_ref().ok_or("IAM omitted testing environment generation")?;
+    if metadata.environment_id != context.environment_id || metadata.key_generation <= 0 || metadata.version <= 0 {
+        return Err("IAM returned an invalid testing environment generation");
+    }
+    Ok(serde_json::json!([metadata.environment_id, metadata.version, metadata.key_generation, metadata.cleaned_at])
+        .to_string())
+}
+
 fn tokens_of(r: models::OAuthTokenResponse) -> Result<Tokens, IamError> {
     let actor = r.actor.ok_or_else(|| {
         IamError::Unavailable("IAM did not disclose the login identity; grant identity access before signing in".into())
@@ -194,14 +268,16 @@ fn tokens_of(r: models::OAuthTokenResponse) -> Result<Tokens, IamError> {
     if Kind::of(&actor.public_id) != Some(kind) {
         return Err(IamError::Unavailable("IAM returned a noncanonical or mismatched login identity".into()));
     }
-    Ok(Tokens {
-        oat: r.access_token,
-        ort: r.refresh_token,
-        expires_in: r.expires_in,
-        actor: actor.public_id,
-        kind,
-        org: r.org_id,
-    })
+    if r.org_id.as_deref().is_none_or(|org| !crate::sql::valid_org(org))
+        || r.token_type != "Bearer"
+        || r.expires_in <= 0
+        || r.access_token.is_empty()
+        || r.refresh_token.is_empty()
+        || r.scope.split_whitespace().any(|scope| scope.starts_with("obo:"))
+    {
+        return Err(IamError::Unavailable("IAM 5 requires one organization and ordinary session credentials".into()));
+    }
+    Ok(Tokens { oat: r.access_token, ort: r.refresh_token, actor: actor.public_id, kind, org: r.org_id })
 }
 
 fn authorization_of(a: models::ApplicationAuthorization, app: &str) -> Result<Authorization, IamError> {
@@ -211,6 +287,10 @@ fn authorization_of(a: models::ApplicationAuthorization, app: &str) -> Result<Au
         _ => None,
     });
     if a.audience != app
+        || a.membership_version < 1
+        || a.authorization_epoch < 1
+        || a.organization_id.is_nil()
+        || a.scopes.iter().any(|scope| scope.starts_with("obo:"))
         || (a.actor_type.is_some() && kind.is_none())
         || a.public_id
             .as_ref()
@@ -255,6 +335,24 @@ mod tests {
         let mut hidden = response;
         hidden.as_object_mut().unwrap().remove("actor");
         assert!(tokens_of(serde_json::from_value(hidden).unwrap()).is_err());
+    }
+
+    #[test]
+    fn ordinary_tokens_refuse_unscoped_and_feature_credentials() {
+        let base = serde_json::json!({ "access_token": "oat_test", "refresh_token": "ort_test", "expires_in": 1800,
+            "token_type": "Bearer", "scope": "identity:read", "org_id": "tos", "actor": {"type": "carbon", "public_id": "c:alice"} });
+        for (field, value) in [
+            ("org_id", serde_json::Value::Null),
+            ("org_id", serde_json::json!("")),
+            ("scope", serde_json::json!("obo:briefcase:write")),
+            ("expires_in", serde_json::json!(0)),
+            ("access_token", serde_json::json!("")),
+            ("token_type", serde_json::json!("Basic")),
+        ] {
+            let mut bad = base.clone();
+            bad[field] = value;
+            assert!(tokens_of(serde_json::from_value(bad).unwrap()).is_err(), "{field}");
+        }
     }
 
     #[test]

@@ -60,6 +60,9 @@ const CRATE: &str = "https://crates.io/crates/space-station";
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
+    /// Independent account/organization profile (or $SPACE_STATION_PROFILE).
+    #[arg(long, global = true)]
+    profile: Option<String>,
     /// The org to work in; else $SPACE_STATION_ORG, else the stored one. Login defaults to IAM's selection
     #[arg(long, global = true)]
     org: Option<String>,
@@ -327,13 +330,14 @@ enum Acting {
 
 fn main() {
     let mut args: Vec<_> = env::args_os().collect();
-    if let Some(i) = args.iter().position(|arg| arg == "login") {
-        if args.get(i + 1).is_some_and(|arg| arg == "status") {
-            args[i + 1] = "--status".into();
-        }
+    if let Some(i) = args.iter().position(|arg| arg == "login")
+        && args.get(i + 1).is_some_and(|arg| arg == "status")
+    {
+        args[i + 1] = "--status".into();
     }
     let mut cli = Cli::parse_from(args);
     cli.org = setting(cli.org, "SPACE_STATION_ORG");
+    cli.profile = setting(cli.profile, "SPACE_STATION_PROFILE");
     cli.api_key = setting(cli.api_key, "SPACE_STATION_API_KEY");
     cli.access_token = setting(cli.access_token, "SPACE_STATION_ACCESS_TOKEN");
     let acting = match (&cli.cmd, &cli.api_key, &cli.access_token) {
@@ -354,7 +358,9 @@ fn main() {
     let command = command_name(&cli.cmd);
     let started = Instant::now();
     let telemetry = Telemetry::from_env().ok().flatten();
-    let result = run(cli, &home);
+    let auth_home = profile_home(&home, cli.profile.as_deref(), &space_station::default_url());
+    let prior_auth = auth_home.as_ref().ok().and_then(|home| store::load(home).ok());
+    let result = auth_home.as_ref().map_err(|e| Error::Local(e.to_string())).and_then(|_| run(cli, &home));
     if let Some(telemetry) = telemetry {
         let (outcome, error_code) = match &result {
             Ok(()) => ("ok", None),
@@ -375,7 +381,13 @@ fn main() {
     }
     if let Err(e) = result {
         let refused = match (acting, &e) {
-            (Acting::Stored, Error::Api { status: 401, .. }) if store::expire(&home).is_ok() => out::EXPIRED,
+            (Acting::Stored, Error::Api { status: 401, .. })
+                if prior_auth
+                    .as_ref()
+                    .is_some_and(|seen| auth_home.as_ref().is_ok_and(|home| store::expire(home, seen).is_ok())) =>
+            {
+                out::EXPIRED
+            }
             (Acting::ApiKey, _) => out::KEY_REFUSED,
             (Acting::AccessToken, _) => out::TOKEN_REFUSED,
             _ => out::SIGN_IN,
@@ -423,7 +435,8 @@ fn login_status(home: &Path, url: &str, org: Option<String>, _as_json: bool) -> 
             return Ok(());
         }
     };
-    let org = org.or(stored.org.clone());
+    check_org(org.as_deref(), stored.org.as_deref())?;
+    let org = stored.org.clone();
     let Some(org) = org else {
         out::json(&serde_json::json!({"authenticated": false, "reason": "no_org"}))?;
         return Ok(());
@@ -462,8 +475,31 @@ fn percent_encode(value: &str) -> String {
         .collect()
 }
 
+fn profile_home(home: &Path, profile: Option<&str>, url: &str) -> Result<PathBuf, Error> {
+    let profile = profile.unwrap_or("default");
+    if profile.is_empty()
+        || profile.len() > 64
+        || !profile.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
+    {
+        return Err(Error::Local("profile must be 1-64 lowercase letters, digits, hyphens or underscores".into()));
+    }
+    // Retired auth.json is never silently adopted. URL separates production and sandbox hosts;
+    // backend rows additionally bind the exact IAM testing world and generation.
+    Ok(home.join("iam5").join(space_station::shared::secrets::sha256_hex(url)).join(profile))
+}
+
+fn check_org(requested: Option<&str>, selected: Option<&str>) -> Result<(), Error> {
+    if selected.is_none() || requested.is_some_and(|org| Some(org) != selected) {
+        return Err(Error::Local(
+            "this profile is bound to another organization; sign in with a separate --profile".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn run(cli: Cli, home: &Path) -> Result<(), Error> {
-    let Cli { cmd, org, json: as_json, api_key, access_token } = cli;
+    let Cli { cmd, org, json: as_json, api_key, access_token, profile } = cli;
+    let auth_home = profile_home(home, profile.as_deref(), &space_station::default_url())?;
     let url = space_station::default_url();
     // The credential this run acts with, and the org it works in: `--org` (or $SPACE_STATION_ORG)
     // above the one stored, which only the stored credential has.
@@ -472,8 +508,9 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
             (Some(key), _) => (Auth::api_key(key), org.clone()),
             (None, Some(token)) => (Auth::access_token(token), org.clone()),
             (None, None) => {
-                let stored = store::load(home)?;
-                (stored.auth, org.clone().or(stored.org))
+                let stored = store::load(&auth_home)?;
+                check_org(org.as_deref(), stored.org.as_deref())?;
+                (stored.auth, stored.org)
             }
         };
         let space = Space::new(&url, auth)?;
@@ -485,22 +522,22 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
     match cmd {
         Cmd::Login { token, no_browser, status } => {
             if status {
-                return login_status(home, &url, org, as_json);
+                return login_status(&auth_home, &url, org, as_json);
             }
-            let org = org.or_else(|| store::org(home)).unwrap_or_default();
+            let org = org.or_else(|| store::org(&auth_home)).unwrap_or_default();
             if let Some(token) = token {
                 let slt = if token == "-" { stdin()? } else { token };
-                return signed_in(home, &url, space_station::exchange(&url, &slt, &org)?, org);
+                return signed_in(&auth_home, &url, space_station::exchange(&url, &slt, &org)?, org);
             }
             let auth = space_station::login(&url, &org, |link| {
                 if no_browser || !out::open(link) {
                     eprintln!("open this to sign in:\n{link}")
                 }
             })?;
-            signed_in(home, &url, auth, org)?
+            signed_in(&auth_home, &url, auth, org)?
         }
         Cmd::Auth { token } => {
-            let org = org.or_else(|| store::org(home)).unwrap_or_default();
+            let org = org.or_else(|| store::org(&auth_home)).unwrap_or_default();
             let slt = match setting(token, "SPACE_STATION_TOKEN").as_deref() {
                 Some("-") => stdin()?,
                 Some(token) => token.to_string(),
@@ -508,11 +545,13 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
                     return Err(Error::Local("no token: pass one, `-` for stdin, or set $SPACE_STATION_TOKEN".into()));
                 }
             };
-            signed_in(home, &url, space_station::exchange(&url, &slt, &org)?, org)?
+            signed_in(&auth_home, &url, space_station::exchange(&url, &slt, &org)?, org)?
         }
         Cmd::Logout => {
-            let ended = store::load(home).and_then(|s| Space::new(&url, s.auth)?.logout());
-            store::forget(home)?;
+            let stored = store::load(&auth_home)?;
+            check_org(org.as_deref(), stored.org.as_deref())?;
+            let ended = Space::new(&url, stored.auth.clone())?.logout();
+            store::forget(&auth_home, Some(&stored))?;
             match ended {
                 Ok(()) => eprintln!("the stored credential is gone"),
                 Err(e) => {
@@ -530,7 +569,7 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
                     eprintln!("using: {what} from --access-token / $SPACE_STATION_ACCESS_TOKEN")
                 }
                 (None, None) => {
-                    if let Ok(stored) = store::load(home) {
+                    if let Ok(stored) = store::load(&auth_home) {
                         eprintln!("stored: {}", stored.auth.describe());
                     }
                 }
@@ -539,7 +578,11 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
         }
         Cmd::Orgs => out::rows(&space()?.orgs()?, ORGS, as_json)?,
         Cmd::Use { org } => {
-            store::update(home, |s| Ok(Stored { org: Some(org.clone()), ..s.ok_or_else(store::not_signed_in)? }))?;
+            store::update(&auth_home, |s| {
+                let stored = s.ok_or_else(store::not_signed_in)?;
+                check_org(Some(&org), stored.org.as_deref())?;
+                Ok(stored)
+            })?;
             eprintln!("working in {org}")
         }
 
@@ -773,7 +816,9 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
 /// is named, not raised.
 fn signed_in(home: &Path, url: &str, auth: Auth, org: String) -> Result<(), Error> {
     let space = Space::new(url, auth.clone())?;
-    let org = if org.is_empty() { space.session_org()? } else { org };
+    let selected = space.session_org()?;
+    check_org(if org.is_empty() { None } else { Some(&org) }, Some(&selected))?;
+    let org = selected;
     store::update(home, |_| Ok(Stored { auth: auth.clone(), org: Some(org.clone()) }))?;
     eprintln!("signed in to {org}: {}", auth.describe());
     match space.app_url() {

@@ -83,6 +83,7 @@ pub async fn authenticate(
     org: &str,
     guarded: bool,
 ) -> Result<Principal, ApiError> {
+    state.iam.verify_world().await?;
     if !valid_org(org) {
         return Err(invalid_org());
     }
@@ -105,6 +106,7 @@ pub async fn authenticate(
         return Err(bad_origin());
     }
     let cookie = session::cookie_value(headers).ok_or_else(unauthenticated)?;
+    session::guard_context(headers, &cookie)?;
     let session = session::load(state, &cookie).await?.ok_or_else(unauthenticated)?;
     Ok(Principal::Actor(bound(state, &session, org).await?))
 }
@@ -176,30 +178,28 @@ async fn own_session(state: &AppState, headers: &HeaderMap) -> Result<Session, A
 /// `{id, kind, org, app}` from the session or an access token. `app` is where the UI lives, so
 /// the package can build links without configuring it; `org` is the one this credential is bound to.
 async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Value>, ApiError> {
-    let (id, kind, org) = match bearer(&headers) {
+    let (id, kind, org, context_id) = match bearer(&headers) {
         Some(token) if token.starts_with("spacewindow-") => {
             let i = tokens::by_access_token(&state, token, None).await?;
-            (i.id, i.kind, i.org)
+            (i.id, i.kind, i.org, None::<String>)
         }
         _ => {
             let s = own_session(&state, &headers).await?;
-            (s.actor, s.kind, s.org)
+            (s.actor, s.kind, s.org, Some(s.id_hash))
         }
     };
-    Ok(Json(json!({"id": id, "kind": kind, "org": org, "app": state.cfg.origin})))
+    Ok(Json(json!({"id": id, "kind": kind, "org": org, "app": state.cfg.origin, "context_id": context_id})))
 }
 
-/// The orgs where the mirror holds an active membership for this actor, plus the session's own:
-/// `[{id, name}]`, the name from the mirror when IAM has told us one. The frontend's logged-out
-/// signal is this route's 401.
+/// Only the selected organization is reachable with this session. Saved contexts are listed
+/// separately at /auth/contexts; directory membership never implies a usable credential.
 const ORGS: &str = "SELECT o.org, coalesce((SELECT m.org_name FROM iam_members m WHERE m.org = o.org AND m.org_name IS NOT NULL \
                     ORDER BY m.updated_at DESC LIMIT 1), o.org) \
-                    FROM (SELECT org FROM iam_members WHERE actor = $1 AND status = 'active' UNION SELECT $2::text) o \
+                    FROM (SELECT $1::text AS org) o \
                     ORDER BY 1";
 
 async fn orgs(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Vec<Value>>, ApiError> {
     let s = own_session(&state, &headers).await?;
-    let rows: Vec<(String, String)> =
-        sqlx::query_as(ORGS).bind(&s.actor).bind(&s.org).fetch_all(&state.store.pg).await?;
+    let rows: Vec<(String, String)> = sqlx::query_as(ORGS).bind(&s.org).fetch_all(&state.store.pg).await?;
     Ok(Json(rows.into_iter().map(|(id, name)| json!({"id": id, "name": name})).collect()))
 }
