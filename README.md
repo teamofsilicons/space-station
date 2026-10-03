@@ -31,13 +31,13 @@ The split is also one of state. The crate is stateless: `Auth` is a value the ca
 `Space` is a function of `(url, Auth)`, nothing reads the environment or the home directory, and
 the one thing that rotates — the Application session IAM issued — lives in the backend, which is
 the only party that ever holds it. The CLI is the stateful shell: it owns
-`~/.space-station/auth.json`, the current org, and the browser.
+`<home>/iam5/<server-hash>/<profile>/auth.json`, the selected account context, and the browser.
 
 ## The smallest real thing
 
 ```toml
 [dependencies]
-space-station = "0.1"
+space-station = "0.3"
 ```
 
 Install the CLI on macOS or Linux (Intel/x86_64 and ARM64), without Rust or sudo:
@@ -143,20 +143,24 @@ must follow the [identifier migration procedure](docs/PUBLIC-ID-MIGRATION.md) be
 
 | who | how |
 |---|---|
-| a carbon in a browser | the app sends you to IAM's login page for the org you picked; IAM brings you back signed in |
+| a carbon or silicon in a browser | choose **Continue as Carbon** or **Continue as Silicon**, then select one account and organization in IAM |
 | a carbon in a terminal | `spacestation login` does the same through a loopback port — or `iam login --app-id 'spacestation' --grant-org <org>` prints the token and `spacestation login <slt>` spends it |
 | a silicon | `iam silicon-login --app-id 'spacestation'` prints the token; `spacestation login <slt>` spends it |
 
-A fresh CLI home saves the organization selected by IAM; `--org`, `$SPACE_STATION_ORG`, or an
-existing saved org overrides that default. A session is bound to exactly one org; another org is another login, which IAM completes without
-a prompt while its own session is good. Space Station never sees an IAM bearer of any kind — not a
+A fresh CLI profile saves the organization selected by IAM. An explicit `--org`,
+`$SPACE_STATION_ORG`, or saved organization must match that selection; it cannot retarget a
+session. Keep another account or organization in a separate `--profile`. Space Station never sees an IAM bearer of any kind — not a
 silicon's `stk-`, not a `sat_` or a `cat_`, not a refresh token, not the Application's `ask_`
 secret outside the backend — and nothing in the crate or the CLI ever prompts for one. The backend
-speaks to IAM through a vendored snapshot of the published `silicon-iam-client` 4.0.0. Its
-[documented local patch](vendor/silicon-iam-client/SPACE-STATION-PATCH.md) accepts string
-webhook `aggregate.id` values, including canonical membership IDs, while retaining signature
-and envelope verification. The backend needs Rust 1.98; the published Space Station crates
-require 1.89 for portable file locking and carry no IAM dependency.
+speaks to IAM through a vendored copy of the published `silicon-iam-client` 5.2.1, with the
+[canonical webhook ID patch](vendor/silicon-iam-client/SPACE-STATION-PATCH.md). The backend needs Rust 1.98;
+the published Space Station crates require 1.89 for portable file locking and carry no IAM dependency.
+
+The website offers **Continue as Carbon** and **Continue as Silicon**, then verifies the returned
+identity against that choice. Each saved account/organization context has its own encrypted
+session. Use the account menu to switch; use `spacestation --profile work login` and
+`spacestation --profile personal login` for separate CLI contexts. IAM 5 requires a fresh login
+for old sessions; application data is retained. See [IAM 5 contexts](docs/IAM5-CONTEXTS.md).
 
 An Application may read nothing about the directory, but IAM tells it who just signed in: the
 introspection of an org-bound session carries the member's id, membership and **tags**, so tags are

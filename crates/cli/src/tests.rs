@@ -118,9 +118,9 @@ fn update_load_and_forget_are_the_whole_life_of_auth_json_and_it_is_private() {
     assert_eq!((loaded.auth.describe(), loaded.org.as_deref()), ("a session", Some("acme")));
     assert_eq!(file(&home)["bearer"], "sscli-x", "`use` keeps the credential as it was");
 
-    store::forget(&home).unwrap();
+    store::forget(&home, None).unwrap();
     assert!(!home.join("auth.json").exists());
-    store::forget(&home).unwrap();
+    store::forget(&home, None).unwrap();
 }
 
 #[test]
@@ -153,4 +153,39 @@ fn universal_contract_commands_parse_without_prompting() {
     let cli = crate::Cli::try_parse_from(["spacestation", "login", "oac_test", "--org", "tos"]).unwrap();
     assert!(matches!(cli.cmd, crate::Cmd::Login { token: Some(token), .. } if token == "oac_test"));
     assert_eq!(crate::percent_encode("a bug/#1"), "a%20bug%2F%231");
+}
+
+#[test]
+fn iam5_profiles_isolate_accounts_servers_and_retired_credentials() {
+    let home = std::path::Path::new("/tmp/ss-profile-test");
+    let alpha = crate::profile_home(home, Some("alpha"), "https://prod.example").unwrap();
+    assert_ne!(alpha, home);
+    assert_ne!(alpha, crate::profile_home(home, Some("beta"), "https://prod.example").unwrap());
+    assert_ne!(alpha, crate::profile_home(home, Some("alpha"), "https://sandbox.example").unwrap());
+    for invalid in ["", "../alpha", "a/b", "Alpha"] {
+        assert!(crate::profile_home(home, Some(invalid), "x").is_err());
+    }
+}
+
+#[test]
+fn a_stored_profile_cannot_be_retargeted_or_adopt_an_unscoped_login() {
+    assert!(crate::check_org(None, Some("tos")).is_ok());
+    assert!(crate::check_org(Some("tos"), Some("tos")).is_ok());
+    assert!(crate::check_org(Some("elsewhere"), Some("tos")).is_err());
+    assert!(crate::check_org(None, None).is_err());
+}
+
+#[test]
+fn delayed_logout_or_401_does_not_erase_a_new_profile_login() {
+    let temp = home();
+    let home = temp.as_path();
+    let old = Stored { auth: Auth::session("sscli-old"), org: Some("tos".into()) };
+    let new = Stored { auth: Auth::session("sscli-new"), org: Some("tos".into()) };
+    store::update(home, |_| Ok(new.clone())).unwrap();
+    store::expire(home, &old).unwrap();
+    store::forget(home, Some(&old)).unwrap();
+    assert!(store::load(home).unwrap() == new);
+    store::forget(home, Some(&new)).unwrap();
+    assert!(store::load(home).is_err());
+    fs::remove_dir_all(temp).unwrap();
 }

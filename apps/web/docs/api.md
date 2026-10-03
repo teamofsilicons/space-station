@@ -3,29 +3,37 @@
 Everything is under `/api`. JSON in, JSON out. Errors are
 `{"error": {"code": "snake_case", "message": "…"}}` — branch on `code`.
 
-Every route here is already a method on the [Rust package](/docs/rust) and a command in the
-[CLI](/docs/cli); reach for this page when you are writing something in another language.
+The [Rust package](/docs/rust) and [CLI](/docs/cli) wrap the management routes. This page also
+describes browser login and context handling for clients written in other languages.
 
 Authenticate with the `ss_session` cookie (the app), or `Authorization: Bearer` with an `sscli-`
 terminal session (carbons and silicons alike), a `spacewindow-` access token or an `apikey-`
 key. Those three are the only bearer shapes accepted; an IAM token of any kind is
 `401 unsupported_bearer`. A cookie-authenticated request that mutates, and every WebSocket
 upgrade, must also carry a matching `Origin` — a bearer needs none, since no browser sends one by
-itself. A session is bound to one org: `/orgs/{org}/…` of any other answers `403 not_a_member`.
+itself. A session is bound to one account and org: `/orgs/{org}/…` of any other org answers `403 not_a_member`.
 Access lists apply to every route except for API keys, which see their whole scope. Actor ids are
 sent without `@`. Deletes answer `204 No Content`.
+
+After `GET /me`, cookie clients send its `context_id` as `x-spacestation-context` on organization
+requests, context changes and logout. Cookie WebSockets use `account_context` in the query.
+A mismatched marker returns `409 context_changed`; reload the selected context before continuing.
+The marker is not a credential. Keep requests, caches and background work bound to that context.
 
 ## Auth
 
 | | |
 |---|---|
-| `GET /auth/login?org=&next=/` | redirects to IAM's login for this Application, bound to `org`; IAM comes back to `/auth/callback?slt=`, the backend exchanges that short-lived token, sets `ss_session` and sends the browser to `next`. IAM asks nothing when its own session is good, which is how a signed-in browser switches org. No `org` is `400 org_required` |
-| `GET /auth/login?org=&cli={port}&state={nonce}` | the same door for a terminal: the callback does not exchange the token but redirects to `http://127.0.0.1:{port}/?slt=…&state={nonce}` instead of setting a cookie, and the terminal spends it at `POST /auth/session` — an `sscli-` credential never travels in a URL. `cli` is a bare port (1024–65535), never a URL |
-| `GET /auth/callback?slt=` | IAM returns here. In a browser it first ends the session the presented `ss_session` cookie belonged to (one session per browser), then sets the new cookie |
-| `POST /auth/session` | `{slt, org}` → `{token}`: a short-lived token the `iam` CLI minted for this Application (`iam login --app-id 'spacestation' --org o`, `iam silicon-login --app-id 'spacestation'`) becomes an `sscli-` session bound to `org`. The token is single-use and two minutes old at most; anything else is refused |
-| `POST /auth/logout` | ends the session presented: the cookie (under the `Origin` rule, and cleared), or an `sscli-` bearer — the terminal's own row, the browser untouched. Any other bearer is `401 unsupported_bearer`: it has no row to end |
-| `GET /me` | `{id, kind, org, app}` for every session, and for a `spacewindow-` bearer — `org` is the one it is bound to, `app` where the UI lives, so a client can build window links |
-| `GET /orgs` | `[{id, name}]`: the orgs Space Station knows you in — those you have signed in to, plus those where IAM's events have shown your membership; `name` is the org name IAM sent, else the id. See [Credentials](/docs/credentials) |
+| `GET /auth/login?identity_kind=carbon&next=/` | choose `carbon` or `silicon`; the backend binds that choice to a sealed, expiring callback state. IAM selects one account and organization. Optional `org` must match that selection; it does not select an IAM org. `next` is a validated app path |
+| `GET /auth/login?identity_kind=carbon&display=popup&attempt_id={uuid}` | popup variant; `display` and `attempt_id` are supplied together. After verified backend success, the callback posts only `{type:"spacestation:login", attempt_id, status}` to the exact app-origin opener. Check origin, popup window and attempt ID; then reload. Blocked popups use the full-page flow; closure is cancellation |
+| `GET /auth/login?org=&cli={port}&state={nonce}` | terminal Carbon flow: the callback exchanges the SLT and verifies its identity, then redirects the same SLT to `http://127.0.0.1:{port}/?slt=…&state={nonce}`. The terminal verifies its state and redeems the backend receipt at `POST /auth/session` without a second IAM exchange. `cli` is a bare port (1024–65535); an `sscli-` credential never travels in a URL |
+| `GET /auth/callback?slt=&state=` | validates the initiated attempt and selected identity kind before establishing a session. Browser login adds a separate saved context, sets HttpOnly cookies, and either completes the popup or redirects to `next`; other saved sessions remain available |
+| `POST /auth/session` | `{slt, org?}` → `{token}`: exchanges a fresh SLT or redeems its matching two-minute backend receipt for an `sscli-` session. IAM mints fresh SLTs with `iam login --app-id 'spacestation' --grant-org o` or `iam silicon-login --app-id 'spacestation'`. Optional `org` must match the selected organization |
+| `GET /auth/contexts` | `[{context_id, actor, org, selected}]`: saved sessions in this browser's group, separate from directory membership |
+| `POST /auth/context` | `{context_id}` selects one saved browser session; requires the current context marker and same-origin request. Returns `204`; reload to discard the old context's caches and requests |
+| `POST /auth/logout` | ends only the presented session. Browser logout requires its context marker and same-origin request, then selects a remaining saved context if present. An `sscli-` bearer ends only that terminal session; other bearers return `401 unsupported_bearer` |
+| `GET /me` | `{id, kind, org, app, context_id}` for a session or `spacewindow-` bearer. `context_id` is null for a window bearer; `app` is the UI origin, used for window links |
+| `GET /orgs` | `[{id, name}]` containing only the selected session's organization. `name` is IAM's reported name, else its id; saved browser contexts are listed separately |
 | `GET /orgs/{org}/me` | `{kind, id, org, tags}` — the tags as IAM last reported them: at your login, at the re-check about once a minute, and by webhook in between |
 | `POST /iam/webhook` | Silicon IAM's membership events, verified by signature; not for clients. The same receiver also answers at the root path `/webhooks/api/` (outside `/api`, with and without the slash), the URL registered with IAM |
 
@@ -95,7 +103,7 @@ Everything else answers `401 unauthorized` to an API key.
 | | |
 |---|---|
 | `/api/ws/ingest` | the daemon's channel: `{batch_id, records}` in, `{batch_id, status, rejected?}` out |
-| `/api/ws/mission-control?org=` | the runtime's channel: `subscribe` / `subscribed` / `trigger` / `state` / `notification` |
+| `/api/ws/mission-control?org=&account_context=` | the runtime's channel: `subscribe` / `subscribed` / `trigger` / `state` / `notification`; cookie clients include their context marker, bearer clients do not need it |
 
 The mission-control socket authenticates with the cookie or an `sscli-` / `spacewindow-` bearer
 — API keys cannot open it. A closed socket with code `4401` means the

@@ -61,7 +61,7 @@ Receivers bound the received text; nobody re-serialises to decide.
 | `spacewindow-{32hex}` | access token: dev server + CLI processors | AES-256-GCM under `SS_KEY` (viewable), plus sha256 for lookup, `last_used_at` | (org, actor). One live per (org, actor); rotatable |
 | `apikey-{32hex}` | programmatic read of tables / notifications | sha256, shown once | (org, scopes). No actor: acts for the org within its scope |
 | `whsec-{32hex}` | signing outgoing webhooks | AES-256-GCM under `SS_KEY` | shown once per (re)creation |
-| cookie `ss_session` | the browser | 32 random bytes; row keyed by sha256; holds the Application `oat_`/`ort_` encrypted | an actor, bound to one org |
+| cookie `ss_session` | the browser | opaque server-keyed secret; row keyed by sha256; holds the Application `oat_`/`ort_` encrypted | one account, organization and IAM world |
 | `sscli-{…}` | a terminal | the same session row, presented as a bearer | an actor, bound to one org |
 | `slt` | what a person or a silicon hands Space Station to sign in | never stored; exchanged once at IAM within 2 minutes | a session |
 
@@ -79,20 +79,17 @@ The backend applies it to processor and renderer bodies on every version create
 
 ## Identity (crate `backend`, module `iam`)
 
-Originally verified against Silicon IAM on 2026-09-05 in a testing environment; identifier
-handling now follows SDK 4 and the [public ID migration](PUBLIC-ID-MIGRATION.md).
-The crate named `silicon-iam` (now a `0.0.0` placeholder on crates.io) implemented a PKCE flow the
-service no longer has; the backend vendors the published **`silicon-iam-client`** 4.0.0 snapshot
-(Rust 1.98). Its [documented local patch](../vendor/silicon-iam-client/SPACE-STATION-PATCH.md)
-accepts nonempty string webhook `aggregate.id` values so canonical membership IDs verify;
-event IDs remain UUIDs, and signed bytes, signatures, envelope checks and testing-key checks
-are unchanged. It types every call below: `Client::builder(url)?.credential(Credential::application(app_id,
+The IAM 5 integration vendors the published **`silicon-iam-client`** 5.2.1 (Rust 1.98), with a
+[canonical webhook ID patch](../vendor/silicon-iam-client/SPACE-STATION-PATCH.md).
+Canonical IDs follow the [public ID migration](PUBLIC-ID-MIGRATION.md), and saved sessions
+follow [IAM 5 contexts](IAM5-CONTEXTS.md). The SDK accepts canonical webhook aggregate IDs
+and verifies signatures, envelopes and testing environments. It types every call below: `Client::builder(url)?.credential(Credential::application(app_id,
 secret)).environment(EnvironmentKey::new(key)?).auto_update(false).build()?`,
 `system().negotiate()`, `oauth().login(app_id, slt, &Mutation::new())`, `oauth().refresh(app_id,
 ort, &Mutation::with_key(k))`, `oauth().authorization(..)` → `Option<ApplicationAuthorization>`,
 `oauth().introspect(..)`, `oauth().revoke(.., &mutation)`, and `webhook::{WebhookVerifier,
 WebhookSecretKeyring, WebhookSecret}` with `VerifiedWebhook::verify_testing_environment`. The
-backend retains **`auto_update(false)`** for compatibility; SDK 4 disables runtime dependency
+backend retains **`auto_update(false)`** for compatibility; SDK 5 disables runtime dependency
 updates unconditionally. It also sets an explicit `User-Agent` (IAM's edge answers an
 HTML 403 to any request without one). There is one HTTP client, the official one, and no fallback.
 
@@ -921,3 +918,5 @@ the environment; `processor` is spawned with `env: {}`.
 `GET /orgs/{org}/me → Identity {kind, id, org, tags}` gives a page the caller's id and tags
 inside the org its session is bound to; `GET /me → {id, kind, org, app}` needs no `?org=` for
 anyone, carbon or silicon, because the session already names its org.
+
+IAM 5 ordinary session isolation, browser account selection, local profile migration and retry receipts are described in [IAM5-CONTEXTS.md](IAM5-CONTEXTS.md).

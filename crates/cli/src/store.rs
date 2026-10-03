@@ -17,7 +17,7 @@ use space_station::{Auth, Error};
 use crate::out;
 
 /// `auth.json`: the credential, exactly as the package serializes it, plus its org.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Stored {
     #[serde(flatten)]
     pub auth: Auth,
@@ -48,13 +48,20 @@ pub fn update(home: &Path, f: impl FnOnce(Option<Stored>) -> Result<Stored, Erro
 }
 
 /// The server refused the stored credential for good: drop it and keep the org.
-pub fn expire(home: &Path) -> Result<(), Error> {
+pub fn expire(home: &Path, expected: &Stored) -> Result<(), Error> {
     let _lock = lock(home)?;
+    if read(home).as_ref() != Some(expected) {
+        return Ok(());
+    }
     write(home, &org(home).map_or(json!({}), |org| json!({"org": org})))
 }
 
 /// Delete the stored credential; nothing stored is nothing to delete.
-pub fn forget(home: &Path) -> Result<(), Error> {
+pub fn forget(home: &Path, expected: Option<&Stored>) -> Result<(), Error> {
+    let _lock = lock(home)?;
+    if expected.is_some() && read(home).as_ref() != expected {
+        return Ok(());
+    }
     match fs::remove_file(home.join("auth.json")) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => Err(Error::Io(e)),
         _ => Ok(()),

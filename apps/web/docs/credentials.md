@@ -10,7 +10,7 @@ Three kinds of credential, one job each. Everything else is a table key.
 | where | minted by Space Station when it exchanges the short-lived token IAM gave you | window page · `spacestation token show` | Settings → API keys · `spacestation keys create` |
 | lifetime | as long as it is used; Space Station refreshes it | one live per actor per org; rotate any time | until deleted |
 | stored server-side as | a session row holding the Application tokens, encrypted | encrypted, viewable | hashed, shown once |
-| stored on your machine | `~/.space-station/auth.json`, by the CLI only | never, by anything of ours | never, by anything of ours |
+| stored on your machine | `<home>/iam5/<server-hash>/<profile>/auth.json`, by the CLI only | never, by anything of ours | never, by anything of ours |
 
 Only three bearer shapes are accepted on `Authorization`: `sscli-`, `spacewindow-` and `apikey-`.
 An IAM token of any kind is refused with `unsupported_bearer`: Space Station never receives one.
@@ -31,24 +31,22 @@ Three ways to obtain one, one way to spend it:
 | who | how the short-lived token is minted | how it is spent |
 |---|---|---|
 | a carbon in a browser | the app sends you to IAM's login for `spacestation`, bound to the org you chose; IAM signs you in — or recognises you — and comes straight back | the callback exchanges it and sets the `ss_session` cookie |
-| a carbon in a terminal | `spacestation login --org o` opens that same page and catches the short-lived token on loopback (`?slt=…&state=…`); without a browser, `iam login --app-id 'spacestation' --org o` prints one | either way `POST /api/auth/session {slt, org}` — `login` does it for you, `spacestation auth <slt>` does it with the one you pasted — and the `sscli-` session comes back over that POST, never in a URL |
+| a carbon in a terminal | `spacestation login --org o` opens that same page and catches the short-lived token on loopback (`?slt=…&state=…`); without a browser, `iam login --app-id 'spacestation' --grant-org o` prints one | either way `POST /api/auth/session {slt, org}` — `login` does it for you, `spacestation auth <slt>` does it with the one you pasted — and the `sscli-` session comes back over that POST, never in a URL |
 | a silicon | `iam silicon-login --app-id 'spacestation'` prints one; the `iam` CLI is what holds the `stk-`, and it never leaves | `spacestation auth <slt> --org o` |
 
-**One session, one org.** A login is bound to an organization, and so is the session it becomes:
-`GET /me` answers `{id, kind, org, app}`, and every `/orgs/{org}/…` route of another org answers
-`403 not_a_member`. To work in another org, sign in again for it — another org in the app's
-sidebar is exactly that link, and `spacestation login --org other` is the terminal's — and IAM
-completes the login without a prompt while its own session is good. A login that names no org is
-refused with `org_required`; a login for an org you are not a member of never reaches Space
-Station, because IAM refuses it.
+**One session, one account and org.** Choose **Continue as Carbon** or **Continue as Silicon**,
+then select an account and organization in IAM. Space Station verifies the returned identity
+against your login choice before completing the popup. If popups are blocked, login opens in
+the current page. Closing a popup cancels that attempt.
 
-**A carbon in a browser** holds an `ss_session` cookie. Because a browser attaches a cookie on its
-own, every mutating request and every WebSocket upgrade must also carry an `Origin` matching the
-app's. A browser holds one session at a time: signing in again — another org, another account —
-ends the session the cookie you presented belonged to before the new one is set, so switching
-never leaves a stale session alive behind you. (Cookies are per host, not per port: two Space
-Stations on `localhost` with different ports share the cookie and sign each other out; a second
-local stack belongs on `127.0.0.1` or `[::1]`.)
+The account menu keeps separate saved contexts. Switching selects another session and reloads
+its workspace. Tabs, requests, caches and sockets remain bound to their original context;
+a stale tab must reload before accessing the newly selected context. Signing out ends only
+the selected session. A new organization needs its own login; one token never combines orgs.
+
+**A browser** holds HttpOnly cookies. Mutating requests and WebSocket upgrades also require the
+app's exact `Origin`. Context markers identify the page's selected session without exposing a
+credential. Cookies are per host, not per port: run a second local stack on `127.0.0.1` or `[::1]`.
 
 **In a terminal**, carbon or silicon, the credential is an `sscli-…` token: a *separate session
 row* from any browser's, which the backend refreshes for as long as it is used. `spacestation
@@ -58,11 +56,13 @@ rule.
 
 **What is stored, and where.** The Rust package stores nothing: `Auth` is a value. The session and
 its refresh token live in the backend, so nothing on your machine ever rotates anything. The CLI is
-the one that keeps things, in `~/.space-station/auth.json` — mode 0600 inside a 0700 directory,
+the one that keeps things, in `<home>/iam5/<server-hash>/<profile>/auth.json` — mode 0600 inside a 0700 directory,
 written under a lock through a tmp file and a rename — holding exactly one credential (the
 `sscli-` session) and the org it works in. Access tokens and API keys passed with `--access-token`
-/ `--api-key` are not written there. `spacestation logout` deletes the file. `SPACE_STATION_HOME`
-moves the directory.
+/ `--api-key` are not written there. `spacestation --profile work logout` deletes only that profile's file.
+Use `--profile <name>` or `SPACE_STATION_PROFILE` to select a profile (default: `default`).
+Different backend URLs have separate stores. Legacy credentials require a fresh login.
+`SPACE_STATION_HOME` moves the base directory when `SILICON_HOME` is unset.
 
 ## Who you are, and tags
 

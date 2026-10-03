@@ -1,3 +1,4 @@
+import { ArcButton, ArcInput } from './arc';
 // The small pieces every page shares: a polled resource that rests while its tab is hidden, a busy
 // action, errors and loading lines, copy and one-time secrets, dialogs, menus, access lists, and
 // the tab a page lives in (`useTab`), which is how a page navigates, names itself and signals.
@@ -133,7 +134,7 @@ export function Loading(p: { error?: Error }) {
 export function Copy(p: { text: string; label?: string }) {
   const [done, setDone] = createSignal<"" | "ok" | "fail">("");
   return (
-    <button
+    <ArcButton
       type="button"
       class="ghost small"
       onClick={async () => {
@@ -148,7 +149,7 @@ export function Copy(p: { text: string; label?: string }) {
     >
       <Icon name={done() === "ok" ? "check" : "copy"} />
       {done() === "ok" ? "Copied" : done() === "fail" ? "Select the text" : p.label || "Copy"}
-    </button>
+    </ArcButton>
   );
 }
 
@@ -158,9 +159,9 @@ export function Secret(p: { value: string; once?: boolean }) {
     <div class="secret">
       <code>{visible() ? p.value : "•".repeat(28)}</code>
       <div class="secret-actions">
-        <button type="button" class="ghost small" onClick={() => setVisible(!visible())}>
+        <ArcButton type="button" class="ghost small" onClick={() => setVisible(!visible())}>
           {visible() ? "Hide" : "Reveal"}
-        </button>
+        </ArcButton>
         <Copy text={p.value} />
       </div>
       <Show when={p.once}>
@@ -180,9 +181,9 @@ export function Modal(p: { title: string; close: () => void; children: JSX.Eleme
     <dialog ref={dialog} class={p.wide ? "wide" : ""} onClose={() => shown() && p.close()} onCancel={p.close}>
       <div class="dialog-head">
         <h2>{p.title}</h2>
-        <button type="button" class="icon" aria-label="Close dialog" onClick={p.close}>
+        <ArcButton type="button" class="icon" aria-label="Close dialog" onClick={p.close}>
           <Icon name="x" />
-        </button>
+        </ArcButton>
       </div>
       {p.children}
     </dialog>
@@ -192,12 +193,20 @@ export function Modal(p: { title: string; close: () => void; children: JSX.Eleme
 /** A segmented control: one choice of a few, always visible. */
 export function Segmented<T extends string>(p: { value: T; options: readonly T[]; label: string; onChange: (v: T) => void; names?: Partial<Record<T, string>> }) {
   return (
-    <div class="segmented" role="radiogroup" aria-label={p.label}>
+    <div class="segmented" role="radiogroup" aria-label={p.label} onKeyDown={event => {
+      const delta = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
+      if (!delta && event.key !== 'Home' && event.key !== 'End') return;
+      event.preventDefault();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? p.options.length - 1 : (p.options.indexOf(p.value) + delta + p.options.length) % p.options.length;
+      if (!p.options[next]) return;
+      p.onChange(p.options[next]);
+      event.currentTarget.querySelectorAll<HTMLButtonElement>('button')[next]?.focus();
+    }}>
       <For each={p.options}>
         {(o) => (
-          <button type="button" role="radio" aria-checked={o === p.value} classList={{ on: o === p.value }} onClick={() => p.onChange(o)}>
+          <ArcButton type="button" role="radio" tabIndex={o === p.value ? 0 : -1} aria-checked={o === p.value} classList={{ on: o === p.value }} onClick={() => p.onChange(o)}>
             {p.names?.[o] ?? o}
-          </button>
+          </ArcButton>
         )}
       </For>
     </div>
@@ -260,7 +269,7 @@ export function MenuHost() {
               item === "-" ? (
                 <hr />
               ) : (
-                <button
+                <ArcButton
                   role="menuitem"
                   classList={{ danger: item.danger }}
                   disabled={item.disabled}
@@ -274,7 +283,7 @@ export function MenuHost() {
                   <Show when={item.keys}>
                     <kbd>{item.keys}</kbd>
                   </Show>
-                </button>
+                </ArcButton>
               )
             }
           </For>
@@ -298,7 +307,7 @@ export function Access(p: { value: string[]; save?: (v: string[]) => Promise<unk
   );
   return (
     <Show when={p.save} fallback={chips}>
-      <button
+      <ArcButton
         type="button"
         class="access-edit"
         title="Edit access"
@@ -309,7 +318,7 @@ export function Access(p: { value: string[]; save?: (v: string[]) => Promise<unk
       >
         {chips}
         <Icon name="pencil" />
-      </button>
+      </ArcButton>
       <Show when={editing()}>
         <Modal title="Edit access" close={() => setEditing(false)}>
           <form
@@ -323,13 +332,13 @@ export function Access(p: { value: string[]; save?: (v: string[]) => Promise<unk
           >
             <label>
               Actors and tags
-              <input value={text()} onInput={(e) => setText(e.currentTarget.value)} placeholder="@c:alice, engineering" autofocus />
+              <ArcInput value={text()} onInput={(e) => setText(e.currentTarget.value)} placeholder="@c:alice, engineering" autofocus />
             </label>
             <p class="hint">Separate @c:handle, @si:handle and tags with commas. Access is the union of all of them.</p>
             <ErrorText message={a.error()} />
             <div class="dialog-foot">
-              <button type="button" onClick={() => setEditing(false)}>Cancel</button>
-              <button class="primary" disabled={a.busy()}>Save access</button>
+              <ArcButton type="button" onClick={() => setEditing(false)}>Cancel</ArcButton>
+              <ArcButton class="primary" disabled={a.busy()}>Save access</ArcButton>
             </div>
           </form>
         </Modal>

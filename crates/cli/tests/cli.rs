@@ -147,12 +147,14 @@ fn home(name: &str) -> PathBuf {
 }
 
 /// A stored session, as `login` or `auth` leaves one, bound to `org` when there is one.
-fn signed_in(home: &Path, org: Option<&str>) {
+fn signed_in(home: &Path, url: &str, org: Option<&str>) {
     let stored = match org {
         Some(org) => json!({"bearer": "sscli-test", "org": org}),
         None => json!({"bearer": "sscli-test"}),
     };
-    fs::write(home.join("auth.json"), stored.to_string()).unwrap();
+    let path = auth_path(home, url);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, stored.to_string()).unwrap();
 }
 
 struct Ran {
@@ -171,6 +173,7 @@ fn run(home: &Path, url: &str, env: &[(&str, &str)], args: &[&str]) -> Ran {
         .env_remove("SPACE_STATION_API_KEY")
         .env_remove("SPACE_STATION_ACCESS_TOKEN")
         .env_remove("SPACE_STATION_TOKEN")
+        .env_remove("SPACE_STATION_PROFILE")
         .env("SPACE_STATION_HOME", home)
         .env("SPACE_STATION_URL", url)
         .envs(env.iter().copied())
@@ -203,8 +206,12 @@ fn calls(seen: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
     seen.lock().unwrap().clone()
 }
 
-fn auth_file(home: &Path) -> Value {
-    serde_json::from_slice(&fs::read(home.join("auth.json")).unwrap()).unwrap()
+fn auth_path(home: &Path, url: &str) -> PathBuf {
+    home.join("iam5").join(space_station::shared::secrets::sha256_hex(url)).join("default").join("auth.json")
+}
+
+fn auth_file(home: &Path, url: &str) -> Value {
+    serde_json::from_slice(&fs::read(auth_path(home, url)).unwrap()).unwrap()
 }
 
 #[cfg(unix)]
@@ -215,31 +222,31 @@ fn mode(path: &Path) -> u32 {
 // ── the org, and the credential ─────────────────────────────────────────────────────────────
 
 #[test]
-fn the_org_is_the_flag_then_the_environment_then_the_one_stored() {
-    let (url, seen) = station(vec![]);
+fn a_stored_session_cannot_be_retargeted_by_an_org_flag_or_environment() {
+    let (url, seen) = station(vec![("GET /api/orgs/cli-stored/tables", json!([]))]);
     let home = home("org");
-    signed_in(&home, Some("cli-stored"));
+    signed_in(&home, &url, Some("cli-stored"));
 
-    run(&home, &url, &[], &["tables", "ls"]);
-    run(&home, &url, &[("SPACE_STATION_ORG", "cli-env")], &["tables", "ls"]);
-    run(&home, &url, &[("SPACE_STATION_ORG", "cli-env")], &["--org", "cli-flag", "tables", "ls"]);
-
-    let asked: Vec<String> =
-        calls(&seen).iter().map(|c| c.replace("GET /api/orgs/", "").replace("/tables", "")).collect();
-    assert_eq!(asked, ["cli-stored", "cli-env", "cli-flag"]);
+    assert!(run(&home, &url, &[], &["tables", "ls"]).ok);
+    for args in [&["tables", "ls"][..], &["--org", "cli-flag", "tables", "ls"]] {
+        let refused = run(&home, &url, &[("SPACE_STATION_ORG", "cli-env")], args);
+        assert!(!refused.ok && refused.err.contains("separate --profile"), "{}", refused.err);
+    }
+    assert!(run(&home, &url, &[("SPACE_STATION_ORG", "cli-env")], &["--org", "cli-stored", "tables", "ls"]).ok);
+    assert_eq!(calls(&seen), ["GET /api/orgs/cli-stored/tables"; 2]);
+    assert_eq!(auth_file(&home, &url)["org"], "cli-stored");
 }
 
 #[test]
-fn without_an_org_the_error_names_every_way_to_set_one_and_nothing_is_asked_for() {
+fn an_unscoped_stored_session_requires_a_new_profile_login_without_sending_it() {
     let (url, seen) = station(vec![]);
     let home = home("no-org");
-    signed_in(&home, None);
+    signed_in(&home, &url, None);
 
-    let ran = run(&home, &url, &[], &["tables", "ls"]);
-    assert!(!ran.ok && ran.out.is_empty(), "{ran:?}", ran = (ran.ok, ran.out));
-    assert!(ran.err.starts_with("error: local: no org: "), "{}", ran.err);
-    for way in ["--org", "$SPACE_STATION_ORG", "spacestation use <org>"] {
-        assert!(ran.err.contains(way), "{way} is a way to set an org: {}", ran.err);
+    for args in [&["tables", "ls"][..], &["--org", "tos", "tables", "ls"]] {
+        let ran = run(&home, &url, &[], args);
+        assert!(!ran.ok && ran.out.is_empty());
+        assert!(ran.err.contains("sign in with a separate --profile"), "{}", ran.err);
     }
     assert!(calls(&seen).is_empty(), "nothing needed to leave the machine to know this");
 }
@@ -254,7 +261,7 @@ fn an_api_key_or_an_access_token_acts_instead_of_the_stored_credential_and_names
         (200, "[]".into())
     });
     let home = home("api-key");
-    signed_in(&home, Some("cli-org"));
+    signed_in(&home, &url, Some("cli-org"));
 
     run(&home, &url, &[], &["tables", "ls"]);
     run(&home, &url, &[], &["--api-key", "apikey-cli", "--org", "cli-org", "tables", "ls"]);
@@ -290,7 +297,7 @@ fn an_empty_credential_or_org_from_a_flag_or_the_environment_is_none_and_the_sto
         (200, "[]".into())
     });
     let home = home("empty-credential");
-    signed_in(&home, Some("cli-org"));
+    signed_in(&home, &url, Some("cli-org"));
 
     for (env, args) in [
         (&[("SPACE_STATION_ACCESS_TOKEN", "")][..], &["tables", "ls"][..]),
@@ -315,22 +322,22 @@ fn a_401_from_the_backend_prints_the_way_in_and_exits_1_whatever_its_code() {
         _ => (403, json!({"error": {"code": "forbidden", "message": "no access"}}).to_string()),
     });
     let home = home("401");
-    signed_in(&home, Some("tos"));
+    signed_in(&home, &url, Some("tos"));
 
     let refused = run(&home, &url, &[], &["tables", "ls"]);
     assert!(!refused.ok && refused.out.is_empty(), "exit 1, nothing on stdout: {}", refused.out);
     assert!(refused.err.starts_with("error: session_expired: gone\n"), "{}", refused.err);
     assert!(refused.err.contains("spacestation login"), "{}", refused.err);
     assert!(refused.err.contains("spacestation auth <slt>"), "{}", refused.err);
-    assert_eq!(auth_file(&home), json!({"org": "tos"}), "an expired session is forgotten; its org is kept");
-    signed_in(&home, Some("tos"));
+    assert_eq!(auth_file(&home, &url), json!({"org": "tos"}), "an expired session is forgotten; its org is kept");
+    signed_in(&home, &url, Some("tos"));
     let novel = run(&home, &url, &[], &["windows", "ls"]);
     assert!(novel.err.contains("spacestation login"), "the status, not the code, is what says to sign in");
-    assert_eq!(auth_file(&home), json!({"org": "tos"}));
-    signed_in(&home, Some("tos"));
+    assert_eq!(auth_file(&home, &url), json!({"org": "tos"}));
+    signed_in(&home, &url, Some("tos"));
     let denied = run(&home, &url, &[], &["keys", "ls"]);
     assert!(!denied.ok && denied.err.trim() == "error: forbidden: no access", "a 403 is about access: {}", denied.err);
-    assert_eq!(auth_file(&home)["bearer"], "sscli-test", "a 403 keeps the credential");
+    assert_eq!(auth_file(&home, &url)["bearer"], "sscli-test", "a 403 keeps the credential");
 }
 
 // ── how an answer is printed ────────────────────────────────────────────────────────────────
@@ -341,7 +348,7 @@ fn a_secret_is_alone_on_stdout_and_its_note_is_only_on_stderr() {
     let (url, _) =
         station(vec![("POST /api/orgs/tos/tables", json!({"key": "table-orders-0123456789abcdef0123456789abcdef"}))]);
     let home = home("secret");
-    signed_in(&home, Some("tos"));
+    signed_in(&home, &url, Some("tos"));
 
     let ran = run(&home, &url, &[], &["tables", "create", "orders", "--access", "@c:alice,tech"]);
     assert!(ran.ok, "{}", ran.err);
@@ -356,7 +363,7 @@ fn a_list_is_columns_and_json_only_when_asked_and_that_json_is_one_line_in_a_pip
                        "created_by": "c:alice", "created_at": "2026-01-01T00:00:00Z"}]);
     let (url, _) = station(vec![("GET /api/orgs/tos/tables", rows)]);
     let home = home("columns");
-    signed_in(&home, Some("tos"));
+    signed_in(&home, &url, Some("tos"));
 
     let columns = run(&home, &url, &[], &["tables", "ls"]);
     assert_eq!(columns.out.lines().next().unwrap(), "ID      RECORDS  WATERMARK  CREATED_BY  ACCESS   RETIRED_AT");
@@ -392,7 +399,7 @@ fn the_tables_group_reaches_every_table_route() {
         ),
     ]);
     let home = home("tables");
-    signed_in(&home, Some("tos"));
+    signed_in(&home, &url, Some("tos"));
     let ran = |args: &[&str]| {
         let ran = run(&home, &url, &[], args);
         assert!(ran.ok, "spacestation {}: {}", args.join(" "), ran.err);
@@ -441,7 +448,7 @@ fn the_windows_group_reaches_every_window_route_and_hands_over_the_page_that_dra
         ),
     ]);
     let home = home("windows");
-    signed_in(&home, Some("tos"));
+    signed_in(&home, &url, Some("tos"));
     let (processor, renderer) = (home.join("processor.js"), home.join("renderer.html"));
     fs::write(&processor, "export default defineProcessor({})").unwrap();
     fs::write(&renderer, "<div id=app></div>").unwrap();
@@ -487,6 +494,7 @@ fn the_windows_group_reaches_every_window_route_and_hands_over_the_page_that_dra
             .args(["windows", "open", "w_01"])
             .env("SPACE_STATION_HOME", &home)
             .env("SPACE_STATION_URL", &url)
+            .env_remove("SPACE_STATION_PROFILE")
             .env("PATH", "")
             .output()
             .unwrap();
@@ -517,7 +525,7 @@ fn the_notifications_group_sends_the_definition_file_as_its_two_arguments() {
         ("POST /api/orgs/tos/notifications/n_01/test", json!({"rows": [], "last_trigger_at": null})),
     ]);
     let home = home("notifications");
-    signed_in(&home, Some("tos"));
+    signed_in(&home, &url, Some("tos"));
     let file = home.join("new-orders.json");
     let def = json!({"name": "New orders", "triggers": [{"table": "orders"}], "sql": "select 1"});
     fs::write(&file, json!({"def": def, "recipients": ["@c:alice"]}).to_string()).unwrap();
@@ -561,7 +569,7 @@ fn the_webhook_groups_print_each_secret_once_naming_what_it_belongs_to() {
         ("PUT /api/orgs/tos/silicon-webhook", json!({"url": "https://bot.example/h", "secret": "whsec-2"})),
     ]);
     let home = home("webhooks");
-    signed_in(&home, Some("tos"));
+    signed_in(&home, &url, Some("tos"));
     let ran = |args: &[&str]| {
         let ran = run(&home, &url, &[], args);
         assert!(ran.ok, "spacestation {}: {}", args.join(" "), ran.err);
@@ -594,7 +602,7 @@ fn the_keys_and_token_groups_print_the_key_the_server_shows_once_and_the_token_i
         ("POST /api/orgs/tos/access-token/rotate", json!({"token": "spacewindow-2", "last_used_at": null})),
     ]);
     let home = home("keys");
-    signed_in(&home, Some("tos"));
+    signed_in(&home, &url, Some("tos"));
     let ran = |args: &[&str]| {
         let ran = run(&home, &url, &[], args);
         assert!(ran.ok, "spacestation {}: {}", args.join(" "), ran.err);
@@ -627,7 +635,7 @@ fn the_query_and_errors_groups_print_what_the_server_answered() {
         ),
     ]);
     let home = home("query");
-    signed_in(&home, Some("tos"));
+    signed_in(&home, &url, Some("tos"));
 
     let rows = run(&home, &url, &[], &["query", "select count() from orders"]);
     assert_eq!(rows.out, "{\"rows\":[{\"n\":1}],\"watermarks\":{\"orders\":130}}\n");
@@ -643,35 +651,38 @@ fn whoami_orgs_use_and_logout_are_the_credential_group_and_logout_ends_the_sessi
         ("POST /api/auth/logout", Value::Null),
     ]);
     let home = home("who");
-    signed_in(&home, Some("tos"));
+    signed_in(&home, &url, Some("tos"));
 
     let who = run(&home, &url, &[], &["whoami"]);
     assert_eq!(who.out.trim(), r#"{"id":"c:alice","kind":"carbon","org":"tos","tags":["tech"]}"#);
     assert!(who.err.contains("stored: a session"), "what is stored is named, never shown: {}", who.err);
     assert_eq!(run(&home, &url, &[], &["orgs"]).out, "ID    NAME\ntos   Team of Silicons\nacme  -\n");
 
-    let used = run(&home, &url, &[], &["use", "other"]);
-    assert!(used.err.contains("working in other"), "{}", used.err);
-    assert_eq!(auth_file(&home)["org"], "other", "`use` is what the next command reads");
-    assert_eq!(auth_file(&home)["bearer"], "sscli-test", "and it keeps the credential");
+    let other = run(&home, &url, &[], &["use", "other"]);
+    assert!(!other.ok && other.err.contains("separate --profile"), "{}", other.err);
+    let used = run(&home, &url, &[], &["use", "tos"]);
+    assert!(used.ok && used.err.contains("working in tos"), "{}", used.err);
+    assert_eq!(auth_file(&home, &url)["org"], "tos", "`use` preserves the authenticated organization");
+    assert_eq!(auth_file(&home, &url)["bearer"], "sscli-test", "and it keeps the credential");
 
     let out = run(&home, &url, &[], &["logout"]);
     assert!(out.ok && out.err.contains("the stored credential is gone"), "{}", out.err);
-    assert!(!home.join("auth.json").exists(), "logout forgets the credential");
+    assert!(!auth_path(&home, &url).exists(), "logout forgets the credential");
     assert!(!run(&home, &url, &[], &["whoami"]).ok, "and then there is nobody to be");
     assert_eq!(calls(&seen), ["GET /api/orgs/tos/me", "GET /api/orgs", "POST /api/auth/logout"]);
 
-    fs::write(home.join("auth.json"), json!({"bearer": "apikey-x"}).to_string()).unwrap();
+    fs::write(auth_path(&home, &url), json!({"bearer": "apikey-x", "org": "tos"}).to_string()).unwrap();
     assert!(run(&home, &url, &[], &["logout"]).ok);
     assert_eq!(calls(&seen).len(), 3, "a key has no session to end, so nothing is sent");
-    assert!(!home.join("auth.json").exists());
+    assert!(!auth_path(&home, &url).exists());
 }
 
 #[test]
 fn whoami_offline_still_names_what_is_stored() {
     let home = home("offline");
-    signed_in(&home, Some("tos"));
-    let who = run(&home, "http://127.0.0.1:1", &[], &["whoami"]);
+    let url = "http://127.0.0.1:1";
+    signed_in(&home, url, Some("tos"));
+    let who = run(&home, url, &[], &["whoami"]);
     assert!(!who.ok && who.out.is_empty());
     assert!(who.err.contains("stored: a session"), "{}", who.err);
     assert!(who.err.contains("error: transport:"), "{}", who.err);
@@ -702,9 +713,10 @@ fn login_opens_the_browser_binds_the_org_and_exchanges_the_short_lived_redirect(
         let (route, query) = path.split_once('?').unwrap_or((path, ""));
         if route == "/api/me" {
             assert!(headers.lines().any(|l| l == "authorization: bearer sscli-fresh"), "{headers}");
+            let org = bound.lock().unwrap().last().cloned().flatten().unwrap_or("tos".into());
             return (
                 200,
-                json!({"id": "c:alice", "kind": "carbon", "org": "tos", "app": "https://app.example"}).to_string(),
+                json!({"id": "c:alice", "kind": "carbon", "org": org, "app": "https://app.example"}).to_string(),
             );
         }
         if route == "/api/auth/session" {
@@ -727,23 +739,27 @@ fn login_opens_the_browser_binds_the_org_and_exchanges_the_short_lived_redirect(
 
     let orgless = run(&home, &backend, &[("PATH", &path)], &["login"]);
     assert!(orgless.ok && orgless.err.contains("signed in to tos: a session"), "{}", orgless.err);
-    assert_eq!(auth_file(&home), json!({"bearer": "sscli-fresh", "org": "tos"}), "IAM selected the org");
+    assert_eq!(auth_file(&home, &backend), json!({"bearer": "sscli-fresh", "org": "tos"}), "IAM selected the org");
 
     let ran = run(&home, &backend, &[("PATH", &path)], &["--org", "tos", "login"]);
     assert!(ran.ok, "{}", ran.err);
     assert!(ran.err.contains("signed in to tos: a session"), "{}", ran.err);
     assert!(ran.err.contains("the app: https://app.example"), "{}", ran.err);
     assert!(!ran.err.contains("sscli-fresh"), "the session is never printed: {}", ran.err);
-    assert_eq!(auth_file(&home), json!({"bearer": "sscli-fresh", "org": "tos"}), "the org the session is bound to");
+    assert_eq!(
+        auth_file(&home, &backend),
+        json!({"bearer": "sscli-fresh", "org": "tos"}),
+        "the org the session is bound to"
+    );
     #[cfg(unix)]
-    assert_eq!(mode(&home.join("auth.json")), 0o600);
+    assert_eq!(mode(&auth_path(&home, &backend)), 0o600);
 
     let again = run(&home, &backend, &[("PATH", &path)], &["login"]);
     assert!(again.ok, "{}", again.err);
-    assert_eq!(auth_file(&home)["org"], "tos", "a login without --org binds to the stored org");
+    assert_eq!(auth_file(&home, &backend)["org"], "tos", "a login without --org binds to the stored org");
     let switched = run(&home, &backend, &[("PATH", &path), ("SPACE_STATION_ORG", "acme")], &["login"]);
     assert!(switched.ok, "{}", switched.err);
-    assert_eq!(auth_file(&home)["org"], "acme", "switching orgs is another login");
+    assert_eq!(auth_file(&home, &backend)["org"], "acme", "switching orgs is another login");
     assert_eq!(*orgs.lock().unwrap(), [None, Some("tos".into()), Some("tos".into()), Some("acme".into())]);
 }
 
@@ -762,7 +778,7 @@ fn token_login_in_a_fresh_home_saves_the_session_org_and_supports_the_auth_lifec
         assert!(login.ok && login.err.contains("signed in to tos: a session"), "{command}: {}", login.err);
         assert!(!login.err.contains("sscli-minted") && !login.err.contains("slt_fresh"), "{}", login.err);
         assert_eq!(calls(&seen)[0], r#"POST /api/auth/session {"slt":"slt_fresh"}"#);
-        assert_eq!(auth_file(&home), json!({"bearer": "sscli-minted", "org": "tos"}));
+        assert_eq!(auth_file(&home, &url), json!({"bearer": "sscli-minted", "org": "tos"}));
 
         let who = run(&home, &url, &[], &["whoami"]);
         assert!(who.ok, "{}", who.err);
@@ -776,7 +792,7 @@ fn token_login_in_a_fresh_home_saves_the_session_org_and_supports_the_auth_lifec
         let logout = run(&home, &url, &[], &["logout"]);
         assert!(logout.ok, "{}", logout.err);
         assert_eq!(calls(&seen).last().unwrap(), "POST /api/auth/logout");
-        assert!(!home.join("auth.json").exists());
+        assert!(!auth_path(&home, &url).exists());
         let count = calls(&seen).len();
         let status = run(&home, &url, &[], &["login", "--status"]);
         assert!(status.ok, "{}", status.err);
@@ -795,7 +811,47 @@ fn orgless_login_does_not_save_or_claim_success_when_session_org_discovery_fails
     let login = run(&home, &url, &[], &["login", "slt_fresh"]);
     assert!(!login.ok && login.err.contains("unavailable"), "{}", login.err);
     assert!(!login.err.contains("signed in"), "{}", login.err);
-    assert!(!home.join("auth.json").exists());
+    assert!(!auth_path(&home, &url).exists());
+}
+
+#[test]
+fn profile_logins_and_logout_keep_other_accounts_servers_and_legacy_credentials_separate() {
+    let url = serve(|method, path, headers, body| {
+        if (method, path) == ("POST", "/api/auth/session") {
+            let body: Value = serde_json::from_str(body).unwrap();
+            return (200, json!({"token": format!("sscli-{}", body["org"].as_str().unwrap())}).to_string());
+        }
+        let org = headers.lines().find_map(|line| line.strip_prefix("authorization: bearer sscli-")).unwrap();
+        match (method, path) {
+            ("GET", "/api/me") => (200, json!({"org": org, "app": "https://app.example"}).to_string()),
+            ("GET", path) if path == format!("/api/orgs/{org}/me") => {
+                (200, json!({"id": "c:alice", "kind": "carbon", "org": org, "tags": []}).to_string())
+            }
+            ("POST", "/api/auth/logout") => (200, "null".into()),
+            _ => panic!("unexpected {method} {path}"),
+        }
+    });
+    let home = home("profiles");
+    let legacy = json!({"bearer": "sscli-legacy", "org": "legacy"}).to_string();
+    fs::write(home.join("auth.json"), &legacy).unwrap();
+    assert!(!run(&home, &url, &[], &["whoami"]).ok, "legacy credentials require a new login");
+
+    for (profile, org) in [("work", "tos"), ("personal", "acme")] {
+        let login = run(&home, &url, &[], &["--profile", profile, "login", "slt_fresh", "--org", org]);
+        assert!(login.ok, "{}", login.err);
+        let who = run(&home, &url, &[("SPACE_STATION_PROFILE", profile)], &["whoami"]);
+        assert!(who.ok, "{}", who.err);
+        assert_eq!(serde_json::from_str::<Value>(&who.out).unwrap()["org"], org);
+    }
+    let selected = run(&home, &url, &[("SPACE_STATION_PROFILE", "personal")], &["--profile", "work", "whoami"]);
+    assert_eq!(serde_json::from_str::<Value>(&selected.out).unwrap()["org"], "tos", "the flag selects the profile");
+    let (other_url, seen) = station(vec![]);
+    assert!(!run(&home, &other_url, &[], &["--profile", "work", "whoami"]).ok);
+    assert!(calls(&seen).is_empty(), "credentials never cross backend URLs");
+    assert!(run(&home, &url, &[], &["--profile", "work", "logout"]).ok);
+    assert!(!run(&home, &url, &[], &["--profile", "work", "whoami"]).ok);
+    assert!(run(&home, &url, &[], &["--profile", "personal", "whoami"]).ok);
+    assert_eq!(fs::read_to_string(home.join("auth.json")).unwrap(), legacy, "legacy credentials remain untouched");
 }
 
 #[test]
@@ -815,15 +871,16 @@ fn auth_takes_a_short_lived_token_from_the_argument_stdin_or_the_environment_and
         "nothing secret is printed: {}",
         ran.err
     );
-    assert_eq!(auth_file(&home), json!({"bearer": "sscli-minted", "org": "tos"}), "the session, never the slt");
+    assert_eq!(auth_file(&home, &url), json!({"bearer": "sscli-minted", "org": "tos"}), "the session, never the slt");
     #[cfg(unix)]
-    assert_eq!(mode(&home.join("auth.json")), 0o600);
+    assert_eq!(mode(&auth_path(&home, &url)), 0o600);
     assert_eq!(calls(&seen)[0], r#"POST /api/auth/session {"org":"tos","slt":"slt_arg"}"#);
 
     let piped = Command::new(BIN)
         .args(["auth", "-"])
         .env("SPACE_STATION_HOME", &home)
         .env("SPACE_STATION_URL", &url)
+        .env_remove("SPACE_STATION_PROFILE")
         .env_remove("SPACE_STATION_ORG")
         .stdin(process::Stdio::piped())
         .stdout(process::Stdio::piped())
@@ -835,11 +892,11 @@ fn auth_takes_a_short_lived_token_from_the_argument_stdin_or_the_environment_and
         })
         .unwrap();
     assert!(piped.status.success(), "{}", String::from_utf8_lossy(&piped.stderr));
-    assert_eq!(calls(&seen)[2], r#"POST /api/auth/session {"org":"tos","slt":"slt_stdin"}"#, "the stored org is kept");
+    assert_eq!(calls(&seen)[3], r#"POST /api/auth/session {"org":"tos","slt":"slt_stdin"}"#, "the stored org is kept");
 
     let env = run(&home, &url, &[("SPACE_STATION_TOKEN", "slt_env")], &["auth"]);
     assert!(env.ok, "{}", env.err);
-    assert_eq!(calls(&seen)[4], r#"POST /api/auth/session {"org":"tos","slt":"slt_env"}"#);
+    assert_eq!(calls(&seen)[6], r#"POST /api/auth/session {"org":"tos","slt":"slt_env"}"#);
 
     let nothing = run(&home, &url, &[], &["auth"]);
     assert!(!nothing.ok && nothing.out.is_empty(), "without a token there is nothing to do");
@@ -860,8 +917,8 @@ fn auth_takes_a_short_lived_token_from_the_argument_stdin_or_the_environment_and
     }
     let from_env = run(&home, &url, &[("SPACE_STATION_TOKEN", &silicon_token)], &["auth"]);
     assert!(!from_env.ok && from_env.err.contains("not a short-lived token"), "from the environment too");
-    assert_eq!(calls(&seen).len(), 6, "and none of them was sent");
-    assert_eq!(auth_file(&home)["bearer"], "sscli-minted", "nothing changed");
+    assert_eq!(calls(&seen).len(), 9, "and none of them was sent");
+    assert_eq!(auth_file(&home, &url)["bearer"], "sscli-minted", "nothing changed");
 
     let help = Command::new(BIN).args(["auth", "--help"]).output().unwrap();
     let help = String::from_utf8_lossy(&help.stdout);

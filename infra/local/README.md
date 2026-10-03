@@ -60,12 +60,12 @@ sat=$(curl -s -X POST http://127.0.0.1:8099/api/v1/silicon-auth/token \
   -d '{"silicon_id":"si:bot","silicon_token":"stk-0123456789abcdef0123456789abcdef"}' | jq -r .access_token)
 slt=$(curl -s -X POST http://127.0.0.1:8099/api/v1/app-auth/short-lived-tokens \
   -H "Authorization: Bearer $sat" -H 'Content-Type: application/json' -H "Idempotency-Key: $(uuidgen)" \
-  -d '{"app_id":"spacestation","org_id":"tos"}' | jq -r .slt)
+  -d '{"app_id":"spacestation","org_ids":["tos"]}' | jq -r .slt)
 
 cargo run -p space-station-cli -- auth "$slt" --org tos   # or `auth -` with the token on stdin, or $SPACE_STATION_TOKEN
 ```
 
-Use IAM 4 for canonical identifiers. Keep test CLI sessions in a scratch `SILICON_IAM_HOME`
+Use IAM 5 for application login and canonical identifiers. Keep test CLI sessions in a scratch `SILICON_IAM_HOME`
 directory, mode 0700. The local HTTP fixture above exercises the token handoff without relying on
 CLI release differences. The slt is single-use and dies after two minutes; the `sat_` stays with
 the silicon and never reaches Space Station.

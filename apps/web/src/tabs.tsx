@@ -44,8 +44,8 @@ export const KIND_ICON: Record<T.Kind, string> = {
 
 type Nav = { tab?: string; i?: number } | null;
 
-export function createTabs(org: string, home: string, first: string) {
-  const key = `ss-tabs:${org}`;
+export function createTabs(org: string, home: string, first: string, context: string) {
+  const key = `ss-tabs:${context}:${org}`;
   let saved: string | null = null;
   try {
     saved = localStorage.getItem(key);

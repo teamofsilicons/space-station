@@ -101,6 +101,7 @@ struct Api {
     base: String,
     origin: String,
     bearer: Option<String>,
+    context: Arc<Mutex<Option<String>>>,
 }
 
 impl Api {
@@ -108,7 +109,7 @@ impl Api {
         let jar = Arc::new(Jar::default());
         let http =
             Client::builder().cookie_provider(jar.clone()).redirect(reqwest::redirect::Policy::none()).build().unwrap();
-        Api { http, jar, base: format!("{origin}/api"), origin: origin.into(), bearer: None }
+        Api { http, jar, base: format!("{origin}/api"), origin: origin.into(), bearer: None, context: Arc::default() }
     }
 
     fn with_bearer(&self, token: &str) -> Api {
@@ -118,7 +119,12 @@ impl Api {
             base: self.base.clone(),
             origin: self.origin.clone(),
             bearer: Some(token.into()),
+            context: self.context.clone(),
         }
+    }
+
+    fn context(&self) -> String {
+        self.context.lock().unwrap().clone().expect("browser login context")
     }
 
     fn cookie(&self) -> String {
@@ -130,6 +136,9 @@ impl Api {
             self.http.request(method, format!("{}{path}", self.base)).header("Origin", origin.unwrap_or(&self.origin));
         if let Some(bearer) = &self.bearer {
             req = req.bearer_auth(bearer);
+        }
+        if let Some(context) = self.context.lock().unwrap().clone() {
+            req = req.header("X-SpaceStation-Context", context);
         }
         if let Some(body) = body {
             req = req.json(&body);
@@ -175,7 +184,10 @@ async fn login(api: &Api, carbon: &str, org: &str) {
     let q: HashMap<String, String> = authorize.query_pairs().into_owned().collect();
     assert!(authorize.path().ends_with("/api/v1/login"), "{authorize}");
     assert_eq!(q["app_id"], APP_ID, "the canonical Application id");
-    assert_eq!(q["redirect_uri"], format!("{}/auth/callback", api.base));
+    let redirect = Url::parse(&q["redirect_uri"]).unwrap();
+    assert_eq!(redirect.origin().ascii_serialization(), api.origin);
+    assert_eq!(redirect.path(), "/api/auth/callback");
+    assert!(redirect.query_pairs().any(|(key, value)| key == "state" && !value.is_empty()));
     assert!(!q.contains_key("org_id"), "IAM owns organization selection");
     authorize.query_pairs_mut().append_pair("as", carbon).append_pair("org_id", org);
     let res = api.http.get(authorize).send().await.unwrap();
@@ -191,6 +203,8 @@ async fn login(api: &Api, carbon: &str, org: &str) {
         res.text().await.unwrap()
     );
     assert_eq!(res.headers()["location"], format!("{}/o/x", api.origin).as_str());
+    *api.context.lock().unwrap() =
+        Some(api.ok(Method::GET, "/me", None).await["context_id"].as_str().unwrap().to_owned());
 }
 
 /// The stub, spoken to the way a person, a silicon or the `iam` CLI would.
@@ -244,7 +258,7 @@ impl Iam {
     async fn slt(&self, bearer: &str, org: Option<&str>) -> String {
         let mut body = json!({"app_id": APP_ID});
         if let Some(org) = org {
-            body["org_id"] = org.into();
+            body["org_ids"] = json!([org]);
         }
         let (status, slt) = self.post_json("/api/v1/app-auth/short-lived-tokens", Some(bearer), body).await;
         assert!(status.is_success(), "short-lived token: {status} {slt}");
@@ -452,7 +466,7 @@ async fn the_whole_station_end_to_end() {
     login(&api, "c:alice", &org).await;
     assert_eq!(
         api.ok(Method::GET, "/me", None).await,
-        json!({"id": "c:alice", "kind": "carbon", "org": org, "app": origin})
+        json!({"id": "c:alice", "kind": "carbon", "org": org, "app": origin, "context_id": api.context()})
     );
     let listed = ours(api.ok(Method::GET, "/orgs", None).await, &[&org, &other]);
     assert_eq!(listed, json!([{"id": org, "name": org}]));
@@ -496,11 +510,19 @@ async fn the_whole_station_end_to_end() {
     assert!(token.starts_with("sscli-"));
     let terminal = api.with_bearer(&token);
     assert_eq!(terminal.ok(Method::GET, "/me", None).await["org"], org);
-    let replay = api.refused(Method::POST, "/auth/session", Some(json!({"slt": slt, "org": org}))).await;
-    assert_eq!(replay, (401, "invalid_slt".into()), "an slt is single-use");
-    let unscoped = iam.slt(&cat, None).await;
-    let refused = api.refused(Method::POST, "/auth/session", Some(json!({"slt": unscoped, "org": org}))).await;
-    assert_eq!(refused, (400, "org_required".into()), "everything here lives inside an org");
+    let replay = api.ok(Method::POST, "/auth/session", Some(json!({"slt": slt, "org": org}))).await;
+    assert_eq!(
+        replay["token"], token,
+        "an uncertain login retrieves its existing receipt without another IAM exchange"
+    );
+    let (status, refusal) = iam
+        .post_json("/api/v1/app-auth/short-lived-tokens", Some(&cat), json!({"app_id": APP_ID, "org_ids": []}))
+        .await;
+    assert_eq!(
+        (status.as_u16(), refusal["error"]["code"].as_str()),
+        (400, Some("organization_selection_required")),
+        "IAM refuses an application login without one selected organization"
+    );
     let elsewhere = iam.slt(&cat, Some(&other)).await;
     let refused = api.refused(Method::POST, "/auth/session", Some(json!({"slt": elsewhere, "org": org}))).await;
     assert_eq!(refused, (400, "org_mismatch".into()), "an slt bound to another org does not open this one");
@@ -629,7 +651,9 @@ async fn the_whole_station_end_to_end() {
 
     // Mission control: subscribe with a where, record a matching row, receive the trigger.
     let mc_url = format!("ws://127.0.0.1:{port}/api/ws/mission-control?org={org}");
-    let mut mc = ws(&mc_url, &[("Cookie", &api.cookie()), ("Origin", &origin)]).await;
+    let mut mc =
+        ws(&mc_url, &[("Cookie", &api.cookie()), ("Origin", &origin), ("X-SpaceStation-Context", &api.context())])
+            .await;
     send(&mut mc, json!({"type": "subscribe", "id": "sub1", "triggers": [{"table": "orders", "where": "record.x::Float64 > 4.9"}]})).await;
     assert_eq!(
         next_text(&mut mc).await,
@@ -661,10 +685,7 @@ async fn the_whole_station_end_to_end() {
     // definition stays available in the retired/all administrative views.
     assert_eq!(api.post(&format!("{orgs}/tables/orders/retire"), json!({})).await.0, StatusCode::NO_CONTENT);
     assert!(api.ok(Method::GET, &format!("{orgs}/tables"), None).await.as_array().unwrap().is_empty());
-    assert_eq!(
-        api.ok(Method::GET, &format!("{orgs}/tables?retired=true"), None).await[0]["retired_at"].is_string(),
-        true
-    );
+    assert!(api.ok(Method::GET, &format!("{orgs}/tables?retired=true"), None).await[0]["retired_at"].is_string());
     assert_eq!(api.ok(Method::GET, &format!("{orgs}/tables?retired=all"), None).await.as_array().unwrap().len(), 1);
     let retained = api.query(&org, "SELECT count() AS n FROM orders", json!({})).await;
     assert!(retained["rows"][0]["n"].as_str().unwrap().parse::<u64>().unwrap() >= 5);
@@ -720,7 +741,7 @@ async fn the_whole_station_end_to_end() {
     assert!(access.starts_with("spacewindow-"));
     assert_eq!(api.with_bearer(&access).query(&org, count_sql, json!({})).await["rows"][0]["n"], "6");
     let by_token = api.with_bearer(&access).ok(Method::GET, "/me", None).await;
-    assert_eq!(by_token, json!({"id": "c:alice", "kind": "carbon", "org": org, "app": origin}));
+    assert_eq!(by_token, json!({"id": "c:alice", "kind": "carbon", "org": org, "app": origin, "context_id": null}));
     let rotated = api.ok(Method::POST, &format!("{orgs}/access-token/rotate"), None).await;
     assert_ne!(rotated["token"], access);
     assert_eq!(rotated["last_used_at"], Value::Null);
@@ -753,7 +774,7 @@ async fn the_whole_station_end_to_end() {
     assert_eq!(me, json!({"kind": "silicon", "id": bot, "org": org, "tags": ["ops"]}), "tags from the snapshot");
     assert_eq!(
         bot_api.ok(Method::GET, "/me", None).await,
-        json!({"id": bot, "kind": "silicon", "org": org, "app": origin})
+        json!({"id": bot, "kind": "silicon", "org": org, "app": origin, "context_id": sha256_hex(bot_api.bearer.as_ref().unwrap())})
     );
     assert_eq!(
         bot_api.ok(Method::GET, &format!("{orgs}/windows"), None).await,
@@ -848,7 +869,11 @@ async fn the_whole_station_end_to_end() {
     let joined = test_envelope(TEST_KEY, &event("organization.membership.updated.v1", alice_rows)).to_string();
     assert_eq!(deliver(&api, "/api/iam/webhook", WEBHOOK_SECRET, now, &joined).await, 204);
     let listed = ours(api.ok(Method::GET, "/orgs", None).await, &[&org, &other]);
-    assert_eq!(listed, json!([{"id": org, "name": "Test Org"}, {"id": other, "name": "Second Org"}]));
+    assert_eq!(
+        listed,
+        json!([{"id": org, "name": "Test Org"}]),
+        "directory membership does not expand the selected session"
+    );
     assert_eq!(api.ok(Method::GET, &format!("{orgs}/me"), None).await["tags"], json!(["tech"]));
     assert_eq!(api.refused(Method::GET, &format!("/orgs/{other}/me"), None).await.1, "not_a_member");
     assert_eq!(bot_api.ok(Method::GET, "/orgs", None).await, json!([{"id": org, "name": "Test Org"}]));
