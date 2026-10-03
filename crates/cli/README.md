@@ -26,10 +26,11 @@ spacestation login                          # opens the browser; IAM selects the
 spacestation auth <slt>                      # a short-lived token from the iam CLI, exchanged for a session
 spacestation login <slt>                     # same exchange using the shared IAM-app grammar
 spacestation login status --json             # whether the stored session is accepted
+spacestation --profile work login            # an independent account and organization
 spacestation iam --json                      # app id, source, docs and crate metadata
 spacestation report-bug "short summary" --details "steps and observed output" --pr-ref owner/repo#123
 spacestation whoami                          # id, kind, org, tags
-spacestation orgs                            # the orgs you belong to
+spacestation orgs                            # the selected session's organization
 spacestation logout
 ```
 
@@ -39,7 +40,7 @@ it alone holds and refreshes:
 
 ```sh
 iam login --app-id 'spacestation' --grant-org tos  # a carbon in a terminal: prints the token
-iam silicon-login --app-id 'spacestation'          # a silicon: the only way a silicon signs in
+iam silicon-login --app-id 'spacestation'          # a silicon: IAM prints the token
 spacestation auth <slt>
 ```
 
@@ -50,27 +51,26 @@ a silicon's own `stk-` token, the Application's `ask_` secret, an IAM bearer (`s
 exit 1, nothing sent and nothing echoed. Those never leave the machine; only the `oac_` token IAM
 minted to be handed over does. `login` without a token uses the browser flow, brokered by Space Station (only
 the backend holds the Application secret): the command listens on `127.0.0.1`, opens the sign-in
-page, catches the short-lived token redirected back, then exchanges it for an `sscli-` session;
-`--no-browser` prints the link.
+page, and catches the short-lived token redirected back. The backend has already exchanged it
+and verified the Carbon identity; the command checks callback state, then redeems the receipt
+at `/auth/session` for the `sscli-` credential without a second IAM exchange. `--no-browser`
+prints the link. The website separately offers Carbon and Silicon popup sign-in.
 
-A session lasts as long as IAM lets the backend refresh it, and IAM ties that to the actor's own
-IAM login: a **new** IAM login by the same actor — a second device, `iam login` with an email code
-again, `iam silicon-login --sid … --stk …` again — makes IAM refuse the refresh of the older Space
-Station sessions, so within about 30 minutes they answer `error: <code>: …` on a 401 with the way
-back in, and `auth` (or `login`) again is the remedy. Minting another short-lived token from the
-IAM session you already have (`iam login --app-id …`, `iam silicon-login --app-id …` without
-`--stk`) is not a new login and ends nothing.
+A session lasts while IAM lets the backend refresh it. Expiry or revocation returns a 401;
+run `auth` with a fresh SLT or `login` again. Legacy sessions require a fresh login for IAM 5.
 
-A session is bound to exactly one org — `--org` (or `$SPACE_STATION_ORG`), else the org already
-stored, else IAM's selection. On a fresh home, `login <slt>`, `auth <slt>`, and browser login read
-the selected org from the authenticated backend and store it beside the session, so later commands
-need no flag. Another org is another
-`login` or `auth`; IAM completes it without a prompt while its own session is good. `logout` ends
-the terminal's session at the server and does not sign the browser out.
+A session is bound to exactly one account and organization. On a fresh profile, login saves
+IAM's selected org beside the session. An explicit `--org`, `$SPACE_STATION_ORG`, or saved org
+must match it; none can retarget an existing session. Use `spacestation --profile personal login`
+for another context and `--profile work` to return to the work context. `logout` ends only the
+selected profile's session and does not sign the browser out.
 
-Whatever is stored lives in `~/.space-station/auth.json` (0600, in a 0700 directory, written under
-a lock through a tmp file and a rename; owner-only DACLs on Windows). `whoami` names what is stored on stderr, so it says
-something even offline.
+Credentials live in `<home>/iam5/<server-hash>/<profile>/auth.json` (0600, in a 0700 directory,
+written under a lock through a tmp file and rename; owner-only DACLs on Windows). `--profile`
+or `$SPACE_STATION_PROFILE` selects the profile, default `default`; backend URLs have separate
+stores. The base home is `$SILICON_HOME/.space-station`, else `$SPACE_STATION_HOME`, else
+`~/.space-station`. Recording uses the shared spool in that base home. Legacy root-level
+credentials are retained but not reused. `whoami` names the stored credential type on stderr.
 
 IAM actor IDs are `c:<handle>` and `si:<handle>`; access and recipient selectors use
 `@c:<handle>` and `@si:<handle>`. Organizations remain explicit. After the coordinated identifier
@@ -79,16 +79,15 @@ the opaque session token and organization; do not rewrite tokens or infer an org
 
 ## The org
 
-Every org command needs one, and takes the first of:
+Every org command uses the selected session's organization. These forms verify that selection:
 
 ```sh
 spacestation --org tos tables ls     # the flag
 SPACE_STATION_ORG=tos spacestation tables ls
-spacestation use tos                 # remembered for later commands
+spacestation use tos                 # verifies this session is bound to tos
 ```
 
-A session already carries the org it was signed in to; `use` is for naming it again. When no org
-is known the command says so and names every way to set one, without asking the server anything.
+`use` and `--org` reject a different organization. Sign in with a separate profile to work there.
 
 An `apikey-` or `spacewindow-` credential can act instead of the stored one — `--api-key`,
 `--access-token`, or their `SPACE_STATION_*` variables — and, not being stored, it carries no
@@ -188,9 +187,10 @@ there is nothing to retry with here — and the message ends with how to sign in
 | variable | default | meaning |
 |---|---|---|
 | `SPACE_STATION_URL` | `https://backend.spacestation.teamofsilicons.com` | the Space Station origin (`/api` is appended) |
-| `SILICON_HOME` | `$SILICON_HOME/.space-station` | base for this app's `auth.json`, runtime, spool and daemon socket |
+| `SILICON_HOME` | — | when set, the base home is `$SILICON_HOME/.space-station` |
 | `SPACE_STATION_HOME` | — | compatibility alias, used when `SILICON_HOME` is unset |
-| `SPACE_STATION_ORG` | — | the org to work in, under `--org` and over the one stored |
+| `SPACE_STATION_PROFILE` | `default` | independent saved account and organization context |
+| `SPACE_STATION_ORG` | — | expected organization, under `--org`; must match a stored session |
 | `SPACE_STATION_TOKEN` | — | the short-lived token `auth` exchanges, when it is not an argument |
 | `SPACE_STATION_API_KEY` | — | act as this `apikey-` key |
 | `SPACE_STATION_ACCESS_TOKEN` | — | act as this `spacewindow-` token |

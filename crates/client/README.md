@@ -9,7 +9,7 @@ crate and has no capability of its own; the web app is a subset.
 
 ```toml
 [dependencies]
-space-station = "0.2"
+space-station = "0.3"
 ```
 
 ## Recording
@@ -25,7 +25,8 @@ ss.flush();                                                   // optional: wait 
 Anything that implements `serde::Serialize` can be recorded; send a JSON object. Errors are events,
 not panics: `SpaceClient::builder(key).on_error(|e| …).build()` receives every one of them (the
 default prints to stderr). `.url(..)` and `.home(..)` override `$SPACE_STATION_URL`
-(`https://backend.spacestation.teamofsilicons.com`) and `$SPACE_STATION_HOME` (`~/.space-station`).
+(`https://backend.spacestation.teamofsilicons.com`) and the default home
+(`$SILICON_HOME/.space-station`, else `$SPACE_STATION_HOME`, else `~/.space-station`).
 
 ### Space Station telemetry
 
@@ -75,26 +76,27 @@ credential — not a silicon's token, not a bearer, not a refresh token. Two fun
 session without keeping one:
 
 - `space_station::exchange(url, slt, org)` spends a **short-lived token** — what `iam login
-  --app-id spacestation --org <org>` or `iam silicon-login --app-id spacestation` prints,
+  --app-id spacestation --grant-org <org>` or `iam silicon-login --app-id spacestation` prints,
   two minutes old at most and good for one exchange — at `POST /api/auth/session {slt, org}` and
   returns the `Auth::session` the backend minted for it, bound to `org`. Anything that is not a
   short-lived token is refused before it leaves the machine as `Error::Local("not a short-lived
   token…")`: a silicon's `stk-` token, the Application's `ask_` secret, an IAM bearer (`sat_`,
   `cat_`, `oat_`) or refresh token (`rft_`, `ort_`), and Space Station's own secrets. Only the
   `oac_` token IAM minted to be handed over goes through.
-- `space_station::login(url, org, visit)` is the browser flow: it binds a loopback port, calls
-  `visit(link)` so you can open or print the link, catches a short-lived token and exchanges it
-  for `Auth::session` — it never opens a browser itself.
+- `space_station::login(url, org, visit)` is the Carbon browser flow: it binds a loopback port
+  and calls `visit(link)` so you can open or print the link. The backend exchanges the SLT and
+  verifies the selected identity before redirecting that SLT to loopback. The client checks
+  callback state and redeems the backend's receipt at `/auth/session`, receiving `Auth::session`
+  without a second IAM exchange. It never opens a browser itself.
 
-A session is bound to exactly one org, and every org call needs `.org("tos")`.
+A session is bound to exactly one account and organization, and every org call needs
+`.org("tos")`. That argument cannot change the session's organization. Keep separate `Auth`
+values for separate contexts and bind requests and cached data to the originating value.
+The CLI does this with `--profile` and separate stores per backend URL.
 
-A session lives as long as IAM lets the backend refresh it, and IAM ties that to the actor's own
-IAM login: a **new** IAM login by the same actor — a second device, `iam login` with a fresh code,
-`iam silicon-login --sid … --stk …` run again — makes IAM refuse the refresh of the older Space
-Station sessions, so within about 30 minutes their calls answer `Error::Api { status: 401, .. }`
-and the program `exchange`s or `login`s again. Minting another short-lived token from the IAM
-session already held (`iam login --app-id …`, `iam silicon-login --app-id …` without `--stk`) is
-not a new login and ends nothing.
+The backend refreshes the session while IAM permits it. Expiry or revocation returns
+`Error::Api { status: 401, .. }`; obtain a fresh SLT or start `login` again. IAM 5 requires a
+fresh login for legacy sessions; another login never expands an existing session to more orgs.
 
 `Space` is one method per operation, synchronous, each returning a typed value or `Error`:
 

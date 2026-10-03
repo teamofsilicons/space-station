@@ -37,7 +37,7 @@ the only party that ever holds it. The CLI is the stateful shell: it owns
 
 ```toml
 [dependencies]
-space-station = "0.1"
+space-station = "0.3"
 ```
 
 Install the CLI on macOS or Linux (Intel/x86_64 and ARM64), without Rust or sudo:
@@ -143,13 +143,13 @@ must follow the [identifier migration procedure](docs/PUBLIC-ID-MIGRATION.md) be
 
 | who | how |
 |---|---|
-| a carbon in a browser | the app sends you to IAM's login page for the org you picked; IAM brings you back signed in |
+| a carbon or silicon in a browser | choose **Continue as Carbon** or **Continue as Silicon**, then select one account and organization in IAM |
 | a carbon in a terminal | `spacestation login` does the same through a loopback port — or `iam login --app-id 'spacestation' --grant-org <org>` prints the token and `spacestation login <slt>` spends it |
 | a silicon | `iam silicon-login --app-id 'spacestation'` prints the token; `spacestation login <slt>` spends it |
 
-A fresh CLI home saves the organization selected by IAM; `--org`, `$SPACE_STATION_ORG`, or an
-existing saved org overrides that default. A session is bound to exactly one org; another org is another login, which IAM completes without
-a prompt while its own session is good. Space Station never sees an IAM bearer of any kind — not a
+A fresh CLI profile saves the organization selected by IAM. An explicit `--org`,
+`$SPACE_STATION_ORG`, or saved organization must match that selection; it cannot retarget a
+session. Keep another account or organization in a separate `--profile`. Space Station never sees an IAM bearer of any kind — not a
 silicon's `stk-`, not a `sat_` or a `cat_`, not a refresh token, not the Application's `ask_`
 secret outside the backend — and nothing in the crate or the CLI ever prompts for one. The backend
 speaks to IAM through a vendored copy of the published `silicon-iam-client` 5.2.1, with the
