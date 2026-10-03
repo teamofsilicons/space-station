@@ -22,6 +22,8 @@ Migration `0009_iam5_contexts.sql` is additive. Existing rows have contract vers
 
 Rows bind IAM URL, application and testing metadata. Test key/generation/version or cleaning changes invalidate the cached world and require restart and reauthentication; there is no production fallback. The existing database testing-key boundary remains in force.
 
+Mission-control sockets revalidate every 60 seconds even while the client only listens. Logout or revoked membership closes the original connection. Each recheck also drops subscriptions whose tables or predicate dependencies are no longer visible and refreshes the identity used for notification delivery.
+
 Refresh is serialized by a PostgreSQL row lock. Its receipt key derives deterministically from the original session and refresh token, so a process crash before commit reconstructs the same IAM mutation. New pairs are swapped atomically. An uncertain introspection preserves the rotated pair with an unusable expiry so the next request can recover; expiry is taken from active introspection rather than extending an idempotent replay's old TTL.
 
 ## Verification
@@ -29,3 +31,5 @@ Refresh is serialized by a PostgreSQL row lock. Its receipt key derives determin
 Unit, CLI and frontend context tests exercise strict ordinary tokens, stale responses, profile isolation and conditional credential cleanup. The database-backed `saved_contexts_receipts_refresh_and_logout_remain_independent` test uses isolated PostgreSQL/Redis URLs (`SS_CONTEXT_TEST_DATABASE`, `SS_CONTEXT_TEST_REDIS`) and the local IAM fixture to cover separate organizations, saved browser selection, login replay, simulated interrupted refresh, concurrent refresh, legacy/world rejection and logout. Run it explicitly with `cargo test -p space-station-backend --lib saved_contexts_receipts -- --ignored`.
 
 Live IAM 5 verification and the full ClickHouse-backed application suite remain separate release gates.
+
+The additional `idle_browser_socket_closes_after_its_session_ends` regression opens a real cookie-authenticated WebSocket, ends its original session, and checks that the server closes it without receiving another application frame. It uses the same isolated database URLs and runs explicitly with `cargo test -p space-station-backend --lib idle_browser_socket -- --ignored`.

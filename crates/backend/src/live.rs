@@ -130,6 +130,9 @@ async fn session(mut socket: WebSocket, state: AppState, headers: HeaderMap, org
     let mut subs: HashMap<String, Sub> = HashMap::new();
     let mut validated = Instant::now();
     let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + PING_EVERY, PING_EVERY);
+    // Listening is itself access: an idle notification consumer must stop after its session or
+    // membership is revoked even when it never sends another application frame.
+    let mut auth_check = tokio::time::interval_at(tokio::time::Instant::now() + CACHE_TTL, CACHE_TTL);
     let mut awaiting_pong = false;
     let mut stop = state.stop.clone();
     loop {
@@ -137,13 +140,10 @@ async fn session(mut socket: WebSocket, state: AppState, headers: HeaderMap, org
             message = socket.recv() => match message {
                 Some(Ok(Message::Text(text))) => {
                     if validated.elapsed() >= CACHE_TTL {
-                        match actor(&state, &headers, &org).await {
+                        match renew(&state, &headers, &org, &mut subs, &tx, attached.1).await {
                             Ok(fresh) => {
                                 identity = fresh;
                                 validated = Instant::now();
-                                if let Some(s) = lock(&state.hub.sockets).get_mut(&attached.1) {
-                                    s.identity = identity.clone();
-                                }
                             }
                             Err(e) => return close(socket, e).await,
                         }
@@ -177,6 +177,13 @@ async fn session(mut socket: WebSocket, state: AppState, headers: HeaderMap, org
                 awaiting_pong = true;
                 None
             }
+            _ = auth_check.tick() => {
+                match renew(&state, &headers, &org, &mut subs, &tx, attached.1).await {
+                    Ok(fresh) => { identity = fresh; validated = Instant::now(); }
+                    Err(e) => return close(socket, e).await,
+                }
+                None
+            }
             _ = stop.changed() => break,
         };
         if let Some(reply) = reply
@@ -186,6 +193,44 @@ async fn session(mut socket: WebSocket, state: AppState, headers: HeaderMap, org
         }
     }
     let _ = socket.send(Message::Close(None)).await;
+}
+
+async fn renew(
+    state: &AppState,
+    headers: &HeaderMap,
+    org: &str,
+    subs: &mut HashMap<String, Sub>,
+    tx: &UnboundedSender<String>,
+    socket_id: u64,
+) -> Result<Identity, ApiError> {
+    let fresh = actor(state, headers, org).await?;
+    if !subs.is_empty() {
+        let visible = access::visible_tables(state, &fresh).await?;
+        subs.retain(|id, sub| {
+            let allowed = subscription_visible(&sub.triggers, &visible);
+            if !allowed {
+                let _ = tx.send(
+                    json!({"type": "error", "id": id, "code": "forbidden",
+                    "message": "This subscription is no longer visible. Subscribe again after reviewing access."})
+                    .to_string(),
+                );
+            }
+            allowed
+        });
+    }
+    if let Some(socket) = lock(&state.hub.sockets).get_mut(&socket_id) {
+        socket.identity = fresh.clone();
+    }
+    Ok(fresh)
+}
+
+fn subscription_visible(triggers: &[Trigger], visible: &[String]) -> bool {
+    triggers.iter().all(|trigger| {
+        visible.contains(&trigger.table)
+            && trigger.where_.as_deref().is_none_or(|predicate| {
+                sql::trigger_plan(&trigger.table, Some(predicate), &|table| visible.iter().any(|v| v == table)).is_ok()
+            })
+    })
 }
 
 /// One frame from the client; which fields matter depends on `type`.
@@ -307,4 +352,22 @@ async fn store_state(
     .execute(&state.store.pg)
     .await?;
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renewed_subscriptions_require_current_visibility_including_subqueries() {
+        let simple = vec![Trigger { table: "orders".into(), where_: None }];
+        assert!(subscription_visible(&simple, &["orders".into()]));
+        assert!(!subscription_visible(&simple, &["customers".into()]));
+        let joined = vec![Trigger {
+            table: "orders".into(),
+            where_: Some("customer IN (SELECT customer FROM customers)".into()),
+        }];
+        assert!(subscription_visible(&joined, &["orders".into(), "customers".into()]));
+        assert!(!subscription_visible(&joined, &["orders".into()]));
+    }
 }

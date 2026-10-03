@@ -4,7 +4,7 @@ use super::*;
 use crate::{config::Config, frontend, http::Inner, iam_stub, store};
 use std::sync::Arc;
 
-async fn fixture() -> (AppState, tokio::task::JoinHandle<()>, reqwest::Client) {
+async fn fixture() -> (AppState, tokio::task::JoinHandle<()>, reqwest::Client, tokio::sync::watch::Sender<bool>) {
     let mut seed = iam_stub::default_seed();
     seed.app.testing_key = None;
     let app_secret = seed.app.secret.clone();
@@ -39,12 +39,13 @@ async fn fixture() -> (AppState, tokio::task::JoinHandle<()>, reqwest::Client) {
     let iam = iam::Client::connect(&cfg).await.unwrap();
     let lease = store::Lease::start(store.redis.clone());
     let frontend = frontend::Collector::from_config(&cfg);
+    let (stop, stopped) = tokio::sync::watch::channel(false);
     let state = AppState(Arc::new(Inner {
         cfg,
         store,
         iam,
         lease,
-        stop: tokio::sync::watch::channel(false).1,
+        stop: stopped,
         triggers: Arc::default(),
         hub: Default::default(),
         keys: Default::default(),
@@ -52,7 +53,7 @@ async fn fixture() -> (AppState, tokio::task::JoinHandle<()>, reqwest::Client) {
         telemetry: None,
         frontend,
     }));
-    (state, task, reqwest::Client::new())
+    (state, task, reqwest::Client::new(), stop)
 }
 
 async fn post(http: &reqwest::Client, state: &AppState, path: &str, token: Option<&str>, body: Value) -> Value {
@@ -96,7 +97,7 @@ fn browser_headers(state: &AppState, group: &str, secret: &str) -> HeaderMap {
 #[tokio::test]
 #[ignore = "requires isolated Postgres and Redis URLs in SS_CONTEXT_TEST_DATABASE and SS_CONTEXT_TEST_REDIS"]
 async fn saved_contexts_receipts_refresh_and_logout_remain_independent() {
-    let (state, stub, http) = fixture().await;
+    let (state, stub, http, _stop) = fixture().await;
     let group = URL_SAFE_NO_PAD.encode(crypto::random::<32>());
     let code_a = slt(&http, &state, "tos").await;
     let login_reply = login(
@@ -202,5 +203,47 @@ async fn saved_contexts_receipts_refresh_and_logout_remain_independent() {
     assert!(open(&state, &code_a, Some("tos"), false, Some(&group)).await.is_err(), "logout must survive replay");
     assert!(load(&state, &b).await.unwrap().is_some());
     state.lease.release().await;
+    stub.abort();
+}
+
+#[tokio::test]
+#[ignore = "requires isolated Postgres and Redis URLs in SS_CONTEXT_TEST_DATABASE and SS_CONTEXT_TEST_REDIS"]
+async fn idle_browser_socket_closes_after_its_session_ends() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
+
+    let (state, stub, http, _stop) = fixture().await;
+    let group = URL_SAFE_NO_PAD.encode(crypto::random::<32>());
+    let secret = open(&state, &slt(&http, &state, "tos").await, Some("tos"), false, Some(&group)).await.unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let router = crate::live::routes().with_state(state.clone());
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let mut request = format!("ws://{addr}/ws/mission-control?org=tos&account_context={}", sha256_hex(&secret))
+        .into_client_request()
+        .unwrap();
+    request.headers_mut().insert(header::COOKIE, format!("{COOKIE}={secret}").parse().unwrap());
+    request.headers_mut().insert(header::ORIGIN, state.cfg.origin.parse().unwrap());
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    // Complete the initial authentication without needing ClickHouse or an application table.
+    socket.send(Message::Text(json!({"type": "unknown"}).to_string().into())).await.unwrap();
+    let first = socket.next().await.unwrap().unwrap();
+    assert!(first.to_text().unwrap().contains("bad_frame"));
+    end(&state, &secret).await.unwrap();
+    // No further text frames: the old implementation left this idle listener authorized forever.
+    let closed = tokio::time::timeout(iam::CACHE_TTL + std::time::Duration::from_secs(10), async {
+        loop {
+            match socket.next().await.unwrap().unwrap() {
+                Message::Ping(bytes) => socket.send(Message::Pong(bytes)).await.unwrap(),
+                Message::Close(Some(frame)) => break frame,
+                other => panic!("unexpected frame after logout: {other:?}"),
+            }
+        }
+    })
+    .await
+    .expect("idle revoked session must close within the authorization cache interval");
+    assert_eq!(u16::from(closed.code), 4401);
+    state.lease.release().await;
+    server.abort();
     stub.abort();
 }
