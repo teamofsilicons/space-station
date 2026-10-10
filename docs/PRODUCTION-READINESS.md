@@ -18,7 +18,7 @@ Browser cookies and protected CLI credentials retain the session until refresh-t
 
 The workspace compilation, frontend TypeScript/production build, shell syntax, Python compilation and whitespace checks passed. Frontend dependency audit reported no vulnerabilities. The real Accounts SLT grant and introspection returned the expected `si:tos` UUID and application audience. A fresh production PostgreSQL backup completed successfully before the migration.
 
-Release versions are Rust shared/client/CLI `0.4.0`, npm runtime `0.2.0`, and browser telemetry `0.1.1`. All three Rust crates and both npm packages are published. Local checks against real Silicon Accounts passed CLI persistence across invocations, single-use token replay rejection, table creation, record ingest and query, window creation, access-token refresh, and logout. Production deployment and native package validation are recorded below when completed.
+Release versions are Rust shared/client/CLI `0.4.0`, npm runtime `0.2.0`, and browser telemetry `0.1.1`. All three Rust crates and both npm packages are published. Local checks against real Silicon Accounts passed CLI persistence across invocations, single-use token replay rejection, table creation, record ingest and query, window creation, access-token refresh, and logout. The browser passed real SLT login, reload persistence, independence from CLI logout, saved-account controls and persistent logout. Six native binaries were built, and the Silicon Apps manifest validator accepted the package. The GitHub release workflow also runs each discovery command on its native target. Production deployment and hosted package-validation evidence are recorded below when completed.
 
 ## Operations
 
