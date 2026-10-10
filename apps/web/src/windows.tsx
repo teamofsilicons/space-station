@@ -2,18 +2,18 @@
 // role: processor sandbox + renderer iframe, reporting status to the tab and notifications to the
 // workspace), the prompt for an agent, the access token, and the code workbench with versions.
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
-import { api, wsUrl, type SpaceWindow, type Table, type Version } from "../lib/api";
+import { api, currentContext, wsUrl, type SpaceWindow, type Table, type Version } from "../lib/api";
 import { agentPrompt } from "../lib/agent-prompt";
 import { trackFrontendEvent } from "../lib/telemetry";
 import { loadRuntime, type Host, type RunError, type Status } from "../lib/runtime";
-import { Access, action, ago, Copy, Empty, ErrorText, list, Loading, Modal, resource, Secret, useTab, when } from "./ui";
+import { action, ago, Copy, Empty, ErrorText, Loading, Modal, resource, Secret, useTab, when } from "./ui";
 import { Link, useWorkspace } from "./tabs";
 import { Icon } from "./icons";
+import { SiliconBadge } from "./silicon-ui";
 
 export function NewWindow(p: { close: () => void }) {
   const ws = useWorkspace();
-  const [name, setName] = createSignal(""),
-    [access, setAccess] = createSignal("");
+  const [name, setName] = createSignal("");
   const a = action();
   return (
     <Modal title="New Space Window" close={p.close}>
@@ -21,11 +21,11 @@ export function NewWindow(p: { close: () => void }) {
         onSubmit={(e) => {
           e.preventDefault();
           a.run(async () => {
-            const w = await api<SpaceWindow>(`/orgs/${encodeURIComponent(ws.org)}/windows`, "POST", { name: name().trim(), access: list(access()) });
+            const w = await api<SpaceWindow>(`/windows`, "POST", { name: name().trim() });
             trackFrontendEvent("window_created", { window: w.id });
             await ws.windows.reload();
             p.close();
-            ws.tabs.reveal(`/o/${ws.org}/windows/${w.id}`, "tab");
+            ws.tabs.reveal(`/a/${ws.actor}/windows/${w.id}`, "tab");
           });
         }}
       >
@@ -33,11 +33,7 @@ export function NewWindow(p: { close: () => void }) {
           Name
           <input required maxlength={19} value={name()} onInput={(e) => setName(e.currentTarget.value)} placeholder="Orders live" autofocus />
         </label>
-        <label>
-          Access <span class="muted">(optional)</span>
-          <input value={access()} onInput={(e) => setAccess(e.currentTarget.value)} placeholder="@c:alice, engineering" />
-        </label>
-        <p class="hint">Shown as the window's title, under 20 characters. You are added to its access automatically.</p>
+        <p class="hint">Shown as the window's title, under 20 characters. Owned by your account.</p>
         <ErrorText message={a.error()} />
         <div class="dialog-foot">
           <button type="button" onClick={p.close}>Cancel</button>
@@ -79,7 +75,7 @@ export function Windows() {
             <div class="card-grid">
               <For each={items()}>
                 {(w) => (
-                  <Link href={`/o/${ws.org}/windows/${w.id}`} class="card window-card">
+                  <Link href={`/a/${ws.actor}/windows/${w.id}`} class="card window-card">
                     <span class="card-top">
                       <span class="title-icon"><Icon name="window" /></span>
                       <Show when={w.version} fallback={<span class="pill">No version</span>}>
@@ -87,7 +83,7 @@ export function Windows() {
                       </Show>
                     </span>
                     <strong>{w.name}</strong>
-                    <Access value={w.access} />
+                    <SiliconBadge>{ws.me.id}</SiliconBadge>
                     <small class="muted">@{w.created_by} · {ago(w.created_at)}</small>
                   </Link>
                 )}
@@ -111,22 +107,21 @@ export function WindowView() {
   const tab = useTab();
   const ws = useWorkspace();
   const id = tab.route().id;
-  const root = `/orgs/${encodeURIComponent(ws.org)}`,
-    path = `${root}/windows/${id}`;
+  const path = `/windows/${id}`;
   const win = resource(() => api<SpaceWindow>(path)),
     versions = resource(() => api<Version[]>(path + "/versions")),
-    tables = resource(() => api<Table[]>(root + "/tables"));
+    tables = resource(() => api<Table[]>("/tables"));
   const code = () => tab.route().kind === "code";
   createEffect(() => win.data() && tab.title(code() ? `${win.data()!.name} · code` : win.data()!.name));
   const prompt = createMemo(() => {
     const w = win.data();
-    return w ? agentPrompt({ org: ws.org, window: w, tables: (tables.data() || []).map((t) => t.id) }) : "";
+    return w ? agentPrompt({ actor: ws.me.id, window: w, tables: (tables.data() || []).map((t) => t.id) }) : "";
   });
   const [status, setStatus] = createSignal<Status>();
   const changed = async () => {
     await Promise.all([win.reload(), versions.reload(), ws.windows.reload()]);
   };
-  const toggle = () => tab.go(`/o/${ws.org}/windows/${id}${code() ? "" : "/code"}`);
+  const toggle = () => tab.go(`/a/${ws.actor}/windows/${id}${code() ? "" : "/code"}`);
   return (
     <Show when={win.data()} fallback={<div class="page-body"><Loading error={win.data.error} /></div>}>
       {(w) => (
@@ -140,12 +135,12 @@ export function WindowView() {
                 {status() ? (status()!.connected ? (status()!.is_live ? "Live" : "Stale") : "Disconnected") : "Starting"} · {w().version!.name}
               </span>
             </Show>
-            <Access value={w().access} save={async (access) => { await api(path, "PUT", { access }); trackFrontendEvent("window_access_updated", { window: w().id }); await changed(); }} />
+            <SiliconBadge>{ws.me.id}</SiliconBadge>
             <span class="grow" />
             <details class="pop">
               <summary class="button ghost small" title="Access token"><Icon name="key" /><span class="label">Access token</span></summary>
               <div class="pop-body">
-                <AccessToken root={root} />
+                <AccessToken />
               </div>
             </details>
             <details class="pop">
@@ -177,7 +172,7 @@ export function WindowView() {
                 </Show>
               }
             >
-              <Live org={ws.org} window={w()} onStatus={setStatus} onVersionChanged={changed} />
+              <Live window={w()} onStatus={setStatus} onVersionChanged={changed} />
             </Show>
             <Show when={code()}>
               <Workbench path={path} window={w()} versions={versions.data() || []} published={changed} />
@@ -283,13 +278,13 @@ function CodeEditor(p: { label: string; value: string; onInput: (value: string) 
   );
 }
 
-export function AccessToken(p: { root: string; hint?: boolean }) {
-  const token = resource(() => api<{ token: string; last_used_at: string | null }>(p.root + "/access-token"));
+export function AccessToken(p: { hint?: boolean }) {
+  const token = resource(() => api<{ token: string; last_used_at: string | null }>("/access-token"));
   const a = action();
   return (
     <div class="token">
       <Show when={p.hint !== false}>
-        <p class="hint">Lets mission control run your queries during development. Tied to you and this org; keep it in <code>.env</code>, never in code.</p>
+        <p class="hint">Lets mission control run your queries during development. Tied to your account; keep it in <code>.env</code>, never in code.</p>
       </Show>
       <Show when={token.data()} fallback={<Loading error={token.data.error} />}>
         {(t) => (
@@ -305,7 +300,7 @@ export function AccessToken(p: { root: string; hint?: boolean }) {
         onClick={() => {
           if (confirm("Rotate your access token? Its current value will stop working everywhere."))
             a.run(async () => {
-              await api(p.root + "/access-token/rotate", "POST");
+              await api("/access-token/rotate", "POST");
               await token.reload();
             });
         }}
@@ -317,7 +312,7 @@ export function AccessToken(p: { root: string; hint?: boolean }) {
   );
 }
 
-function Live(p: { org: string; window: SpaceWindow; onStatus: (s: Status) => void; onVersionChanged: () => Promise<void> }) {
+function Live(p: { window: SpaceWindow; onStatus: (s: Status) => void; onVersionChanged: () => Promise<void> }) {
   const tab = useTab();
   const ws = useWorkspace();
   let mount!: HTMLDivElement;
@@ -335,9 +330,8 @@ function Live(p: { org: string; window: SpaceWindow; onStatus: (s: Status) => vo
         if (gone) return;
         host = runtime.host({
           runtimeUrl: location.origin + "/mission-control.js",
-          api: { base: "/api" },
-          ws: wsUrl(p.org),
-          org: p.org,
+          api: { base: "/api", headers: { "x-spacestation-context": currentContext()! } },
+          ws: wsUrl(),
           window: w,
           mount,
           onJson: () => tab.mark({ activity: true }),

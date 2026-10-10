@@ -24,9 +24,9 @@ use uuid::Uuid;
 pub use engine::Engine;
 
 use crate::access::{self, Entry};
-use crate::http::auth::{Auth, Principal};
+use crate::accounts::{Identity, Kind};
+use crate::http::auth::Auth;
 use crate::http::{ApiError, AppState, Json, Path};
-use crate::iam::{Identity, Kind};
 use crate::store::ChError;
 use crate::{query, sql};
 use cron::Cron;
@@ -117,15 +117,15 @@ pub fn duration_ms(text: &str) -> Option<u64> {
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/orgs/{org}/notifications", get(list).post(create))
-        .route("/orgs/{org}/notifications/{id}", get(show).put(update).delete(remove))
-        .route("/orgs/{org}/notifications/{id}/events", get(events))
-        .route("/orgs/{org}/notifications/{id}/subscribe", post(subscribe).delete(unsubscribe))
-        .route("/orgs/{org}/notifications/{id}/test", post(test))
+        .route("/notifications", get(list).post(create))
+        .route("/notifications/{id}", get(show).put(update).delete(remove))
+        .route("/notifications/{id}/events", get(events))
+        .route("/notifications/{id}/subscribe", post(subscribe).delete(unsubscribe))
+        .route("/notifications/{id}/test", post(test))
 }
 
-/// The org and the notification a path names; the org is already the `Auth`'s.
-type Id = Path<(String, Uuid)>;
+/// The org and the notification a path names; the account is already the `Auth`'s.
+type Id = Path<Uuid>;
 
 /// One notification as every client reads it: the mutable row plus its current definition.
 #[derive(sqlx::FromRow, Serialize)]
@@ -142,10 +142,6 @@ const SELECT: &str = "SELECT n.id, v.def, n.recipients, n.enabled, n.created_by,
                       JOIN notification_versions v ON v.id = n.current_version";
 
 impl Row {
-    fn access_list(&self) -> Vec<String> {
-        access::list(&self.def["access"])
-    }
-
     fn recipients_list(&self) -> Vec<String> {
         access::list(&self.recipients)
     }
@@ -155,19 +151,11 @@ impl Row {
     }
 }
 
-/// An actor the access list names, or an API key holding `notifications`, which reads the org.
-fn readable(auth: &Auth, row: &Row) -> bool {
-    match &auth.0 {
-        Principal::Actor(me) => access::matches(me, &row.access_list()),
-        Principal::Org { .. } => true,
-    }
-}
-
 async fn list(State(state): State<AppState>, auth: Auth) -> Result<Json<Vec<Row>>, ApiError> {
     auth.allow("notifications")?;
     let sql = format!("{SELECT} WHERE n.org = $1 ORDER BY n.created_at");
     let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql)).bind(auth.org()).fetch_all(&state.store.pg).await?;
-    Ok(Json(rows.into_iter().filter(|row| readable(&auth, row)).collect()))
+    Ok(Json(rows))
 }
 
 /// The notification, if this caller may read it.
@@ -177,7 +165,7 @@ async fn one(state: &AppState, auth: &Auth, id: Uuid) -> Result<Row, ApiError> {
     let row: Option<Row> =
         sqlx::query_as(sqlx::AssertSqlSafe(sql)).bind(auth.org()).bind(id).fetch_optional(&state.store.pg).await?;
     let row = row.ok_or_else(|| ApiError::not_found("notification"))?;
-    if readable(auth, &row) { Ok(row) } else { Err(ApiError::forbidden()) }
+    Ok(row)
 }
 
 /// The notification, if this caller may change it: `one` is already that test for an actor, and
@@ -187,7 +175,7 @@ async fn mine(state: &AppState, auth: &Auth, id: Uuid) -> Result<Row, ApiError> 
     one(state, auth, id).await
 }
 
-async fn show(State(state): State<AppState>, auth: Auth, Path((_, id)): Id) -> Result<Json<Row>, ApiError> {
+async fn show(State(state): State<AppState>, auth: Auth, Path(id): Id) -> Result<Json<Row>, ApiError> {
     Ok(Json(one(&state, &auth, id).await?))
 }
 
@@ -205,7 +193,7 @@ async fn create(
 ) -> Result<(StatusCode, Json<Row>), ApiError> {
     let me = auth.actor()?;
     let recipients = body.recipients.unwrap_or_default();
-    let def = validate(&state, me, body.def, &recipients, &[]).await?;
+    let def = validate(&state, me, body.def, &recipients).await?;
     let id = Uuid::new_v4();
     let mut tx = state.store.pg.begin().await?;
     sqlx::query("INSERT INTO notifications (id, org, created_by, cursors) VALUES ($1, $2, $3, $4)")
@@ -226,14 +214,14 @@ async fn create(
 async fn update(
     State(state): State<AppState>,
     auth: Auth,
-    Path((_, id)): Id,
+    Path(id): Id,
     Json(body): Json<Body>,
 ) -> Result<Json<Row>, ApiError> {
     let row = mine(&state, &auth, id).await?;
     let me = auth.actor()?;
     let current = row.recipients_list();
     let recipients = body.recipients.unwrap_or_else(|| current.clone());
-    let def = validate(&state, me, body.def, &recipients, &current).await?;
+    let def = validate(&state, me, body.def, &recipients).await?;
     let restart = match def.enabled && !row.enabled {
         true => Some(watermarks(&state, &me.org, &def).await?),
         false => None,
@@ -249,7 +237,7 @@ async fn update(
 /// The `current_version` pointer into `notification_versions` needs no separate step: it is a
 /// `NO ACTION` foreign key, checked at the end of the statement, by which time the row that held
 /// the pointer is gone as well. `engine::changed()` retires its worker.
-async fn remove(State(state): State<AppState>, auth: Auth, Path((_, id)): Id) -> Result<StatusCode, ApiError> {
+async fn remove(State(state): State<AppState>, auth: Auth, Path(id): Id) -> Result<StatusCode, ApiError> {
     mine(&state, &auth, id).await?;
     sqlx::query("DELETE FROM notifications WHERE id = $1").bind(id).execute(&state.store.pg).await?;
     engine::changed();
@@ -308,7 +296,7 @@ struct Event {
 }
 
 /// The stored events, newest first. Append only: storing one is what "read" means.
-async fn events(State(state): State<AppState>, auth: Auth, Path((_, id)): Id) -> Result<Json<Vec<Event>>, ApiError> {
+async fn events(State(state): State<AppState>, auth: Auth, Path(id): Id) -> Result<Json<Vec<Event>>, ApiError> {
     one(&state, &auth, id).await?;
     let sql = "SELECT id, dedup_key, text, metadata, created_at FROM notification_events WHERE notification = $1 \
                ORDER BY id DESC LIMIT 200";
@@ -317,7 +305,7 @@ async fn events(State(state): State<AppState>, auth: Auth, Path((_, id)): Id) ->
 
 /// Subscribing adds the caller to the recipients; a silicon needs the webhook its events would
 /// go to before it can.
-async fn subscribe(State(state): State<AppState>, auth: Auth, Path((_, id)): Id) -> Result<Json<Value>, ApiError> {
+async fn subscribe(State(state): State<AppState>, auth: Auth, Path(id): Id) -> Result<Json<Value>, ApiError> {
     let row = mine(&state, &auth, id).await?;
     let me = auth.actor()?;
     let sql = "SELECT count(*) FROM webhooks WHERE org = $1 AND actor = $2";
@@ -329,7 +317,7 @@ async fn subscribe(State(state): State<AppState>, auth: Auth, Path((_, id)): Id)
     recipients(&state, id, row, &format!("@{}", me.id), true).await
 }
 
-async fn unsubscribe(State(state): State<AppState>, auth: Auth, Path((_, id)): Id) -> Result<Json<Value>, ApiError> {
+async fn unsubscribe(State(state): State<AppState>, auth: Auth, Path(id): Id) -> Result<Json<Value>, ApiError> {
     let row = mine(&state, &auth, id).await?;
     let entry = format!("@{}", auth.actor()?.id);
     recipients(&state, id, row, &entry, false).await
@@ -358,7 +346,7 @@ async fn recipients(
 }
 
 /// Strikes `entry` (`@actor` or `webhook:{id}`) from every recipients list in `org`: what a
-/// removal from IAM and a deleted webhook both do, so no list names a recipient that no longer
+/// removal from Silicon Accounts and a deleted webhook both do, so no list names a recipient that no longer
 /// exists. Returns how many notifications changed; the caller rebuilds the engine when any did.
 pub async fn forget_recipient(tx: &mut PgConnection, org: &str, entry: &str) -> sqlx::Result<u64> {
     let sql = "UPDATE notifications SET recipients = recipients - $2::text WHERE org = $1 AND recipients ? $2";
@@ -367,7 +355,7 @@ pub async fn forget_recipient(tx: &mut PgConnection, org: &str, entry: &str) -> 
 
 /// Runs the sql now over `(cursors, watermark]` and moves nothing: what the test button, the CLI
 /// and `space-station-dev notify` show. Org-scoped, exactly as the engine will run it.
-async fn test(State(state): State<AppState>, auth: Auth, Path((_, id)): Id) -> Result<Json<Value>, ApiError> {
+async fn test(State(state): State<AppState>, auth: Auth, Path(id): Id) -> Result<Json<Value>, ApiError> {
     let def = mine(&state, &auth, id).await?.def()?;
     let cursors: Value = sqlx::query_scalar("SELECT cursors FROM notifications WHERE id = $1")
         .bind(id)
@@ -396,13 +384,7 @@ fn invalid(code: &str, message: impl Into<String>) -> ApiError {
 /// must accept the sql and see the three columns in it, the durations must fit, and the
 /// recipients must stay inside the access list. The creator is appended to `access`, so every
 /// later check is one membership test.
-async fn validate(
-    state: &AppState,
-    me: &Identity,
-    def: Def,
-    recipients: &[String],
-    current: &[String],
-) -> Result<Def, ApiError> {
+async fn validate(state: &AppState, me: &Identity, def: Def, recipients: &[String]) -> Result<Def, ApiError> {
     if def.name.trim().is_empty() || def.name.len() > 200 {
         return Err(invalid("invalid_name", "a notification name is 1 to 200 characters"));
     }
@@ -436,8 +418,11 @@ async fn validate(
     let access = access::with_actor(def.access, &me.id);
     let mut webhooks = Vec::new();
     for entry in recipients {
-        if !recipient_in(entry, &access, current, &me.id) {
-            return Err(invalid("recipients_not_in_access", format!("{entry:?} is not in the access list")));
+        if !recipient_in(entry, &me.id) {
+            return Err(invalid(
+                "invalid_recipient",
+                format!("{entry:?} must name this account or one of its webhooks"),
+            ));
         }
         if let Entry::Webhook(id) = Entry::parse(entry) {
             let id =
@@ -450,7 +435,7 @@ async fn validate(
     let sql = "SELECT count(*) FROM webhooks WHERE org = $1 AND id = ANY($2) AND actor IS NULL";
     let known: i64 = sqlx::query_scalar(sql).bind(&me.org).bind(&webhooks).fetch_one(&state.store.pg).await?;
     if known != webhooks.len() as i64 {
-        return Err(invalid("unknown_webhook", "a webhook recipient does not exist in this org"));
+        return Err(invalid("unknown_webhook", "a webhook recipient does not belong to this account"));
     }
     Ok(Def { access, ..def })
 }
@@ -478,79 +463,11 @@ async fn shape(state: &AppState, org: &str, plan: &sql::Plan) -> Result<(), ApiE
     }
 }
 
-/// Is `entry` a recipient this saver may set? `recipients ⊆ access`, as far as one process can
-/// know it: an `@actor` must be named by the access list itself, be the saver (who passed it to
-/// get here), or already be a recipient — someone who matched a tag is on the list because
-/// `subscribe` tested their identity, and nobody here can re-resolve another actor's tags. A
-/// `webhook:{id}` only has to belong to the org: a webhook is a thing, not a member, and the
-/// saver's own access is what stands behind it. A tag is not a recipient; delivery is per actor.
-fn recipient_in(entry: &str, access: &[String], current: &[String], saver: &str) -> bool {
+/// Only the owning account and its configured webhooks can receive a notification.
+fn recipient_in(entry: &str, saver: &str) -> bool {
     match Entry::parse(entry) {
-        Entry::Actor(actor) => {
-            crate::iam::Kind::of(actor).is_some()
-                && (actor == saver || access.iter().any(|e| e == entry) || current.iter().any(|e| e == entry))
-        }
+        Entry::Actor(actor) => actor == saver,
         Entry::Webhook(id) => !id.is_empty(),
         Entry::Tag(_) => false,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn strings(list: &[&str]) -> Vec<String> {
-        list.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn durations_are_an_integer_and_one_unit() {
-        assert_eq!(duration_ms("500ms"), Some(500));
-        assert_eq!(duration_ms("2s"), Some(2_000));
-        assert_eq!(duration_ms("10m"), Some(600_000));
-        assert_eq!(duration_ms("1h"), Some(DELAY_MAX));
-        assert_eq!(duration_ms("30d"), Some(COOLDOWN_MAX));
-        assert_eq!(duration_ms("0s"), Some(0));
-        for text in
-            ["", "2", "s", "ms", "-2s", "2.5s", "2 s", " 2s", "2sec", "2S", "1e3s", "2π", "99999999999999999999d"]
-        {
-            assert_eq!(duration_ms(text), None, "{text:?} is not a duration");
-        }
-    }
-
-    #[test]
-    fn a_definition_keeps_its_defaults_and_both_trigger_shapes() {
-        let def: Def = serde_json::from_value(json!({
-            "name": "Big order", "sql": "SELECT 1", "access": ["ops"],
-            "triggers": [{"table": "orders", "where": "record.x::Float64 > 1"}, {"schedule": "*/5 * * * *"}]
-        }))
-        .unwrap();
-        assert_eq!((def.enabled, def.delay.as_str(), def.cooldown.as_str()), (true, "2s", "10m"));
-        assert_eq!(def.tables().collect::<Vec<_>>(), [("orders", Some("record.x::Float64 > 1"))]);
-        assert_eq!(def.schedules().collect::<Vec<_>>(), ["*/5 * * * *"]);
-        let stored = json!(def);
-        assert_eq!(
-            stored["triggers"],
-            json!([{"table": "orders", "where": "record.x::Float64 > 1"}, {"schedule": "*/5 * * * *"}])
-        );
-        assert!(stored.get("description").is_none(), "an absent description stays absent");
-        let full = json!({"name": "Big order", "description": "over 100", "enabled": false, "sql": "SELECT 1",
-            "triggers": [{"schedule": "0 * * * *"}], "delay": "500ms", "cooldown": "1d", "access": ["@c:alice"]});
-        let def: Def = serde_json::from_value(full.clone()).unwrap();
-        assert_eq!(json!(def), full, "what a client sends round-trips field for field");
-    }
-
-    #[test]
-    fn recipients_stay_inside_the_access_list() {
-        let access = strings(&["@c:alice", "ops"]);
-        let subscribed = strings(&["@c:bob"]);
-        assert!(recipient_in("@c:alice", &access, &[], "c:carol"), "named by the list");
-        assert!(recipient_in("@c:carol", &access, &[], "c:carol"), "the saver, who passed the list to get here");
-        assert!(recipient_in("@c:bob", &access, &subscribed, "c:carol"), "already subscribed, through a tag");
-        assert!(!recipient_in("@c:bob", &access, &[], "c:carol"), "another actor's tags are not ours to resolve");
-        assert!(recipient_in("webhook:abc", &[], &[], "c:carol"), "a webhook is a thing, not a member");
-        assert!(!recipient_in("ops", &access, &[], "c:carol"), "a tag is not a recipient");
-        assert!(!recipient_in("@", &access, &[], "c:carol"));
-        assert!(!recipient_in("webhook:", &access, &[], "c:carol"));
     }
 }

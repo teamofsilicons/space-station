@@ -101,7 +101,7 @@ pub(crate) fn refusal(name: &str, stderr: &str) -> Error {
     refused.unwrap_or_else(|| Error::Local(format!("tool {name}: {stderr}")))
 }
 
-/// `node mission-control.js <role> --url U --org O <args…>` with only `PATH` and the access token
+/// `node mission-control.js <role> --url U <args…>` with only `PATH` and the access token
 /// in its environment, and both its streams piped back here.
 fn spawn(space: &Space, dir: &Path, role: &str, args: &[&str]) -> Result<Child, Error> {
     let runtime = runtime(dir)?;
@@ -109,7 +109,7 @@ fn spawn(space: &Space, dir: &Path, role: &str, args: &[&str]) -> Result<Child, 
     let mut command = Command::new("node");
     command
         .arg(runtime)
-        .args([role, "--url", space.url(), "--org", space.scope()?])
+        .args([role, "--url", space.url()])
         .args(args)
         .env_clear()
         .env("PATH", env::var_os("PATH").unwrap_or_default())

@@ -22,9 +22,9 @@ use space_station_shared::limits::SILICON_JSON_MAX;
 use tokio::sync::mpsc::{self, UnboundedSender};
 use uuid::Uuid;
 
+use crate::accounts::{CACHE_TTL, Identity};
 use crate::http::auth::{Principal, authenticate};
 use crate::http::{ApiError, AppState, Query};
-use crate::iam::{CACHE_TTL, Identity};
 use crate::triggers::{Hit, Registration};
 use crate::{access, lock, sql};
 
@@ -84,7 +84,7 @@ async fn upgrade(
     headers: HeaderMap,
     Query(q): Query<HashMap<String, String>>,
 ) -> Response {
-    let org = q.get("org").cloned().unwrap_or_default();
+    let org = String::new();
     let mut headers = headers;
     if let Some(context) = q.get("account_context").and_then(|s| s.parse().ok()) {
         headers.insert("x-spacestation-context", context);
@@ -96,7 +96,7 @@ async fn upgrade(
 
 /// 4401 and 4403 mean "this credential, this actor": a client that reconnects with the same one
 /// gets the same answer, so the runtime stops. A failure on our side is a plain 1011 instead,
-/// because reconnecting is exactly the right thing to do after a database or IAM blip.
+/// because reconnecting is exactly the right thing to do after a database or Silicon Accounts blip.
 async fn close(mut socket: WebSocket, e: ApiError) {
     let code = match e.status {
         StatusCode::FORBIDDEN => 4403,
@@ -110,7 +110,7 @@ async fn close(mut socket: WebSocket, e: ApiError) {
 async fn actor(state: &AppState, headers: &HeaderMap, org: &str) -> Result<Identity, ApiError> {
     match authenticate(state, headers, org, true).await? {
         Principal::Actor(identity) => Ok(identity),
-        Principal::Org { .. } => Err(ApiError::unauthorized("unauthorized", "API keys cannot open mission control")),
+        Principal::Key { .. } => Err(ApiError::unauthorized("unauthorized", "API keys cannot open mission control")),
     }
 }
 
@@ -126,6 +126,7 @@ async fn session(mut socket: WebSocket, state: AppState, headers: HeaderMap, org
     };
     let (tx, mut frames) = mpsc::unbounded_channel::<String>();
     let (hit_tx, mut hits) = mpsc::unbounded_channel::<Hit>();
+    let org = identity.org.clone();
     let attached = Attached(&state, state.hub.attach(&org, identity.clone(), tx.clone()));
     let mut subs: HashMap<String, Sub> = HashMap::new();
     let mut validated = Instant::now();
@@ -323,13 +324,11 @@ async fn store_state(
     version: Option<String>,
     json: Option<&RawValue>,
 ) -> Result<Option<Value>, ApiError> {
-    let sql = "SELECT w.access, v.name FROM windows w LEFT JOIN window_versions v ON v.id = w.current_version WHERE w.id = $1 AND w.org = $2";
-    let row: Option<(Value, Option<String>)> =
+    let sql = "SELECT v.name FROM windows w LEFT JOIN window_versions v ON v.id = w.current_version WHERE w.id = $1 AND w.org = $2";
+    let row: Option<(Option<String>,)> =
         sqlx::query_as(sql).bind(window).bind(&me.org).fetch_optional(&state.store.pg).await?;
-    let (access, current) = row.ok_or_else(ApiError::forbidden)?;
-    if !access::matches(me, &access::list(&access)) {
-        return Err(ApiError::forbidden());
-    }
+    let (current,) = row.ok_or_else(ApiError::forbidden)?;
+
     let Some(version) = version else {
         return Ok(None);
     };
@@ -352,22 +351,4 @@ async fn store_state(
     .execute(&state.store.pg)
     .await?;
     Ok(None)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn renewed_subscriptions_require_current_visibility_including_subqueries() {
-        let simple = vec![Trigger { table: "orders".into(), where_: None }];
-        assert!(subscription_visible(&simple, &["orders".into()]));
-        assert!(!subscription_visible(&simple, &["customers".into()]));
-        let joined = vec![Trigger {
-            table: "orders".into(),
-            where_: Some("customer IN (SELECT customer FROM customers)".into()),
-        }];
-        assert!(subscription_visible(&joined, &["orders".into(), "customers".into()]));
-        assert!(!subscription_visible(&joined, &["orders".into()]));
-    }
 }

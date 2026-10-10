@@ -22,8 +22,8 @@
   const TIMEOUT = 10_000; // onTrigger and tools (shared::limits::TRIGGER_TIMEOUT_MS)
   const IDLE = 600_000; // `run` exits after this long without a trigger (shared::limits::WINDOW_IDLE_MS)
   // shared::secrets::find_secret, duplicated here because the browser has no Rust: our secrets, a
-  // terminal's own `sscli-` session, and every IAM credential.
-  const SECRET = /\b(spacewindow|apikey|whsec|stk|table-[a-z0-9]{1,50})-[0-9a-f]{32}\b|\b(?:(sat|cat|rft|oat|ort|ask)_|(sscli)-)[A-Za-z0-9_-]{43}\b/;
+  // terminal's own `sscli-` session, Silicon Accounts credentials, and legacy secret formats.
+  const SECRET = /\b(spacewindow|apikey|whsec|table-[a-z0-9]{1,50})-[0-9a-f]{32}\b|\b(stk)-[0-9a-fA-F]{8,32}\b|\b(?:sar|sas|sa_app|whsec|sap|sapr|sad|saf|sau|sarq|sac|sat|cat|rft|oat|ort|ask)_[A-Za-z0-9_-]{43}\b|\bsscli-(?:[0-9a-fA-F]{64}|[A-Za-z0-9_-]{43})\b|\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/;
   const NUMERIC = ["cursor", "event_ts_ms", "registered_ts_ms"]; // quoted 64-bit ints from ClickHouse
 
   const utf8 = s => new TextEncoder().encode(s).length;
@@ -354,7 +354,7 @@
    * (no init, no subscriptions: `tool`), `activity()` (a trigger or tool call happened).
    */
   function host(opts, env) {
-    const { api, org } = opts, errors = [], subs = new Map();
+    const { api } = opts, errors = [], subs = new Map();
     const meta = { processor_version: "dev", renderer_version: "dev", produced_at: null, is_live: false };
     let json = {}, tools, version = null, published = false, load, proc, rend, ws, retry = 1000, timer, closed = false;
 
@@ -379,13 +379,13 @@
     async function start() {
       let code = opts.code;
       if (!code) {
-        code = opts.window.version ?? (await call(`/orgs/${org}/windows/${opts.window.id}`)).version;
+        code = opts.window.version ?? (await call(`/windows/${opts.window.id}`)).version;
         if (closed) return;
         if (!code) throw new Error("this window has no published version");
         version = code.name;
       }
       meta.processor_version = meta.renderer_version = version ?? "dev";
-      const cached = opts.window.id ? await call(`/orgs/${org}/windows/${opts.window.id}/state`) : {};
+      const cached = opts.window.id ? await call(`/windows/${opts.window.id}/state`) : {};
       if (closed) return;
       json = cached.json ?? {};
       meta.produced_at = cached.metadata?.produced_at ?? null;
@@ -447,10 +447,10 @@
         case "ready": return proc.send(load);
         case "loaded": tools = m.tools; return update();
         case "tables":
-          return proc.send(await answer(m, async () => ({ type: "tables", tables: Object.fromEntries((await call(`/orgs/${org}/tables`)).map(t => [t.id, t.watermark])) })));
+          return proc.send(await answer(m, async () => ({ type: "tables", tables: Object.fromEntries((await call(`/tables`)).map(t => [t.id, t.watermark])) })));
         case "query":
           return proc.send(await answer(m, async () => {
-            const { rows, watermarks } = await call(`/orgs/${org}/query`, { sql: m.sql, restrict: m.restrict });
+            const { rows, watermarks } = await call(`/query`, { sql: m.sql, restrict: m.restrict });
             for (const r of rows) for (const k of NUMERIC) if (k in r) {
               const n = Number(r[k]);
               if (Number.isSafeInteger(n)) r[k] = n;
@@ -525,8 +525,8 @@
   function nodeEnv(token, oneshot) {
     const { spawn } = require("node:child_process"), readline = require("node:readline");
     return {
-      wsOptions: { headers: { Authorization: `Bearer ${token}`, "User-Agent": "space-station-runtime/0.1.0" } },
-      timeout: Number(process.env.SPACE_STATION_TEST_TIMEOUT_MS) || TIMEOUT,
+      wsOptions: { headers: { Authorization: `Bearer ${token}`, "User-Agent": "space-station-runtime/0.2.0" } },
+      timeout: TIMEOUT,
       oneshot,
       sandbox(receive) {
         const child = spawn(process.execPath, ["--permission", `--allow-fs-read=${__filename}`, __filename, "processor"], { env: {}, stdio: ["pipe", "pipe", "inherit"] });
@@ -548,8 +548,8 @@
   // ─── Node CLI ────────────────────────────────────────────────────────────────────────────────
 
   const USAGE = `usage:
-  mission-control.js run  --url U --org O --window W
-  mission-control.js tool --url U --org O --window W --name N [--args JSON]
+  mission-control.js run  --url U --window W
+  mission-control.js tool --url U --window W --name N [--args JSON]
   mission-control.js dev  [serve [--port 4747] [--dir .]] | publish --window W --name V | notify <notification-id>
   mission-control.js processor`;
 
@@ -571,7 +571,7 @@
     const [cmd, ...rest] = argv, f = flags(rest), token = process.env.SPACE_STATION_ACCESS_TOKEN ?? "";
     if (cmd === "processor") return processorMain();
     if (cmd === "dev") return dev(f);
-    if (!["run", "tool"].includes(cmd) || !f.url || !f.org || !f.window || (cmd === "tool" && !f.name)) return fail(USAGE);
+    if (!["run", "tool"].includes(cmd) || !f.url || !f.window || (cmd === "tool" && !f.name)) return fail(USAGE);
     const base = f.url.replace(/\/$/, ""), env = nodeEnv(token, cmd === "tool");
     let idle;
     env.activity = () => {
@@ -579,7 +579,7 @@
       idle = setTimeout(() => {
         mc.destroy();
         process.exit(0);
-      }, Number(process.env.SPACE_STATION_TEST_IDLE_MS) || IDLE);
+      }, IDLE);
     };
     if (cmd === "tool") {
       const args = JSON.parse(f.args ?? "{}");
@@ -595,9 +595,8 @@
       });
     }
     const mc = host({
-      api: { base: `${base}/api`, headers: { Authorization: `Bearer ${token}`, "User-Agent": "space-station-runtime/0.1.0" } },
-      ws: `${base.replace(/^http/, "ws")}/api/ws/mission-control?org=${encodeURIComponent(f.org)}`,
-      org: f.org,
+      api: { base: `${base}/api`, headers: { Authorization: `Bearer ${token}`, "User-Agent": "space-station-runtime/0.2.0" } },
+      ws: `${base.replace(/^http/, "ws")}/api/ws/mission-control`,
       window: { id: f.window },
       onJson: cmd === "run" ? j => line(process.stdout, j) : undefined,
       onStatus: s => line(process.stderr, { status: s }),
@@ -609,25 +608,25 @@
     if (cmd === "run") env.activity();
   }
 
-  /** `dev serve | publish | notify`: `.env` in `--dir` holds the URL, token, org and window. */
+  /** `dev serve | publish | notify`: `.env` in `--dir` holds the URL, token and window. */
   async function dev(f) {
     const fs = require("node:fs"), path = require("node:path");
     const dir = path.resolve(f.dir ?? "."), envFile = path.join(dir, ".env");
     const dotenv = fs.existsSync(envFile) ? require("node:util").parseEnv(fs.readFileSync(envFile, "utf8")) : {};
     const setting = k => process.env[k] ?? dotenv[k];
-    const url = (setting("SPACE_STATION_URL") ?? "").replace(/\/$/, ""), token = setting("SPACE_STATION_ACCESS_TOKEN"), org = setting("SPACE_STATION_ORG");
-    if (!url || !token || !org) return fail(`${envFile} needs SPACE_STATION_URL, SPACE_STATION_ACCESS_TOKEN and SPACE_STATION_ORG`);
+    const url = (setting("SPACE_STATION_URL") ?? "").replace(/\/$/, ""), token = setting("SPACE_STATION_ACCESS_TOKEN");
+    if (!url || !token) return fail(`${envFile} needs SPACE_STATION_URL and SPACE_STATION_ACCESS_TOKEN`);
     const read = name => fs.readFileSync(path.join(dir, name), "utf8");
-    const post = (p, body) => request(`${url}/api/orgs/${encodeURIComponent(org)}${p}`, { authorization: `Bearer ${token}` }, body);
+    const post = (p, body) => request(`${url}/api${p}`, { authorization: `Bearer ${token}` }, body);
     switch (f._[0] ?? "serve") {
       case "serve":
-        return serve({ port: Number(f.port ?? 4747), dir, url, token, org, window: setting("SPACE_STATION_WINDOW") ?? null, read });
+        return serve({ port: Number(f.port ?? 4747), dir, url, token, window: setting("SPACE_STATION_WINDOW") ?? null, read });
       case "publish": {
         if (!f.window || !f.name) return fail(USAGE);
         const files = { processor: read("processor.js"), renderer: read("renderer.html") };
         for (const [k, text] of Object.entries(files)) {
           const m = SECRET.exec(text);
-          if (m) return fail(`${k} contains a ${m[1] ?? m[2] ?? m[3]} secret; remove it before publishing`);
+          if (m) return fail(`${k} contains a secret; remove it before publishing`);
         }
         return line(process.stdout, await post(`/windows/${f.window}/versions`, { name: f.name, ...files }));
       }
@@ -644,7 +643,7 @@
   }
 
   /** The dev host page on 127.0.0.1 plus the only door to the backend: an HTTP and WS proxy adding the bearer. */
-  function serve({ port, dir, url, token, org, window, read }) {
+  function serve({ port, dir, url, token, window, read }) {
     const http = require("node:http"), fs = require("node:fs"), path = require("node:path"), WebSocket = require("ws");
     const hosts = new Set([`localhost:${port}`, `127.0.0.1:${port}`]);
     const trusted = (req, strict) => hosts.has(req.headers.host) && (!strict || req.headers.origin === `http://${req.headers.host}`);
@@ -655,14 +654,14 @@
 <script src="/mission-control.js"></script>
 <script>
 (async () => {
-  const errors = document.getElementById("errors"), ORG = ${JSON.stringify(org)}, WINDOW = ${JSON.stringify(window)};
+  const errors = document.getElementById("errors"), WINDOW = ${JSON.stringify(window)};
   const text = async u => { const r = await fetch(u); if (!r.ok) throw new Error(u + ": " + await r.text()); return r.text(); };
   try {
     const [processor, renderer, version] = await Promise.all([text("/processor.js"), text("/renderer.html"), text("/version")]);
     SpaceStation.host({
       runtimeUrl: location.origin + "/mission-control.js", api: { base: "/api" },
-      ws: "ws://" + location.host + "/api/ws/mission-control?org=" + encodeURIComponent(ORG),
-      org: ORG, window: { id: WINDOW, name: "dev", version: null }, code: { processor, renderer }, mount: document.getElementById("mount"),
+      ws: "ws://" + location.host + "/api/ws/mission-control",
+      window: { id: WINDOW, name: "dev", version: null }, code: { processor, renderer }, mount: document.getElementById("mount"),
       onError: e => errors.append(e.source + ": " + e.message + "\\n" + (e.detail ? e.detail + "\\n" : "")),
     });
     setInterval(async () => { if (await text("/version") !== version) location.reload(); }, 2000);
@@ -701,7 +700,7 @@
     const wss = new WebSocket.Server({ noServer: true });
     server.on("upgrade", (req, socket, head) => {
       if (!trusted(req, true) || !req.url.startsWith("/api/ws/")) return socket.destroy();
-      const backend = new WebSocket(url.replace(/^http/, "ws") + req.url, { headers: { authorization: `Bearer ${token}`, "User-Agent": "space-station-runtime/0.1.0" } });
+      const backend = new WebSocket(url.replace(/^http/, "ws") + req.url, { headers: { authorization: `Bearer ${token}`, "User-Agent": "space-station-runtime/0.2.0" } });
       backend.on("error", () => socket.destroy());
       backend.on("open", () => wss.handleUpgrade(req, socket, head, client => {
         client.on("error", () => {});

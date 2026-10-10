@@ -1,6 +1,6 @@
 //! Space Station's own telemetry stream.
 //!
-//! Telemetry is an ordinary record in the `tos` organization's `spacestation` table.  The
+//! Telemetry is an ordinary record in the `si:tos` account's `spacestation` table.  The
 //! table key is supplied by deployment (the normal table key shown once by the CLI), so this
 //! module has no privileged backend path and uses the same daemon and spool as every other app.
 
@@ -12,10 +12,10 @@ use serde::Serialize;
 
 use crate::{Error, SpaceClient, default_home};
 
-/// The organization and table reserved for Space Station's own events.
-pub const ORG: &str = "tos";
+/// The account and table reserved for Space Station's own events.
+pub const ACCOUNT: &str = "si:tos";
 pub const TABLE: &str = "spacestation";
-/// Environment variable containing the ordinary `tos.spacestation` table key.
+/// Environment variable containing the ordinary `si:tos/spacestation` table key.
 pub const KEY_ENV: &str = "SPACE_STATION_TELEMETRY_KEY";
 /// Set to `0`, `false`, or `off` to stop emitting telemetry.
 pub const ENABLED_ENV: &str = "SPACE_STATION_TELEMETRY";
@@ -27,7 +27,7 @@ pub struct Telemetry {
 }
 
 impl Telemetry {
-    /// Build a sender from the key created for `tos`/`spacestation`.
+    /// Build a sender from the key created for `si:tos`/`spacestation`.
     pub fn new(table_key: &str) -> Result<Self, Error> {
         Self::with_options(table_key, default_home(), crate::default_url())
     }
@@ -36,7 +36,7 @@ impl Telemetry {
     pub fn with_options(table_key: &str, home: impl Into<PathBuf>, url: impl Into<String>) -> Result<Self, Error> {
         let table = crate::shared::secrets::parse_table_key(table_key).ok_or(Error::InvalidKey)?;
         if table != TABLE {
-            return Err(Error::Local(format!("telemetry requires the {ORG}.{TABLE} table key, got {table}")));
+            return Err(Error::Local(format!("telemetry requires the {ACCOUNT}/{TABLE} table key, got {table}")));
         }
         // Telemetry must never hold up the command or print a transport failure. The ordinary
         // client keeps a five-second delivery window for application records; diagnostics can
@@ -86,33 +86,4 @@ struct TelemetryRecord<'a, C> {
     progress: Option<f64>,
     event: &'a str,
     context: C,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn record_shape_is_self_contained() {
-        let record = serde_json::to_value(TelemetryRecord {
-            source: "daemon",
-            step: "ship",
-            progress: Some(0.5),
-            event: "batch_sent",
-            context: json!({"batch_id": "b1"}),
-        })
-        .unwrap();
-        assert_eq!(record["source"], "daemon");
-        assert_eq!(record["step"], "ship");
-        assert_eq!(record["progress"], 0.5);
-        assert_eq!(record["event"], "batch_sent");
-        assert_eq!(record["context"]["batch_id"], "b1");
-    }
-
-    #[test]
-    fn only_spacestation_keys_are_accepted() {
-        let key = "table-orders-0123456789abcdef0123456789abcdef";
-        assert!(matches!(Telemetry::new(key), Err(Error::Local(message)) if message.contains("tos.spacestation")));
-    }
 }

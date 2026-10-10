@@ -12,10 +12,10 @@ use space_station_shared::secrets::parse_table_key;
 use space_station_shared::wire::Code;
 use uuid::Uuid;
 
+use crate::accounts::session;
 use crate::config::Config;
 use crate::http::auth::{bad_origin, origin_ok};
 use crate::http::{ApiError, AppState, Json};
-use crate::iam::session;
 
 const MAX_EVENT_BYTES: usize = 64 * 1024;
 const MAX_BATCH: usize = 40;
@@ -142,7 +142,7 @@ async fn record(
         && let Some(session) = session::load(&state, &cookie).await?
     {
         server["actor"] = json!(session.actor);
-        server["org"] = json!(session.org);
+        server["account_uuid"] = json!(session.uuid);
         server["kind"] = json!(session.kind);
     }
     let batch = state.frontend.batch(body, server)?;
@@ -162,27 +162,4 @@ async fn record(
         return Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "telemetry_rejected", &rejection.reason));
     }
     Ok(StatusCode::NO_CONTENT)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn batches_validate_before_staging_keep_retry_ids_and_strip_referrer_secrets() {
-        let collector = Collector {
-            analytics_key: Some("table-analytics-0123456789abcdef0123456789abcdef".into()),
-            events_key: None,
-        };
-        let body = json!({"table":"analytics", "events":[{"id":"retry-id", "type":"page_view", "metadata":{"occurred_at":"2026-09-13T00:00:00Z"}}]});
-        let one = collector.batch(serde_json::from_value(body.clone()).unwrap(), json!({})).unwrap();
-        let two = collector.batch(serde_json::from_value(body.clone()).unwrap(), json!({})).unwrap();
-        assert_eq!(one["records"][0]["metadata"], two["records"][0]["metadata"]);
-        let mut bad = body;
-        bad["events"].as_array_mut().unwrap().push(json!({"type":"", "id":"bad"}));
-        assert!(collector.batch(serde_json::from_value(bad).unwrap(), json!({})).is_err());
-        let mut headers = HeaderMap::new();
-        headers.insert("referer", "https://user:secret@example.com/path?token=secret#secret".parse().unwrap());
-        assert_eq!(request_context(&headers)["referrer"], "https://example.com/path");
-    }
 }

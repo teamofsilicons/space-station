@@ -1,8 +1,7 @@
 //! Space Station's HTTP API as one type: every operation is a method, sync, one request and one
-//! answer. Paths are `/api` plus the route, org calls carry the scope this `Space` was given, and
+//! answer. Paths are `/api` plus the route, scoped to the authenticated account, and
 //! `{error: {code, message}}` becomes [`Error::Api`] so callers branch on `code` and never on
-//! prose. A 401 is final: the backend holds and refreshes the session behind an `sscli-` bearer,
-//! so there is nothing here to retry with.
+//! prose. The backend refreshes the Accounts session behind an `sscli-` bearer.
 //!
 //! A `Space` is a function of `(url, Auth)`: it reads nothing ambient and writes nothing.
 //! Anything that needs pixels stays in the web app: [`Space::window_url`] hands back the link.
@@ -20,10 +19,9 @@ use ureq::http::Request;
 use crate::types::*;
 use crate::{Auth, Error, WindowOutput, windows};
 
-/// A Space Station, an identity, and an org to work in.
+/// A Space Station and the account it acts as.
 pub struct Space {
     url: String,
-    org: Option<String>,
     auth: Auth,
     agent: Agent,
 }
@@ -92,51 +90,21 @@ pub(crate) fn call<T: DeserializeOwned>(
 }
 
 impl Space {
-    /// The Space Station at `url`, as whoever `auth` is. No org yet: `org` names one.
+    /// The Space Station at `url`, as the account authenticated by `auth`.
     pub fn new(url: impl Into<String>, auth: Auth) -> Result<Space, Error> {
-        Ok(Space { url: origin(&url.into())?, org: None, auth, agent: agent() })
-    }
-
-    /// Work in `org`.
-    pub fn org(mut self, org: impl Into<String>) -> Self {
-        self.org = Some(org.into());
-        self
+        Ok(Space { url: origin(&url.into())?, auth, agent: agent() })
     }
 
     pub fn url(&self) -> &str {
         &self.url
     }
 
-    /// The org every org-scoped call is for.
-    pub fn scope(&self) -> Result<&str, Error> {
-        let missing =
-            || Error::Local("no org: pass --org, set $SPACE_STATION_ORG, or run `spacestation use <org>`".into());
-        self.org.as_deref().ok_or_else(missing)
-    }
-
-    // ── who you are ─────────────────────────────────────────────────────────────────────────
-
-    /// The orgs the directory mirror knows this actor in, and the session's own.
-    pub fn orgs(&self) -> Result<Vec<Org>, Error> {
-        self.get("/orgs")
-    }
-
-    /// Who this credential is inside the current org: id, kind, org and tags.
+    /// The authenticated carbon or silicon, including its immutable account UUID.
     pub fn me(&self) -> Result<Identity, Error> {
-        self.get(&self.at("/me")?)
+        self.get("/me")
     }
 
-    /// The organization selected by IAM for this session, without an explicit scope.
-    pub fn session_org(&self) -> Result<String, Error> {
-        #[derive(Deserialize)]
-        struct Session {
-            org: String,
-        }
-        Ok(self.get::<Session>("/me")?.org)
-    }
-
-    /// Where the UI lives, for the links a terminal hands off. `GET /me` says so for any session,
-    /// which is bound to its org and needs no `?org=`.
+    /// Where the UI lives, for the links a terminal hands off.
     pub fn app_url(&self) -> Result<String, Error> {
         let me: Value = self.get("/me")?;
         Ok(me["app"].as_str().unwrap_or(&self.url).to_string())
@@ -172,7 +140,7 @@ impl Space {
             Some(value) => format!("/tables?retired={value}"),
             None => "/tables".to_string(),
         };
-        self.get(&self.at(&path)?)
+        self.get(&path)
     }
 
     /// One table. The server has no route for a single one: the list is the source, filtered.
@@ -181,65 +149,61 @@ impl Space {
     }
 
     pub fn retire_table(&self, id: &str) -> Result<(), Error> {
-        self.post(&self.at(&format!("/tables/{id}/retire"))?, None)
+        self.post(&format!("/tables/{id}/retire"), None)
     }
 
     pub fn unretire_table(&self, id: &str) -> Result<(), Error> {
-        self.post(&self.at(&format!("/tables/{id}/unretire"))?, None)
+        self.post(&format!("/tables/{id}/unretire"), None)
     }
 
     /// Create a table. The key it answers with is shown exactly once, here.
-    pub fn create_table(&self, id: &str, access: &[&str]) -> Result<Key, Error> {
-        self.post(&self.at("/tables")?, Some(json!({"id": id, "access": access})))
-    }
-
-    pub fn set_table_access(&self, id: &str, access: &[&str]) -> Result<Table, Error> {
-        self.put(&self.at(&format!("/tables/{id}"))?, json!({"access": access}))
+    pub fn create_table(&self, id: &str) -> Result<Key, Error> {
+        self.post("/tables", Some(json!({"id": id, "access": []})))
     }
 
     /// A new key for the table; the old one stops resolving at once.
     pub fn rotate_table_key(&self, id: &str) -> Result<Key, Error> {
-        self.post(&self.at(&format!("/tables/{id}/rotate-key"))?, None)
+        self.post(&format!("/tables/{id}/rotate-key"), None)
     }
 
     /// Delete the table. Its records go too, on ClickHouse's own clock, and the id is free to
     /// reuse immediately.
     pub fn delete_table(&self, id: &str) -> Result<(), Error> {
-        self.delete(&self.at(&format!("/tables/{id}"))?)
+        self.delete(&format!("/tables/{id}"))
     }
 
     /// The Tables tab in one value. `window` is one of `1m 5m 15m 1h 5h 1d 7d 30d`.
     pub fn overview(&self, window: &str) -> Result<Overview, Error> {
-        self.get(&self.at(&format!("/tables/overview?window={window}"))?)
+        self.get(&format!("/tables/overview?window={window}"))
     }
 
     // ── space windows ───────────────────────────────────────────────────────────────────────
 
     pub fn windows(&self) -> Result<Vec<Window>, Error> {
-        self.get(&self.at("/windows")?)
+        self.get("/windows")
     }
 
     pub fn window(&self, id: &str) -> Result<Window, Error> {
-        self.get(&self.at(&format!("/windows/{id}"))?)
+        self.get(&format!("/windows/{id}"))
     }
 
     /// Create a window; the name is what the UI shows, under 20 characters.
-    pub fn create_window(&self, name: &str, access: &[&str]) -> Result<Window, Error> {
-        self.post(&self.at("/windows")?, Some(json!({"name": name, "access": access})))
+    pub fn create_window(&self, name: &str) -> Result<Window, Error> {
+        self.post("/windows", Some(json!({"name": name, "access": []})))
     }
 
-    /// Rename a window, change who may open it, or both; `None` leaves that half alone.
-    pub fn update_window(&self, id: &str, name: Option<&str>, access: Option<&[&str]>) -> Result<Window, Error> {
-        self.put(&self.at(&format!("/windows/{id}"))?, json!({"name": name, "access": access}))
+    /// Rename a window owned by the authenticated account.
+    pub fn update_window(&self, id: &str, name: &str) -> Result<Window, Error> {
+        self.put(&format!("/windows/{id}"), json!({"name": name}))
     }
 
     /// Delete the window, its versions and its stored state.
     pub fn delete_window(&self, id: &str) -> Result<(), Error> {
-        self.delete(&self.at(&format!("/windows/{id}"))?)
+        self.delete(&format!("/windows/{id}"))
     }
 
     pub fn versions(&self, id: &str) -> Result<Vec<Version>, Error> {
-        self.get(&self.at(&format!("/windows/{id}/versions"))?)
+        self.get(&format!("/windows/{id}/versions"))
     }
 
     /// Publish a named processor/renderer pair, which becomes the current version at once. Code
@@ -248,12 +212,12 @@ impl Space {
         windows::preflight("processor", processor)?;
         windows::preflight("renderer", renderer)?;
         let body = json!({"name": name, "processor": processor, "renderer": renderer});
-        self.post(&self.at(&format!("/windows/{id}/versions"))?, Some(body))
+        self.post(&format!("/windows/{id}/versions"), Some(body))
     }
 
     /// The last SiliconJSON a runner published for this window, and how fresh it is.
     pub fn window_state(&self, id: &str) -> Result<WindowState, Error> {
-        self.get(&self.at(&format!("/windows/{id}/state"))?)
+        self.get(&format!("/windows/{id}/state"))
     }
 
     /// Run this window's published processor locally in Node, feeding every line of the child's
@@ -280,124 +244,120 @@ impl Space {
     /// The page that renders this window. Graphs, live views and video belong to the web app;
     /// this is how a terminal hands off to it.
     pub fn window_url(&self, id: &str) -> Result<String, Error> {
-        Ok(format!("{}/o/{}/windows/{id}", self.app_url()?, self.scope()?))
+        let me: Value = self.get("/me")?;
+        let account = me["uuid"].as_str().ok_or_else(|| Error::Transport("account UUID missing from /me".into()))?;
+        let app = me["app"].as_str().unwrap_or(&self.url);
+        Ok(format!("{app}/a/{account}/windows/{id}"))
     }
 
     // ── notifications ───────────────────────────────────────────────────────────────────────
 
     pub fn notifications(&self) -> Result<Vec<Notification>, Error> {
-        self.get(&self.at("/notifications")?)
+        self.get("/notifications")
     }
 
     pub fn notification(&self, id: &str) -> Result<Notification, Error> {
-        self.get(&self.at(&format!("/notifications/{id}"))?)
+        self.get(&format!("/notifications/{id}"))
     }
 
-    /// Create a notification. `recipients` is the subscription set and must stay inside the
-    /// definition's access list.
+    /// Create a notification delivered to this account or its webhooks.
     pub fn create_notification(&self, def: &Def, recipients: &[&str]) -> Result<Notification, Error> {
-        self.post(&self.at("/notifications")?, Some(json!({"def": def, "recipients": recipients})))
+        self.post("/notifications", Some(json!({"def": def, "recipients": recipients})))
     }
 
     /// Replace the definition with a new version; `None` recipients keeps the current subscribers.
     pub fn update_notification(&self, id: &str, def: &Def, recipients: Option<&[&str]>) -> Result<Notification, Error> {
-        self.put(&self.at(&format!("/notifications/{id}"))?, json!({"def": def, "recipients": recipients}))
+        self.put(&format!("/notifications/{id}"), json!({"def": def, "recipients": recipients}))
     }
 
     /// Delete the notification, its versions and its event history.
     pub fn delete_notification(&self, id: &str) -> Result<(), Error> {
-        self.delete(&self.at(&format!("/notifications/{id}"))?)
+        self.delete(&format!("/notifications/{id}"))
     }
 
     /// What it has fired, newest first. Append only: storing an event is what "read" means.
     pub fn events(&self, id: &str) -> Result<Vec<Event>, Error> {
-        self.get(&self.at(&format!("/notifications/{id}/events"))?)
+        self.get(&format!("/notifications/{id}/events"))
     }
 
     /// Subscribe this actor; the new recipient list comes back. A silicon needs its delivery
     /// webhook set first, since that is where its events land.
     pub fn subscribe(&self, id: &str) -> Result<Vec<String>, Error> {
-        let path = self.at(&format!("/notifications/{id}/subscribe"))?;
+        let path = format!("/notifications/{id}/subscribe");
         Ok(self.post::<Recipients>(&path, None)?.recipients)
     }
 
     pub fn unsubscribe(&self, id: &str) -> Result<Vec<String>, Error> {
-        let path = self.at(&format!("/notifications/{id}/subscribe"))?;
+        let path = format!("/notifications/{id}/subscribe");
         Ok(self.send::<Recipients>("DELETE", &path, None)?.recipients)
     }
 
     /// Run its SQL now, over everything since its cursors, without advancing them.
     pub fn test_notification(&self, id: &str) -> Result<TestRun, Error> {
-        self.post(&self.at(&format!("/notifications/{id}/test"))?, None)
+        self.post(&format!("/notifications/{id}/test"), None)
     }
 
     // ── settings ────────────────────────────────────────────────────────────────────────────
 
     pub fn webhooks(&self) -> Result<Vec<Webhook>, Error> {
-        self.get(&self.at("/webhooks")?)
+        self.get("/webhooks")
     }
 
-    /// An org webhook a notification can deliver to; the signing secret is shown once, here.
+    /// An account webhook a notification can deliver to; the signing secret is shown once, here.
     pub fn create_webhook(&self, url: &str) -> Result<Key, Error> {
-        self.post(&self.at("/webhooks")?, Some(json!({"url": webhook_url(url)?})))
+        self.post("/webhooks", Some(json!({"url": webhook_url(url)?})))
     }
 
     pub fn delete_webhook(&self, id: &str) -> Result<(), Error> {
-        self.delete(&self.at(&format!("/webhooks/{id}"))?)
+        self.delete(&format!("/webhooks/{id}"))
     }
 
     /// This silicon's own delivery webhook, where `@si:<handle>` recipients land. Every write
     /// replaces the URL and mints a new signing secret.
     pub fn set_silicon_webhook(&self, url: &str) -> Result<Key, Error> {
-        self.put(&self.at("/silicon-webhook")?, json!({"url": webhook_url(url)?}))
+        self.put("/silicon-webhook", json!({"url": webhook_url(url)?}))
     }
 
     /// Drop this silicon's delivery webhook; its notifications stop arriving anywhere.
     pub fn delete_silicon_webhook(&self) -> Result<(), Error> {
-        self.delete(&self.at("/silicon-webhook")?)
+        self.delete("/silicon-webhook")
     }
 
     pub fn api_keys(&self) -> Result<Vec<ApiKey>, Error> {
-        self.get(&self.at("/api-keys")?)
+        self.get("/api-keys")
     }
 
-    /// A key acting for the org inside `scopes` (`tables`, `notifications`), shown once.
+    /// A key acting for the account inside `scopes` (`tables`, `notifications`), shown once.
     pub fn create_api_key(&self, scopes: &[&str]) -> Result<Key, Error> {
-        self.post(&self.at("/api-keys")?, Some(json!({"scopes": scopes})))
+        self.post("/api-keys", Some(json!({"scopes": scopes})))
     }
 
     pub fn delete_api_key(&self, id: &str) -> Result<(), Error> {
-        self.delete(&self.at(&format!("/api-keys/{id}"))?)
+        self.delete(&format!("/api-keys/{id}"))
     }
 
-    /// The access token processors and dev servers use, minted on first sight. One per (org,
-    /// actor), and the server can read it back, so this may be asked for as often as you like.
+    /// The access token processors and dev servers use, minted on first sight. One per account, and the server can read it back, so this may be asked for as often as you like.
     pub fn access_token(&self) -> Result<AccessToken, Error> {
-        self.get(&self.at("/access-token")?)
+        self.get("/access-token")
     }
 
     pub fn rotate_access_token(&self) -> Result<AccessToken, Error> {
-        self.post(&self.at("/access-token/rotate")?, None)
+        self.post("/access-token/rotate", None)
     }
 
     // ── data ────────────────────────────────────────────────────────────────────────────────
 
-    /// One read-only query over the org's tables, plus the cursor each table was read up to.
+    /// One read-only query over the account's tables, plus the cursor each table was read up to.
     pub fn query(&self, sql: &str, restrict: &Restrict) -> Result<Rows, Error> {
-        self.post(&self.at("/query")?, Some(json!({"sql": sql, "restrict": restrict})))
+        self.post("/query", Some(json!({"sql": sql, "restrict": restrict})))
     }
 
-    /// What went wrong server-side for this org: notification runs, deliveries, refused rows.
+    /// What went wrong server-side for this account: notification runs, deliveries, refused rows.
     pub fn dev_errors(&self) -> Result<Vec<DevError>, Error> {
-        self.get(&self.at("/dev-errors")?)
+        self.get("/dev-errors")
     }
 
     // ── the wire ────────────────────────────────────────────────────────────────────────────
-
-    /// An org-scoped path, or the reason there is no org to scope it to.
-    fn at(&self, path: &str) -> Result<String, Error> {
-        Ok(format!("/orgs/{}{path}", self.scope()?))
-    }
 
     fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T, Error> {
         self.send("GET", path, None)

@@ -1,16 +1,13 @@
 [package]
 name = "space-station-cli"
-description = "The `spacestation` command: a shell over the space-station crate — orgs, tables, space windows, notifications, keys, queries, daemon."
-version = "0.3.0"
+description = "The `spacestation` command: a shell over the space-station crate — accounts, tables, space windows, notifications, keys, queries, daemon."
+version = "0.4.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
-# The coverage test reads the package's source to check that every method has a command; it is a
-# test of this repository, not of the published crate.
-exclude = ["tests"]
 
 [[bin]]
 name = "spacestation"
@@ -21,16 +18,7 @@ space-station.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
-base64 = "0.22"
-ed25519-dalek = "2"
-flate2 = "1"
-sha2.workspace = true
-tar = "0.4"
-ureq = { version = "3", default-features = false, features = ["rustls"] }
 
-[features]
-# Honeycomb owns the executable and installs updates itself.
-honeycomb-managed = []
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

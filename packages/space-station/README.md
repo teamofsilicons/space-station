@@ -20,7 +20,6 @@ space-station-dev publish --window <id> --name v1
 ```
 SPACE_STATION_URL=https://space.example.com
 SPACE_STATION_ACCESS_TOKEN=spacewindow-…     # the access token shown on every window page; yours, rotatable there
-SPACE_STATION_ORG=tos                        # the org id
 SPACE_STATION_WINDOW=w_01                    # optional: the window whose cached state seeds a dev run
 ```
 
@@ -65,7 +64,7 @@ there is exactly:
 
 | `mission_control.…` | |
 |---|---|
-| `query(sql)` | runs a read-only SELECT over the org's tables; resolves to the rows (`cursor`, `event_ts_ms`, `registered_ts_ms` as numbers); rejects with `{code, message}` when the server refuses it |
+| `query(sql)` | runs a read-only SELECT over the account's tables; resolves to the rows (`cursor`, `event_ts_ms`, `registered_ts_ms` as numbers); rejects with `{code, message}` when the server refuses it |
 | `data.tables[t]` | `{cursor, watermark}` per trigger table: the cursor every subscription on it has passed, and the highest watermark seen. Managed for you |
 | `json` | the current SiliconJSON |
 
@@ -118,7 +117,7 @@ Unknown keys are refused. Errors are `unknown_tool`, `invalid_args`, `timeout` (
 
 ### SQL
 
-`FROM <table_id>` for any table of the org; read-only, one SELECT. Columns: `cursor`,
+`FROM <table_id>` for any table owned by the account; read-only, one SELECT. Columns: `cursor`,
 `record_id`, `event_ts_ms`, `registered_ts_ms`, `metadata` (JSON) and `record` (JSON, what the
 app sent). JSON paths need a cast (`record.amount::Float64`, `record.id::String`). Refused:
 `SETTINGS`, `FORMAT`, `INTO OUTFILE`, table functions, `system.*`, `db.table` names.
@@ -188,7 +187,7 @@ carry an `Origin` equal to the page's own. `.env` is never served and the token 
 page. Dev runs never store state on the server (their version is `null`).
 
 **publish** refuses either file when it contains anything shaped like a credential
-(`spacewindow-…`, `apikey-…`, `whsec-…`, `table-{id}-…`, IAM `sat_`/`oat_`/… tokens — comments
+(`spacewindow-…`, `apikey-…`, `whsec-…`, `table-{id}-…`, Silicon Accounts refresh tokens and JWTs — comments
 included; the server runs the same scan and answers `secret_in_code`), then POSTs the pair as a
 new version and prints the server's reply. The published version becomes the window's current
 one.
@@ -206,8 +205,7 @@ The same file, loaded from a CDN or served by the app, defines `window.SpaceStat
 const mc = SpaceStation.host({
   runtimeUrl,                 // absolute URL of mission-control.js, for the processor iframe's <script> and its CSP
   api: { base: "/api", headers: {} },   // fetch base (cookie in the app; the dev proxy adds the bearer)
-  ws,                         // absolute ws(s) URL of /api/ws/mission-control?org=…
-  org,
+  ws,                         // absolute ws(s) URL of /api/ws/mission-control
   window: { id, name, version: { name, processor, renderer } | null },
   code: { processor, renderer },        // optional dev code; version must be null when given
   mount,                      // HTMLElement: receives the renderer iframe and the hidden processor iframe
@@ -219,15 +217,15 @@ mc.destroy();
 SpaceStation.SANDBOX;   // "allow-scripts"
 ```
 
-Without `code` and with `window.version` null, the host fetches `GET /orgs/{org}/windows/{id}`
+Without `code` and with `window.version` null, the host fetches `GET /windows/{id}`
 for the current version. Both iframes get `sandbox="allow-scripts"` and nothing more; the host
 listens only to messages whose `source` is one of its own frames.
 
 ## Under Node (what the CLI runs)
 
 ```
-node mission-control.js run  --url U --org O --window W                    # until 10 idle minutes → exit 0
-node mission-control.js tool --url U --org O --window W --name N [--args JSON]
+node mission-control.js run  --url U --window W                    # until 10 idle minutes → exit 0
+node mission-control.js tool --url U --window W --name N [--args JSON]
 node mission-control.js processor                                          # the child; never call it yourself
 ```
 
@@ -244,11 +242,3 @@ workers, and it has no `fetch`/`WebSocket`. It talks to the host over stdio only
 `console` and `process.stdout` go to stderr so user code cannot forge bridge messages. Node's
 permission model does not gate raw sockets, so a processor that goes out of its way can open
 one — without any credential.
-
-## Tests
-
-`npm test` (`node --test`, under 20 s): a real Node host, a real `--permission` child and a fake
-backend on 127.0.0.1 for the lifecycle, the tool type table, the 64 KB bounds, coalescing and
-ordering, timeouts, reconnect and catch-up; the CLI surface (`run`, `tool`, `dev serve` with its
-host/origin checks and proxies, `publish`, `notify`); and the browser side (host and renderer
-bridge) in a vm context with a minimal DOM.

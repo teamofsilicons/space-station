@@ -1,6 +1,6 @@
-import { ArcButton, ArcInput } from './arc';
+import { SiliconButton, SiliconInput } from './silicon-ui';
 // The small pieces every page shares: a polled resource that rests while its tab is hidden, a busy
-// action, errors and loading lines, copy and one-time secrets, dialogs, menus, access lists, and
+// action, errors and loading lines, copy and one-time secrets, dialogs, menus, and
 // the tab a page lives in (`useTab`), which is how a page navigates, names itself and signals.
 import {
   createContext,
@@ -46,7 +46,6 @@ export function ago(s: string | number | null) {
   if (m < 43200) return `${Math.round(m / 1440)}d ago`;
   return new Date(t).toLocaleDateString();
 }
-export const list = (s: string) => s.split(/[\s,]+/).filter(Boolean);
 export const count = (n: number) => (n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e4 ? Math.round(n / 1e3) + "k" : n.toLocaleString());
 
 /**
@@ -134,7 +133,7 @@ export function Loading(p: { error?: Error }) {
 export function Copy(p: { text: string; label?: string }) {
   const [done, setDone] = createSignal<"" | "ok" | "fail">("");
   return (
-    <ArcButton
+    <SiliconButton
       type="button"
       class="ghost small"
       onClick={async () => {
@@ -149,7 +148,7 @@ export function Copy(p: { text: string; label?: string }) {
     >
       <Icon name={done() === "ok" ? "check" : "copy"} />
       {done() === "ok" ? "Copied" : done() === "fail" ? "Select the text" : p.label || "Copy"}
-    </ArcButton>
+    </SiliconButton>
   );
 }
 
@@ -159,9 +158,9 @@ export function Secret(p: { value: string; once?: boolean }) {
     <div class="secret">
       <code>{visible() ? p.value : "•".repeat(28)}</code>
       <div class="secret-actions">
-        <ArcButton type="button" class="ghost small" onClick={() => setVisible(!visible())}>
+        <SiliconButton type="button" class="ghost small" onClick={() => setVisible(!visible())}>
           {visible() ? "Hide" : "Reveal"}
-        </ArcButton>
+        </SiliconButton>
         <Copy text={p.value} />
       </div>
       <Show when={p.once}>
@@ -181,9 +180,9 @@ export function Modal(p: { title: string; close: () => void; children: JSX.Eleme
     <dialog ref={dialog} class={p.wide ? "wide" : ""} onClose={() => shown() && p.close()} onCancel={p.close}>
       <div class="dialog-head">
         <h2>{p.title}</h2>
-        <ArcButton type="button" class="icon" aria-label="Close dialog" onClick={p.close}>
+        <SiliconButton type="button" class="icon" aria-label="Close dialog" onClick={p.close}>
           <Icon name="x" />
-        </ArcButton>
+        </SiliconButton>
       </div>
       {p.children}
     </dialog>
@@ -204,9 +203,9 @@ export function Segmented<T extends string>(p: { value: T; options: readonly T[]
     }}>
       <For each={p.options}>
         {(o) => (
-          <ArcButton type="button" role="radio" tabIndex={o === p.value ? 0 : -1} aria-checked={o === p.value} classList={{ on: o === p.value }} onClick={() => p.onChange(o)}>
+          <SiliconButton type="button" role="radio" tabIndex={o === p.value ? 0 : -1} aria-checked={o === p.value} classList={{ on: o === p.value }} onClick={() => p.onChange(o)}>
             {p.names?.[o] ?? o}
-          </ArcButton>
+          </SiliconButton>
         )}
       </For>
     </div>
@@ -220,10 +219,10 @@ const [menu, setMenu] = createSignal<{ x: number; y: number; items: MenuItem[] }
 export const closeMenu = () => setMenu(undefined);
 
 /** Opens a menu at the pointer, or under the element that was clicked. */
-export function openMenu(e: MouseEvent, items: MenuItem[]) {
+export function openMenu(e: MouseEvent, items: MenuItem[], anchor = e.currentTarget as HTMLElement) {
   e.preventDefault();
   e.stopPropagation();
-  const r = e.type === "contextmenu" ? null : (e.currentTarget as HTMLElement).getBoundingClientRect();
+  const r = e.type === "contextmenu" ? null : anchor.getBoundingClientRect();
   setMenu({ x: r ? r.left : e.clientX, y: r ? r.bottom + 4 : e.clientY, items });
 }
 
@@ -269,7 +268,7 @@ export function MenuHost() {
               item === "-" ? (
                 <hr />
               ) : (
-                <ArcButton
+                <SiliconButton
                   role="menuitem"
                   classList={{ danger: item.danger }}
                   disabled={item.disabled}
@@ -283,66 +282,12 @@ export function MenuHost() {
                   <Show when={item.keys}>
                     <kbd>{item.keys}</kbd>
                   </Show>
-                </ArcButton>
+                </SiliconButton>
               )
             }
           </For>
         </div>
       )}
-    </Show>
-  );
-}
-
-/** Actor and tag chips; an editor behind them when `save` is given. */
-export function Access(p: { value: string[]; save?: (v: string[]) => Promise<unknown> }) {
-  const [editing, setEditing] = createSignal(false),
-    [text, setText] = createSignal(p.value.join(", "));
-  const a = action();
-  const chips = (
-    <span class="chips">
-      <Show when={p.value.length} fallback={<span class="chip muted">Creator only</span>}>
-        <For each={p.value}>{(v) => <span class="chip" classList={{ tag: !v.startsWith("@") }}>{v}</span>}</For>
-      </Show>
-    </span>
-  );
-  return (
-    <Show when={p.save} fallback={chips}>
-      <ArcButton
-        type="button"
-        class="access-edit"
-        title="Edit access"
-        onClick={() => {
-          setText(p.value.join(", "));
-          setEditing(true);
-        }}
-      >
-        {chips}
-        <Icon name="pencil" />
-      </ArcButton>
-      <Show when={editing()}>
-        <Modal title="Edit access" close={() => setEditing(false)}>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              a.run(async () => {
-                await p.save!(list(text()));
-                setEditing(false);
-              });
-            }}
-          >
-            <label>
-              Actors and tags
-              <ArcInput value={text()} onInput={(e) => setText(e.currentTarget.value)} placeholder="@c:alice, engineering" autofocus />
-            </label>
-            <p class="hint">Separate @c:handle, @si:handle and tags with commas. Access is the union of all of them.</p>
-            <ErrorText message={a.error()} />
-            <div class="dialog-foot">
-              <ArcButton type="button" onClick={() => setEditing(false)}>Cancel</ArcButton>
-              <ArcButton class="primary" disabled={a.busy()}>Save access</ArcButton>
-            </div>
-          </form>
-        </Modal>
-      </Show>
     </Show>
   );
 }

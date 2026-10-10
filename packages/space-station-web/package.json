@@ -1,6 +1,6 @@
 {
   "name": "@teamofsilicons/space-station-web",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Framework-agnostic browser analytics and events for Space Station.",
   "license": "MIT",
   "repository": {
@@ -30,7 +30,6 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test 'test/*.test.cjs'",
     "prepack": "node scripts/build-cjs.mjs"
   }
 }

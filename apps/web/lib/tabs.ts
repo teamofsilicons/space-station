@@ -1,9 +1,9 @@
 // The workspace's tabs, kept the way Chrome keeps them: an ordered strip (pinned first), one to
 // three panes side by side that each show one tab, a history per tab, and the last closed tabs.
-// Pure — the shell holds the state and persists it per org; these functions say what comes next.
+// Pure — the shell holds the state and persists it per actor; these functions say what comes next.
 
 export type Kind = "home" | "tables" | "table" | "windows" | "window" | "code" | "notifications" | "settings" | "docs";
-export type Route = { kind: Kind; org: string; id: string };
+export type Route = { kind: Kind; actor: string; id: string };
 export type Tab = { id: string; path: string; title: string; pinned?: boolean; opener?: string; back: string[]; forward: string[] };
 export type Tabs = { tabs: Tab[]; panes: string[]; focus: number; closed: Tab[] };
 /** here: the focused tab navigates; tab: a new tab in front; background: a new tab behind; split: a new pane. */
@@ -12,23 +12,23 @@ export type How = "here" | "tab" | "background" | "split";
 export const MAX_PANES = 3;
 
 const ROUTES: [RegExp, Kind][] = [
-  [/^\/o\/([^/]+)$/, "home"],
-  [/^\/o\/([^/]+)\/tables$/, "tables"],
-  [/^\/o\/([^/]+)\/tables\/([a-z0-9]{1,50})$/, "table"],
-  [/^\/o\/([^/]+)\/windows$/, "windows"],
-  [/^\/o\/([^/]+)\/windows\/([^/]+)$/, "window"],
-  [/^\/o\/([^/]+)\/windows\/([^/]+)\/code$/, "code"],
-  [/^\/o\/([^/]+)\/notifications$/, "notifications"],
-  [/^\/o\/([^/]+)\/settings$/, "settings"],
-  [/^\/o\/([^/]+)\/docs(?:\/([a-z0-9-]+))?$/, "docs"],
+  [/^\/a\/([^/]+)$/, "home"],
+  [/^\/a\/([^/]+)\/tables$/, "tables"],
+  [/^\/a\/([^/]+)\/tables\/([a-z0-9]{1,50})$/, "table"],
+  [/^\/a\/([^/]+)\/windows$/, "windows"],
+  [/^\/a\/([^/]+)\/windows\/([^/]+)$/, "window"],
+  [/^\/a\/([^/]+)\/windows\/([^/]+)\/code$/, "code"],
+  [/^\/a\/([^/]+)\/notifications$/, "notifications"],
+  [/^\/a\/([^/]+)\/settings$/, "settings"],
+  [/^\/a\/([^/]+)\/docs(?:\/([a-z0-9-]+))?$/, "docs"],
 ];
 
-/** What a workspace path shows; `null` for anything that is not an org page. */
+/** What a workspace path shows; `null` for anything that is not an actor page. */
 export function route(path: string): Route | null {
   const clean = path.split(/[?#]/)[0].replace(/\/+$/, "") || "/";
   for (const [re, kind] of ROUTES) {
     const m = re.exec(clean);
-    if (m) return { kind, org: decodeURIComponent(m[1]), id: m[2] ? decodeURIComponent(m[2]) : "" };
+    if (m) return { kind, actor: decodeURIComponent(m[1]), id: m[2] ? decodeURIComponent(m[2]) : "" };
   }
   return null;
 }
@@ -211,12 +211,12 @@ export function rename(s: Tabs, id: string, title: string): Tabs {
 export const save = (s: Tabs) =>
   JSON.stringify({ tabs: s.tabs.map(({ id, path, title, pinned }) => ({ id, path, title, pinned })), panes: s.panes, focus: s.focus });
 
-/** A saved strip, kept only as far as it is still a strip of this org's pages. */
-export function restore(text: string | null, org: string): Tabs | null {
+/** A saved strip, kept only as far as it is still a strip of this actor's pages. */
+export function restore(text: string | null, actor: string): Tabs | null {
   try {
     const d = JSON.parse(text || "null");
     const tabs: Tab[] = (Array.isArray(d?.tabs) ? d.tabs : [])
-      .filter((t: Tab) => typeof t?.id === "string" && typeof t.path === "string" && route(t.path)?.org === org)
+      .filter((t: Tab) => typeof t?.id === "string" && typeof t.path === "string" && route(t.path)?.actor === actor)
       .map((t: Tab) => ({ id: t.id, path: t.path, title: typeof t.title === "string" ? t.title : titleOf(t.path), pinned: !!t.pinned, back: [], forward: [] }));
     if (!tabs.length) return null;
     const ids = new Set(tabs.map((t) => t.id));
@@ -230,7 +230,7 @@ export function restore(text: string | null, org: string): Tabs | null {
 
 /**
  * Where the address bar says to be: the tab already showing `path` if one is, else `path` in a
- * new tab. An org root only opens a tab when nothing is open.
+ * new tab. An actor root only opens a tab when nothing is open.
  */
 export function arrive(s: Tabs, path: string): Tabs {
   const cur = active(s);

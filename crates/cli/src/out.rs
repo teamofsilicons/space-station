@@ -14,17 +14,15 @@ use serde_json::Value;
 use space_station::Error;
 
 /// The way in, said wherever nobody is signed in.
-pub const SIGN_IN: &str = "run `spacestation login --org <org>`, or `spacestation auth <slt> --org <org>` with a \
-                           short-lived token from the iam CLI";
-/// A 401 on the stored session: it is over, and has just been forgotten.
-pub const EXPIRED: &str = "the stored session is over and has been forgotten (its org is kept); run `spacestation \
-                           login`, or `spacestation auth <slt>` with a short-lived token from the iam CLI";
-/// A 401 with `--api-key`: no session to sign in to, only scopes to stay inside.
-pub const KEY_REFUSED: &str = "an api key reaches only what its scopes allow — `tables`: tables ls, tables overview, \
-                               query; `notifications`: notifications ls, get, events — and acts for no one, so \
-                               nothing else answers it; `spacestation keys ls` as a signed-in user shows its scopes";
+pub const SIGN_IN: &str = "run `spacestation login`, or pipe a short-lived token from `silicon-accounts login --app spacestation -q` into `spacestation auth -`";
+/// A confirmed expired or revoked session has been removed.
+pub const EXPIRED: &str = "the stored session has ended; run `spacestation login`, or `silicon-accounts login --app spacestation -q | spacestation auth -`";
+/// An unconfirmed refusal must not discard a saved login.
+pub const SESSION_UNVERIFIED: &str = "the stored session was kept; retry or check `spacestation login status --json`";
+/// Scoped API keys identify an account but cannot perform its session-only actions.
+pub const KEY_REFUSED: &str = "an API key is limited to its owner's configured scopes (`tables`, `notifications`); other commands need an account session. Run `spacestation keys ls` while signed in to see its scopes";
 /// A 401 with `--access-token`.
-pub const TOKEN_REFUSED: &str = "an access token stops resolving once it is rotated or its actor leaves the org; \
+pub const TOKEN_REFUSED: &str = "an access token stops resolving once it is rotated or its account access is revoked; \
                                  `spacestation token show` as a signed-in user prints the live one";
 
 /// A column: its header, and the key or dotted path (`def.name`) it reads from each row.
@@ -75,8 +73,8 @@ pub fn open(link: &str) -> bool {
 }
 
 /// What a failure reads like on stderr: `error: <code>: <message>`, plus `refused` — what a 401
-/// means for the credential in use — when the server refused the credential itself. A 401 is
-/// final, since the backend holds the session and nothing here can mend one.
+/// means for the credential in use — when the server refused the credential itself.
+/// Confirmed expiry and temporary failures have different recovery instructions.
 pub fn fail(e: &Error, refused: &str) -> String {
     let code = code(e);
     let message = match e {

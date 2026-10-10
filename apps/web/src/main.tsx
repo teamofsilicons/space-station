@@ -1,8 +1,8 @@
 // The app's front door: public docs and inspirations for anyone; otherwise the session decides —
-// sign in, a page of another org (offered as a switch), or the station itself.
+// sign in, a page of another actor (offered as a switch), or the station itself.
 import { render } from "solid-js/web";
 import { createResource, Match, onCleanup, Switch } from "solid-js";
-import { api, signedOut, type Me, type Org } from "../lib/api";
+import { api, signedOut, type Me } from "../lib/api";
 import { route } from "../lib/tabs";
 import { Workspace } from "./workspace";
 import { LoginButtons } from "./login";
@@ -10,6 +10,7 @@ import { Inspirations, PublicDocs } from "./docs";
 import { Mark } from "./icons";
 import "./theme";
 import "./style.css";
+import "./silicon-ui/foundation.css";
 import "./refinement.css";
 
 const orNull = async <T,>(call: Promise<T>, empty: T) => {
@@ -31,8 +32,8 @@ function Login() {
       <div class="login-copy">
         <Mark size={34} />
         <h1>Space Station</h1>
-        <p class="lede">Records, live views and notifications for carbons and silicons. Choose your organization in Silicon IAM to continue.</p>
-        <LoginButtons next={location.pathname + location.search + location.hash} org={route(location.pathname)?.org} />
+        <p class="lede">Records, live views and notifications for carbons and silicons. Sign in with Silicon Accounts to continue.</p>
+        <LoginButtons next={location.pathname + location.search + location.hash} />
         <p class="muted small-print">
           New here? Read <a href="/docs/getting-started">getting started</a>.
         </p>
@@ -43,12 +44,11 @@ function Login() {
 
 function Session() {
   const [me, { refetch }] = createResource(() => orNull(api<Me>("/me"), null));
-  const [orgs] = createResource(() => me()?.context_id, () => orNull(api<Org[]>("/orgs"), [] as Org[]));
   const out = () => refetch();
   signedOut.addEventListener("signedout", out);
   onCleanup(() => signedOut.removeEventListener("signedout", out));
   const path = location.pathname;
-  const wanted = route(path)?.org;
+  const wanted = route(path)?.actor;
   return (
     <Switch>
       <Match when={me.loading}>
@@ -68,22 +68,22 @@ function Session() {
       <Match when={!me()}>
         <Login />
       </Match>
-      <Match when={wanted && wanted !== me()!.org}>
+      <Match when={wanted && wanted !== me()!.uuid}>
         <div class="center-card">
-          <span class="kicker">Another organization</span>
-          <h1>This page belongs to {wanted}</h1>
+          <span class="kicker">Another account</span>
+          <h1>This page belongs to another account</h1>
           <p class="muted">
-            You are signed in to {me()!.org}. Choose an account, then select {wanted} in Silicon IAM. Your saved accounts stay available in the account switcher.
+            You are signed in to {me()!.id}. Switch to the page's account to open it. Your saved accounts stay available in the account switcher.
           </p>
           <div class="row">
-            <LoginButtons next={path} org={wanted} />
-            <a class="button" href={`/o/${me()!.org}`}>
-              Return to {me()!.org}
+            <LoginButtons next={path} />
+            <a class="button" href={`/a/${me()!.uuid}`}>
+              Return to {me()!.id}
             </a>
           </div>
         </div>
       </Match>
-      <Match when={me()}>{(m) => <Workspace me={m()} orgs={() => orgs() || []} path={path} />}</Match>
+      <Match when={me()}>{(m) => <Workspace me={m()} path={path} />}</Match>
     </Switch>
   );
 }

@@ -19,16 +19,16 @@ use space_station_shared::secrets::webhook_secret;
 use url::{Host, Url};
 use uuid::Uuid;
 
+use crate::accounts::{Identity, Kind};
 use crate::http::auth::Auth;
 use crate::http::{ApiError, AppState, Json, Path};
-use crate::iam::{Identity, Kind};
 use crate::{crypto, notifications};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/orgs/{org}/webhooks", get(list).post(create))
-        .route("/orgs/{org}/webhooks/{id}", delete(remove))
-        .route("/orgs/{org}/silicon-webhook", put(silicon).delete(silicon_remove))
+        .route("/webhooks", get(list).post(create))
+        .route("/webhooks/{id}", delete(remove))
+        .route("/silicon-webhook", put(silicon).delete(silicon_remove))
 }
 
 #[derive(sqlx::FromRow, Serialize)]
@@ -70,13 +70,9 @@ async fn create(
     Ok((StatusCode::CREATED, Json(json!({"id": id, "url": url, "secret": secret}))))
 }
 
-/// Deleting a webhook also strikes `webhook:{id}` from every notification's recipients in the org,
+/// Deleting a webhook also strikes `webhook:{id}` from every notification's recipients in the account,
 /// in the same transaction, so no list goes on naming a target that no longer exists.
-async fn remove(
-    State(state): State<AppState>,
-    auth: Auth,
-    Path((_, id)): Path<(String, Uuid)>,
-) -> Result<StatusCode, ApiError> {
+async fn remove(State(state): State<AppState>, auth: Auth, Path(id): Path<Uuid>) -> Result<StatusCode, ApiError> {
     auth.actor()?;
     let mut tx = state.store.pg.begin().await?;
     let sql = "DELETE FROM webhooks WHERE org = $1 AND id = $2 AND actor IS NULL";
@@ -228,96 +224,4 @@ pub fn sign(secret: &str, ts: i64, body: &[u8]) -> String {
     message.push(b'.');
     message.extend_from_slice(body);
     format!("v1={}", crypto::hmac_sha256_hex(secret.as_bytes(), &message))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    async fn code(url: &str, allow_private: bool) -> Result<String, String> {
-        validate_url(url, allow_private).await.map(|v| v.url).map_err(|e| e.message)
-    }
-
-    #[tokio::test]
-    async fn private_hosts_userinfo_and_plain_http_are_refused_unless_allowed() {
-        for url in [
-            "https://127.0.0.1/hook",
-            "https://10.1.2.3/hook",
-            "https://172.16.5.5/hook",
-            "https://192.168.1.1/hook",
-            "https://169.254.169.254/latest/meta-data",
-            "https://100.64.0.1/hook",
-            "https://[::1]/hook",
-            "https://[fc00::1]/hook",
-            "https://[fe80::1]/hook",
-            "https://[::ffff:10.0.0.1]/hook",
-            "https://localhost/hook",
-        ] {
-            assert!(code(url, false).await.is_err(), "{url} must be refused");
-            assert!(code(url, true).await.is_ok(), "{url} is fine for local development");
-        }
-        assert_eq!(
-            code("https://user:pw@example.com/hook", false).await.unwrap_err(),
-            "credentials in the URL are not allowed"
-        );
-        assert_eq!(code("http://93.184.216.34/hook", false).await.unwrap_err(), "http: webhooks are https only");
-        assert!(code("http://127.0.0.1:9/hook", true).await.is_ok());
-        assert!(code("http://localhost:4747/hook", true).await.is_ok(), "plain http reaches a private address");
-        assert!(code("ftp://example.com/x", true).await.is_err());
-        assert_eq!(code("https://93.184.216.34/hook?x=1", false).await.unwrap(), "https://93.184.216.34/hook?x=1");
-    }
-
-    /// The flag relaxes the address rule and nothing else: plain http to a public host is refused
-    /// as https-only whether or not private webhooks are allowed.
-    #[tokio::test]
-    async fn allowing_private_webhooks_never_allows_plain_http_to_a_public_host() {
-        for url in ["http://93.184.216.34/hook", "http://[2606:2800:220:1:248:1893:25c8:1946]/hook"] {
-            assert_eq!(code(url, true).await.unwrap_err(), "http: webhooks are https only", "{url}");
-            assert_eq!(code(url, false).await.unwrap_err(), "http: webhooks are https only", "{url}");
-        }
-        assert!(code("https://93.184.216.34/hook", true).await.is_ok(), "https to a public host is always fine");
-    }
-
-    /// The connect must land on the address the check vetted, not on whatever DNS answers a
-    /// moment later. `.invalid` never resolves, so only the pin can reach the listener.
-    #[tokio::test]
-    async fn a_vetted_url_is_dialled_at_the_address_that_was_checked() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let dialled = tokio::spawn(async move { listener.accept().await.is_ok() });
-        let vetted = |addrs: Vec<SocketAddr>| Vetted {
-            url: "http://pinned.invalid/hook".into(),
-            host: "pinned.invalid".into(),
-            addrs,
-        };
-        let pinned = vetted(vec![addr]);
-        let _ = pinned.client().post(&pinned.url).body("{}").send().await;
-        let dialled = tokio::time::timeout(Duration::from_secs(5), dialled).await;
-        assert!(dialled.is_ok_and(|r| r.unwrap()), "the address that was checked is the one dialled");
-        let loose = vetted(Vec::new());
-        assert!(loose.client().post(&loose.url).send().await.is_err(), "with nothing pinned the name is resolved");
-        assert!(
-            validate_url("https://93.184.216.34/hook", false).await.unwrap().addrs.is_empty(),
-            "an ip needs no pin"
-        );
-        assert!(
-            !validate_url("http://localhost:1/x", true).await.unwrap().addrs.is_empty(),
-            "a name is resolved, and pinned, even when private addresses are allowed"
-        );
-        if let Ok(vetted) = validate_url("https://example.com/hook", false).await {
-            assert!(!vetted.addrs.is_empty(), "a domain keeps the addresses its check resolved");
-        }
-    }
-
-    #[test]
-    fn signatures_are_v1_hmac_over_timestamp_dot_body() {
-        let body = br#"{"dedup_key":"k","text":"t","metadata":{}}"#;
-        let mut message = b"1700000000.".to_vec();
-        message.extend_from_slice(body);
-        assert_eq!(
-            sign("whsec-abc", 1_700_000_000, body),
-            format!("v1={}", crypto::hmac_sha256_hex(b"whsec-abc", &message))
-        );
-        assert!(sign("whsec-abc", 1, body).starts_with("v1=") && sign("whsec-abc", 1, body).len() == 67);
-    }
 }

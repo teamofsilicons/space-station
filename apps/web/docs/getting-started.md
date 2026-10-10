@@ -1,11 +1,11 @@
 # Getting started
 
-Space Station takes JSON records for a **table** inside your **organization**, keeps them in
+Space Station takes JSON records for a **table** owned by your **Carbon or Silicon account**, keeps them in
 order, and lets you build [Space Windows](/docs/space-windows) (live views) and
 [Notifications](/docs/notifications) on top of them.
 
-Org → Tables → Records. A table is logical: one ClickHouse table holds everything and the
-backend scopes every query to your org and your table ids, so `FROM orders` just works. Records
+Account → Tables → Records. A table is logical: one ClickHouse table holds everything and the
+backend scopes every query to your account UUID and table ids, so `FROM orders` just works. Records
 are whatever JSON your app cares about; plan what you send, then build views around it.
 
 Everything here is available three ways, and they are the same thing seen from different angles:
@@ -15,26 +15,30 @@ and this app is a subset of that.
 Install the CLI and its background daemon on macOS or Linux:
 
 ```sh
-curl -fsSL https://spacestation.teamofsilicons.com/install.sh | sh
+silicon-apps install spacestation
 ```
 
 Open a new terminal, then follow the commands below. For a web project, start with
-[Browser analytics and events](/docs/web). For local development and the IAM test environment,
+[Browser analytics and events](/docs/web). For local development,
 see [the development guide](https://github.com/teamofsilicons/space-station/blob/main/docs/DEVELOPING.md).
 
 ## 1. Create a table
 
-In the app: choose **Continue as Carbon** or **Continue as Silicon**, then select one organization in Silicon IAM. Sign-in opens in a popup, with a full-page fallback if your browser blocks it. Open **Tables** and create one. To add or switch a saved account and organization, use the organization button in the sidebar; each context keeps its own session and saved tabs.
-From a terminal, the same two steps — a session is bound to the one org it signs in to:
+In the app, choose **Continue as Carbon** for hosted Silicon Accounts sign-in, or
+**Continue as Silicon** to exchange a short-lived token from the Accounts CLI. Open **Tables**
+and create one. The account button in the sidebar keeps your saved accounts and tabs separate.
+Sessions survive reloads and browser restarts until they expire or you sign out.
 
-```
-spacestation login --org tos       a carbon with a browser
-spacestation auth <slt> --org tos  instead, with a short-lived token the iam CLI minted: `iam login --app-id 'spacestation' --org tos`
-                                    for a carbon, `iam silicon-login --app-id 'spacestation'` for a silicon (see the CLI page)
-spacestation tables create orders --access @c:alice,tech
+From a terminal:
+
+```sh
+spacestation login                         # Carbon with a browser
+# Or use your signed-in Silicon Accounts CLI:
+silicon-accounts login --app spacestation -q | spacestation auth -
+spacestation tables create orders
 ```
 
-A table id is unique in the org and matches `^[a-z0-9]{1,50}$`. You are shown the **table key**
+A table id is unique within your account and matches `^[a-z0-9]{1,50}$`. You are shown the **table key**
 once:
 
 ```
@@ -42,13 +46,9 @@ table-orders-9f3c1a…            table-{table_id}-{32 hex}
 ```
 
 It is stored hashed. There is one key per table; rotating it (`spacestation tables rotate
-orders`, or Tables → rotate key) invalidates the old one at once. Access to a table is a list of
-`@actor` ids and IAM tag names — the union of them can see it; whoever creates it is added to the
-list. Tags come with the login itself — IAM reports them when Space Station verifies your session
-— and IAM's webhooks keep them current; see [Credentials](/docs/credentials). Actor entries must
-use complete IDs such as `@c:alice` or `@si:bot`. Space Station validates that syntax but does
-not look up whether `tech` or `@c:bob` exists, so a well-formed, mistyped entry grants nobody
-anything. Check spelling and case (`tech`, not `Tech`) when someone who should see a table does not.
+orders`, or Tables → rotate key) invalidates the old one at once. Your account owns the table.
+All management and query operations stay inside that owning account; see
+[Credentials](/docs/credentials).
 
 Use `spacestation tables retire orders` to stop writes and move the table behind **Retired**.
 Its records remain queryable and existing Space Windows keep their references. Use
@@ -76,11 +76,11 @@ For continuous recording from your application, use the published Rust package:
 
 ```toml
 [dependencies]
-space-station = "0.1"
+space-station = "0.4"
 ```
 
 ```sh
-curl -fsSL https://spacestation.teamofsilicons.com/install.sh | sh && export PATH="$HOME/.local/bin:$PATH"
+silicon-apps install spacestation
 # Optional development server for Space Windows:
 npm i -g @teamofsilicons/space-station
 ```
@@ -88,7 +88,7 @@ npm i -g @teamofsilicons/space-station
 ```rust
 use space_station::SpaceClient;
 
-let ss = SpaceClient::new(&std::env::var("SPACE_STATION_TABLE_KEY")?)?; // org + table come from the key
+let ss = SpaceClient::new(&std::env::var("SPACE_STATION_TABLE_KEY")?)?; // account + table come from the key
 ss.record(serde_json::json!({ "id": "o-42", "customer": "ada", "amount": 12.5 })); // non-blocking
 ```
 
@@ -107,7 +107,7 @@ The same crate is how you manage everything else — tables, windows, notificati
 ## 3. The daemon
 
 One daemon per machine carries records for any number of table keys over a single WebSocket, so
-many apps and orgs on one host cost one connection. The first `SpaceClient` on a machine starts
+many apps and accounts on one host cost one connection. The first `SpaceClient` on a machine starts
 it in-process (a lock file elects one); `spacestation daemon run` runs it in the foreground
 instead, and `spacestation daemon status` says whether one is listening and how many records are
 still unacked.

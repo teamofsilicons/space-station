@@ -64,7 +64,7 @@ The adapter preserves each event's stable `id` as `metadata.record_id`, so norma
 
 ## Space Station's own frontend
 
-The `tos` organization owns these ordinary tables:
+The `si:tos` account owns these ordinary tables:
 
 - `spacestation`: backend and daemon diagnostics.
 - `spacestationfrontendanalytics`: automatic browser analytics.

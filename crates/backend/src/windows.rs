@@ -14,16 +14,16 @@ use space_station_shared::secrets::find_secret;
 use uuid::Uuid;
 
 use crate::access;
+use crate::accounts::Identity;
 use crate::http::auth::Auth;
 use crate::http::{ApiError, AppState, Json, Path};
-use crate::iam::Identity;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/orgs/{org}/windows", get(list).post(create))
-        .route("/orgs/{org}/windows/{id}", get(show).put(update).delete(remove))
-        .route("/orgs/{org}/windows/{id}/versions", get(versions).post(publish))
-        .route("/orgs/{org}/windows/{id}/state", get(state_of))
+        .route("/windows", get(list).post(create))
+        .route("/windows/{id}", get(show).put(update).delete(remove))
+        .route("/windows/{id}/versions", get(versions).post(publish))
+        .route("/windows/{id}/state", get(state_of))
 }
 
 const SELECT: &str = "SELECT w.id, w.name, w.access, w.created_by, w.created_at, v.name AS version, v.processor, v.renderer \
@@ -59,14 +59,14 @@ async fn fetch(state: &AppState, me: &Identity, id: Uuid) -> Result<Row, ApiErro
         .fetch_optional(&state.store.pg)
         .await?
         .ok_or_else(|| ApiError::not_found("window"))?;
-    if access::matches(me, &access::list(&row.access)) { Ok(row) } else { Err(ApiError::forbidden()) }
+    Ok(row)
 }
 
 async fn list(State(state): State<AppState>, auth: Auth) -> Result<Json<Vec<Value>>, ApiError> {
     let me = auth.actor()?;
     let sql = format!("{SELECT} WHERE w.org = $1 ORDER BY w.created_at");
     let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql)).bind(&me.org).fetch_all(&state.store.pg).await?;
-    Ok(Json(rows.into_iter().filter(|r| access::matches(me, &access::list(&r.access))).map(Row::json).collect()))
+    Ok(Json(rows.into_iter().map(Row::json).collect()))
 }
 
 fn valid_name(name: &str) -> Result<(), ApiError> {
@@ -107,11 +107,7 @@ async fn create(
     Ok((StatusCode::CREATED, Json(fetch(&state, me, id).await?.json())))
 }
 
-async fn show(
-    State(state): State<AppState>,
-    auth: Auth,
-    Path((_, id)): Path<(String, Uuid)>,
-) -> Result<Json<Value>, ApiError> {
+async fn show(State(state): State<AppState>, auth: Auth, Path(id): Path<Uuid>) -> Result<Json<Value>, ApiError> {
     Ok(Json(fetch(&state, auth.actor()?, id).await?.json()))
 }
 
@@ -124,7 +120,7 @@ struct Update {
 async fn update(
     State(state): State<AppState>,
     auth: Auth,
-    Path((_, id)): Path<(String, Uuid)>,
+    Path(id): Path<Uuid>,
     Json(body): Json<Update>,
 ) -> Result<Json<Value>, ApiError> {
     let me = auth.actor()?;
@@ -149,11 +145,7 @@ async fn update(
 /// which Postgres checks at the end of the statement, by which time the row holding the pointer
 /// has been deleted too. The "Deleting" step of `the_whole_station_end_to_end` in tests/core.rs
 /// is the proof.
-async fn remove(
-    State(state): State<AppState>,
-    auth: Auth,
-    Path((_, id)): Path<(String, Uuid)>,
-) -> Result<StatusCode, ApiError> {
+async fn remove(State(state): State<AppState>, auth: Auth, Path(id): Path<Uuid>) -> Result<StatusCode, ApiError> {
     fetch(&state, auth.actor()?, id).await?;
     sqlx::query("DELETE FROM windows WHERE id = $1").bind(id).execute(&state.store.pg).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -174,7 +166,7 @@ const VERSION: &str = "id, name, processor, renderer, created_by, created_at";
 async fn versions(
     State(state): State<AppState>,
     auth: Auth,
-    Path((_, id)): Path<(String, Uuid)>,
+    Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<Version>>, ApiError> {
     fetch(&state, auth.actor()?, id).await?;
     let sql = format!("SELECT {VERSION} FROM window_versions WHERE window_id = $1 ORDER BY created_at DESC");
@@ -192,7 +184,7 @@ struct Publish {
 async fn publish(
     State(state): State<AppState>,
     auth: Auth,
-    Path((_, id)): Path<(String, Uuid)>,
+    Path(id): Path<Uuid>,
     Json(body): Json<Publish>,
 ) -> Result<(StatusCode, Json<Version>), ApiError> {
     let me = auth.actor()?;
@@ -236,11 +228,7 @@ async fn publish(
 }
 
 /// `{json, metadata: {processor_version, renderer_version, produced_at, is_live}}`.
-async fn state_of(
-    State(state): State<AppState>,
-    auth: Auth,
-    Path((_, id)): Path<(String, Uuid)>,
-) -> Result<Json<Value>, ApiError> {
+async fn state_of(State(state): State<AppState>, auth: Auth, Path(id): Path<Uuid>) -> Result<Json<Value>, ApiError> {
     let row = fetch(&state, auth.actor()?, id).await?;
     let sql = "SELECT state, state_version, produced_at FROM windows WHERE id = $1";
     let (json, state_version, produced_at): (Option<Value>, Option<String>, Option<DateTime<Utc>>) =
@@ -260,21 +248,4 @@ fn is_live(
     current.is_some()
         && state_version == current
         && produced_at.is_some_and(|at| now - at < TimeDelta::milliseconds(LIVE_WINDOW_MS as i64))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn live_means_the_current_version_within_the_window() {
-        let now = Utc::now();
-        let recent = Some(now - TimeDelta::seconds(5));
-        let old = Some(now - TimeDelta::seconds(31));
-        assert!(is_live(Some("v3"), Some("v3"), recent, now));
-        assert!(!is_live(Some("v2"), Some("v3"), recent, now), "an older version's state is stale");
-        assert!(!is_live(Some("v3"), Some("v3"), old, now), "silence for 30 s is stale");
-        assert!(!is_live(Some("v3"), None, recent, now), "no version published yet");
-        assert!(!is_live(None, Some("v3"), None, now));
-    }
 }

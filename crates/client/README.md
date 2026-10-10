@@ -2,14 +2,14 @@
 
 The [Space Station](https://github.com/teamofsilicons/space-station) interface, in Rust. Two
 halves, one dependency: **recording** sends events to a table, **managing** is everything else —
-orgs, tables, space windows, notifications, webhooks, keys and queries.
+account tables, space windows, notifications, webhooks, keys and queries.
 
 Everything Space Station can do is a method here. The `spacestation` command is a shell over this
 crate and has no capability of its own; the web app is a subset.
 
 ```toml
 [dependencies]
-space-station = "0.3"
+space-station = "0.4"
 ```
 
 ## Recording
@@ -30,7 +30,7 @@ default prints to stderr). `.url(..)` and `.home(..)` override `$SPACE_STATION_U
 
 ### Space Station telemetry
 
-Provision the ordinary `tos.spacestation` table once and keep its one-time key in
+Provision the ordinary `si:tos/spacestation` table once and keep its one-time key in
 `SPACE_STATION_TELEMETRY_KEY` or `<SILICON_HOME>/.space-station/telemetry.key`. Then use the same
 daemon and spool for context-rich events:
 
@@ -51,10 +51,10 @@ disabled so an application never fails to start because observability is unavail
 use space_station::{Auth, Space};
 
 let url = space_station::default_url();
-let auth = space_station::exchange(&url, slt, "tos")?;          // slt: what `iam silicon-login --app-id spacestation` printed
-let space = Space::new(&url, auth)?.org("tos");
+let auth = space_station::exchange(&url, slt)?;          // slt: what `silicon-accounts login --app spacestation -q` printed
+let space = Space::new(&url, auth)?;
 
-let key = space.create_table("orders", &["@c:alice", "tech"])?;   // the table key, shown exactly once
+let key = space.create_table("orders")?;   // the table key, shown exactly once
 let rows = space.query("SELECT count() FROM orders", &Default::default())?;
 let window = &space.windows()?[0];
 let link = space.window_url(&window.id)?;                       // graphs live in the app; this is the way there
@@ -62,49 +62,40 @@ let link = space.window_url(&window.id)?;                       // graphs live i
 
 This half is stateless: no file, no environment, no browser. `Auth` is a value you build, `Space`
 is a function of `(url, Auth)`, and nothing here ever rotates — the backend holds the session and
-refreshes it, so a 401 is final and means *sign in again*. `Auth` is `Serialize`/`Deserialize` so
+refreshes it. A confirmed expired or revoked session means *sign in again*. `Auth` is `Serialize`/`Deserialize` so
 it can be persisted verbatim, and `describe()` names what it is without revealing what it holds.
 
 | | for | credential |
 |---|---|---|
 | `Auth::session(sscli)` | a carbon or a silicon signed in from a terminal | the `sscli-` session the backend minted, holds and refreshes |
 | `Auth::access_token(t)` | window and processor code | a `spacewindow-` token |
-| `Auth::api_key(k)` | a program acting for the org | an `apikey-` key |
+| `Auth::api_key(k)` | a program acting for the account | an `apikey-` key |
 
-Nothing here talks to IAM, and nothing here ever prompts for, receives or stores an IAM
-credential — not a silicon's token, not a bearer, not a refresh token. Two functions produce a
-session without keeping one:
+The client never receives an STK, Accounts access token, or refresh token. Two functions produce
+a session without storing it:
 
-- `space_station::exchange(url, slt, org)` spends a **short-lived token** — what `iam login
-  --app-id spacestation --grant-org <org>` or `iam silicon-login --app-id spacestation` prints,
-  two minutes old at most and good for one exchange — at `POST /api/auth/session {slt, org}` and
-  returns the `Auth::session` the backend minted for it, bound to `org`. Anything that is not a
-  short-lived token is refused before it leaves the machine as `Error::Local("not a short-lived
-  token…")`: a silicon's `stk-` token, the Application's `ask_` secret, an IAM bearer (`sat_`,
-  `cat_`, `oat_`) or refresh token (`rft_`, `ort_`), and Space Station's own secrets. Only the
-  `oac_` token IAM minted to be handed over goes through.
-- `space_station::login(url, org, visit)` is the Carbon browser flow: it binds a loopback port
-  and calls `visit(link)` so you can open or print the link. The backend exchanges the SLT and
-  verifies the selected identity before redirecting that SLT to loopback. The client checks
-  callback state and redeems the backend's receipt at `/auth/session`, receiving `Auth::session`
-  without a second IAM exchange. It never opens a browser itself.
+- `space_station::exchange(url, slt)` sends an app-bound `slt_` token from
+  `silicon-accounts login --app spacestation -q` to `POST /api/auth/session {slt}`. The backend
+  exchanges it with Accounts and returns a stable `Auth` carrying its absolute session expiry.
+- `space_station::login(url, visit)` opens a loopback listener and calls `visit(link)` so the host
+  can open or print the sign-in URL. The backend uses authorization code and PKCE, then redirects
+  a one-time handoff to loopback. The client checks state and exchanges `{code, state}` for a
+  session. It never opens a browser itself.
 
-A session is bound to exactly one account and organization, and every org call needs
-`.org("tos")`. That argument cannot change the session's organization. Keep separate `Auth`
-values for separate contexts and bind requests and cached data to the originating value.
-The CLI does this with `--profile` and separate stores per backend URL.
-
-The backend refreshes the session while IAM permits it. Expiry or revocation returns
-`Error::Api { status: 401, .. }`; obtain a fresh SLT or start `login` again. IAM 5 requires a
-fresh login for legacy sessions; another login never expands an existing session to more orgs.
+Every request acts as the credential's carbon or silicon account. Keep separate `Auth` values
+for separate accounts. The CLI isolates profiles and backend URLs automatically. Serialize
+`Auth` to persist the session until expiry or logout; `expires_at()` exposes its server-issued
+expiration and `is_expired()` checks it without a network call. Temporary transport failures
+must not discard an unexpired session. The backend refreshes Accounts
+access tokens while the absolute session lifetime remains valid.
 
 `Space` is one method per operation, synchronous, each returning a typed value or `Error`:
 
 ```
-orgs() me() app_url()                                   whoami and where the UI lives
-tables() table(id) create_table(id, access) -> Key      set_table_access(id, access)
+me() app_url()                                   whoami and where the UI lives
+tables() table(id) create_table(id) -> Key
 rotate_table_key(id) -> Key  delete_table(id)  overview(window)
-windows() window(id) create_window(name, access) update_window(id, name, access) delete_window(id)
+windows() window(id) create_window(name) update_window(id, name) delete_window(id)
 versions(id) publish(id, name, processor, renderer) window_state(id)
 run_window(id, runtime_dir, on_line) window_tool(id, runtime_dir, name, args) window_url(id)
 logout()
@@ -116,15 +107,13 @@ access_token() rotate_access_token()
 query(sql, restrict) dev_errors()
 ```
 
-`me()` is `Identity { kind, id, org, tags }` — IDs are `c:<handle>` or `si:<handle>`, and
-organization authority stays in `org`; neither actor kind nor organization is inferred from a colon.
-A refused request is `Error::Api { status, code, message }`; branch on `code`, which is snake_case
-and stable, never on the message. A `status` of 401 is final — there is nothing here
-to retry with — so a program tells its person to sign in again. Nothing that needs pixels is
-invented here: `window_url(id)` hands back the page instead.
+`me()` returns `Identity { kind, id, uuid, context_id, expires_at }`. UUID identifies an account
+permanently; `c:<handle>` and `si:<handle>` are display IDs that can change. A refused request is
+`Error::Api { status, code, message }`; branch on the stable code. Confirmed expiry or revocation
+requires a fresh sign-in, while temporary failures preserve saved credentials. `window_url(id)`
+returns the account-bound browser page.
 
-`publish` refuses code carrying a secret — Space Station's or IAM's, the same shapes `exchange`
-refuses — before it leaves the machine, and `run_window` unpacks
+`publish` refuses code carrying a secret — Space Station's or Silicon Accounts' credentials — before it leaves the machine, and `run_window` unpacks
 the mission-control runtime into the directory you name and runs the window's processor in `node`
 with only `PATH`, the access token and Windows `SystemRoot` in its environment, one output line per callback,
 until the window goes idle. Its callback receives `WindowOutput::Json(line)` for SiliconJSON

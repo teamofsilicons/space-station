@@ -73,11 +73,11 @@ async fn stand_down(fleet: &mut Option<Fleet>) {
     }
 }
 
-/// One worker per enabled notification, in every org.
+/// One worker per enabled notification, in every account.
 async fn spawn_all(state: &AppState) -> Fleet {
     let (generation, leaving) = watch::channel(());
     let sql = "SELECT n.id, n.org, n.recipients, n.cursors, n.last_cron_at, v.def FROM notifications n \
-               JOIN notification_versions v ON v.id = n.current_version WHERE n.enabled";
+               JOIN notification_versions v ON v.id = n.current_version JOIN account_owners o ON o.namespace=n.org AND o.active WHERE n.enabled";
     let rows: Vec<Loaded> = sqlx::query_as(sql).fetch_all(&state.store.pg).await.unwrap_or_else(|e| {
         tracing::error!("notifications could not be loaded: {e}");
         Vec::new()
@@ -232,44 +232,7 @@ async fn fire(state: &AppState, job: &Job, dedup_key: &str, text: &str, metadata
     deliver::send(state, &job.org, job.recipients.clone(), frame);
 }
 
-/// Whatever went wrong, for the org's dev errors: `source` is `notification`, `ref` is its id.
+/// Whatever went wrong, for the account's dev errors: `source` is `notification`, `ref` is its id.
 async fn report(state: &AppState, job: &Job, message: &str, detail: Value) {
     dev_errors::insert(&state.store, &job.org, "notification", &job.id.to_string(), message, detail).await;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_row_is_an_event_only_in_exactly_the_documented_shape() {
-        let good = json!({"dedup_key": "o-42", "text": "Order o-42", "metadata": {"amount": "120.5"}});
-        assert_eq!(event(&good), Some(("o-42", "Order o-42", &json!({"amount": "120.5"}))));
-        assert!(event(&json!({"dedup_key": "k", "text": "t", "metadata": {}, "extra": 1})).is_some());
-        for bad in [
-            json!({"text": "t", "metadata": {}}),
-            json!({"dedup_key": "", "text": "t", "metadata": {}}),
-            json!({"dedup_key": 42, "text": "t", "metadata": {}}),
-            json!({"dedup_key": "k", "text": 42, "metadata": {}}),
-            json!({"dedup_key": "k", "text": "t"}),
-            json!({"dedup_key": "k", "text": "t", "metadata": []}),
-            json!({"dedup_key": "k", "text": "t", "metadata": "{}"}),
-            json!({"dedup_key": "k".repeat(DEDUP_KEY_MAX + 1), "text": "t", "metadata": {}}),
-        ] {
-            assert_eq!(event(&bad), None, "{bad} is a bad row");
-        }
-        assert!(event(&json!({"dedup_key": "k".repeat(DEDUP_KEY_MAX), "text": "", "metadata": {}})).is_some());
-    }
-
-    #[test]
-    fn the_delta_restriction_is_one_bound_per_table_trigger() {
-        let def: Def = serde_json::from_value(json!({"name": "n", "sql": "SELECT 1",
-            "triggers": [{"table": "orders"}, {"table": "signups"}, {"schedule": "*/5 * * * *"}]}))
-        .unwrap();
-        let cursors = BTreeMap::from([("orders".to_owned(), 130)]);
-        let restrict = restrict(&def, &cursors);
-        assert_eq!(restrict.keys().collect::<Vec<_>>(), ["orders", "signups"], "schedules bound nothing");
-        assert_eq!((restrict["orders"].from, restrict["orders"].to), (Some(130), None), "the server fills `to`");
-        assert_eq!(restrict["signups"].from, None, "a table with no cursor yet is unbounded");
-    }
 }

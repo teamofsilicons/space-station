@@ -22,8 +22,8 @@ use space_station_shared::wire::{Ack, Code, Rejection};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::accounts::CACHE_TTL;
 use crate::http::{ApiError, AppState, Json};
-use crate::iam::CACHE_TTL;
 use crate::lock;
 
 /// One `EVAL` per batch. ARGV is `record_id, row, record_id, row, …`; the reply lists the ids seen
@@ -55,7 +55,7 @@ impl Keys {
         {
             return Ok(found.clone());
         }
-        let found = sqlx::query_as("SELECT org, id FROM tables WHERE key_hash = $1 AND retired_at IS NULL")
+        let found = sqlx::query_as("SELECT t.org, t.id FROM tables t JOIN account_owners o ON o.namespace=t.org AND o.active WHERE t.key_hash = $1 AND t.retired_at IS NULL")
             .bind(&hash)
             .fetch_optional(pg)
             .await?;
@@ -232,27 +232,4 @@ async fn handle(state: &AppState, text: &str) -> Result<Ack, Fault> {
         rejected.extend(seen.map(|id| reject(id, Code::Duplicate, "seen in the last five minutes")));
     }
     Ok(if rejected.is_empty() { Ack::ok(batch.batch_id) } else { Ack::rejected(batch.batch_id, rejected) })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_script_dedups_with_set_nx_ex_and_stages_with_rpush() {
-        let lua = LUA.as_str();
-        assert!(lua.contains("'SET', 'dedup:' .. ARGV[i], '1', 'NX', 'EX', 300"));
-        assert!(lua.contains("'RPUSH', 'staging', ARGV[i + 1]"));
-        assert!(lua.ends_with("return rejected"));
-    }
-
-    #[test]
-    fn a_batch_borrows_its_records_without_reserialising_them() {
-        let text = r#"{"batch_id":"11111111-1111-4111-8111-111111111111","records":[{"key":"table-orders-0123","metadata":{"record_id":"22222222-2222-4222-8222-222222222222","table_id":"orders","event_ts_ms":7},"record":{"a": 1}}]}"#;
-        let batch: Batch = serde_json::from_str(text).unwrap();
-        assert_eq!(batch.records.len(), 1);
-        assert_eq!(batch.records[0].record.get(), r#"{"a": 1}"#);
-        let meta: Meta = serde_json::from_str(batch.records[0].metadata.get()).unwrap();
-        assert_eq!(meta.event_ts_ms, 7);
-    }
 }

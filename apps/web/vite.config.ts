@@ -8,10 +8,6 @@ export default defineConfig({
         target: process.env.SS_BACKEND_URL || "http://localhost:8080",
         changeOrigin: true,
       },
-      "/webhooks/api": {
-        target: process.env.SS_BACKEND_URL || "http://localhost:8080",
-        changeOrigin: true,
-      },
     },
   },
 });

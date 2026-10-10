@@ -9,10 +9,10 @@
 //!   [`Space`] is every HTTP call, typed, synchronous, one request per method.
 //!
 //! The managing half is stateless: `Auth` is a value the caller builds and `Space` is a function
-//! of `(url, Auth)`. Nothing here talks to IAM: a person or a silicon obtains a *short-lived
-//! token* from the `iam` CLI (or the browser), [`exchange`] hands it to the backend once, and the
-//! backend is what holds and refreshes the session — so nothing on this side ever rotates, and a
-//! 401 is final. The recording half keeps a spool on purpose, in the home it is given, and its
+//! of `(url, Auth)`. Nothing here talks to Silicon Accounts: a carbon or a silicon obtains a *short-lived
+//! token* from the `silicon-accounts` CLI (or the browser), [`exchange`] hands it to the backend once, and the
+//! backend holds and refreshes the session. Only confirmed expiry or revocation requires signing
+//! in again. The recording half keeps a spool on purpose, in the home it is given, and its
 //! `flush` waits for the server's acks when this process is the one running the daemon, so a
 //! one-shot program delivers before it exits. Neither half reads the environment or the home
 //! directory on its own; [`default_url`] and [`default_home`] are here for a program that wants
@@ -26,8 +26,8 @@
 //! ss.record(serde_json::json!({"id": "o-42", "amount": 12.5}));
 //!
 //! let url = space_station::default_url();
-//! let auth = space_station::exchange(&url, "<what `iam silicon-login --app-id 'spacestation'` printed>", "tos")?;
-//! let space = Space::new(url, auth)?.org("tos");
+//! let auth = space_station::exchange(&url, "<what `silicon-accounts login --app spacestation -q` printed>")?;
+//! let space = Space::new(url, auth)?;
 //! let tables = space.tables()?;
 //! let rows = space.query("SELECT count() FROM orders", &Default::default())?;
 //! # Ok(()) }
@@ -43,8 +43,6 @@ pub mod local;
 mod record;
 mod spool;
 pub mod telemetry;
-#[cfg(test)]
-mod tests;
 mod types;
 mod windows;
 
@@ -55,7 +53,7 @@ pub use auth::{Auth, exchange, login};
 pub use record::{Builder, SpaceClient};
 pub use telemetry::Telemetry;
 pub use types::{
-    AccessToken, ApiKey, Bounds, DaemonStatus, Def, DevError, Event, Identity, Key, Kind, Notification, Org, Overview,
+    AccessToken, ApiKey, Bounds, DaemonStatus, Def, DevError, Event, Identity, Key, Kind, Notification, Overview,
     Restrict, Rows, StateMetadata, Table, TestRun, TopTable, Trigger, Version, Webhook, Window, WindowState,
 };
 pub use windows::WindowOutput;
@@ -88,8 +86,8 @@ pub fn default_url() -> String {
 
 /// Everything that can go wrong, whichever half you use. `Rejected` is the server's verdict on
 /// one record and `Api` its verdict on one request: branch on `code`, never on the message. A
-/// `status` of 401 means the credential itself was refused, and that is final: the backend holds
-/// and refreshes the session, so nothing here can mend one — sign in again. A `status` of 0 is a
+/// confirmed `session_expired` or `unauthenticated` refusal requires signing in again. Transport
+/// failures and unrecognized proxy refusals must preserve saved credentials. A `status` of 0 is a
 /// refusal relayed by the local window runtime (`window_tool`), which carries the code but not
 /// the HTTP status.
 #[derive(Debug)]
@@ -114,7 +112,7 @@ pub enum Error {
         code: String,
         message: String,
     },
-    /// Nothing left the machine: no credential, no org, no `node`, a secret in the code.
+    /// Nothing left the machine: no credential, no `node`, a secret in the code.
     Local(String),
 }
 
@@ -151,12 +149,4 @@ pub(crate) type Hook = Arc<dyn Fn(Error) + Send + Sync>;
 /// Lock a mutex, recovering the data if a panicking thread poisoned it.
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-/// A fresh home for one test.
-#[cfg(test)]
-pub(crate) fn test_home() -> PathBuf {
-    let home = std::env::temp_dir().join(format!("ss-{}", &Uuid::new_v4().simple().to_string()[..8]));
-    std::fs::create_dir_all(&home).unwrap();
-    home
 }

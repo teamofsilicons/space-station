@@ -5,17 +5,14 @@ tables and rotates their keys, writes and publishes space windows, manages notif
 webhooks, access tokens and API keys, sends records, runs queries, and runs the ingest daemon. Everything the
 app can do is here, and a few things only here.
 
-Install on macOS or Linux (Intel/x86_64 and ARM64), without Rust or sudo:
+Install with Silicon Apps:
 
 ```sh
-curl -fsSL https://spacestation.teamofsilicons.com/install.sh | sh && export PATH="$HOME/.local/bin:$PATH"
+silicon-apps install spacestation
 ```
 
-The installer verifies checksums, installs under `~/.local`, and sets up PATH for future
-terminals. It reuses compatible Node.js or installs a private runtime for `windows run` and
-`windows tool`. On Linux distributions unsupported by official Node.js builds (such as Alpine),
-install Node >=22.13 through the OS package manager to use those two commands; the native CLI
-itself is statically linked on Linux. macOS binaries require macOS 11 or newer.
+Silicon Apps chooses the package for your platform and keeps it updated. The native CLI runs on
+macOS, Linux and Windows. `windows run` and `windows tool` also require Node >=22.13.
 
 Build from a checkout with `cargo install --path crates/cli --locked`.
 
@@ -32,8 +29,7 @@ app is a subset of it.
 
 The split is also one of state. The package is stateless: `Auth` is a value, `Space` is a
 function of `(url, Auth)`, and neither reads a file or the environment. The CLI is the stateful
-shell around it: it owns `<home>/iam5/<server-hash>/<profile>/auth.json` — the one signed-in credential and the org
-it works in — it reads the `SPACE_STATION_*` variables, and it opens the browser. Nothing on your
+shell around it: it owns `<home>/accounts/<server-hash>/<profile>/auth.json` — the signed-in credential and its account identity — it reads the `SPACE_STATION_*` variables, and it opens the browser. Nothing on your
 machine ever rotates a token: the session and its refresh live in the backend.
 
 Where something genuinely needs pixels — a live renderer, a chart, a video — it stays in the app,
@@ -48,92 +44,55 @@ key.txt` captures the key and nothing more. A failure is `error: <code>: <messag
 exit code 1; `code` is the backend's own snake_case code, or `local`, `transport`, `io` for what
 never reached it.
 
-**The org.** `--org <org>`, else `$SPACE_STATION_ORG`, else the org stored with the credential. A
-session is bound to the one org it signed in to (see [Credentials](/docs/credentials)), so that is
-the org to name at `login` or `auth`. Both `c:alice` and `si:bot` keep their organization separate
-from their ID. With no saved or explicit org, login saves IAM's selected organization. Other
-commands require an org and report how to set one when it is missing.
-
 ## Sign in
 
-```
-spacestation login [--org o] [--no-browser]   a carbon with a browser: IAM signs you in, a session bound to o comes back on loopback
-spacestation auth <slt> [--org o]             a short-lived token the iam CLI minted for this Application; carbon or silicon
-spacestation logout                           forgets the stored credential; ends the terminal session at the server
-spacestation whoami                           id, kind, org, tags
-spacestation orgs                             the orgs Space Station knows you in
-spacestation use <org>                        verify the selected session's org
+```sh
+spacestation login                           # Carbon: opens Silicon Accounts in a browser
+silicon-accounts login --app spacestation -q | spacestation auth -  # Silicon: exchange a fresh SLT
+spacestation whoami                          # id, uuid, kind and session expiry
+spacestation logout                          # end the selected terminal session
 ```
 
-**A carbon with a browser** runs `login`. It opens a listener on `127.0.0.1`, sends you to
-Silicon IAM through Space Station for the org you named, and the callback comes back to that port
-with the **short-lived token** IAM minted (`?slt=…&state=…`); the CLI then spends it exactly as
-`auth` would, at `POST /api/auth/session`, and stores the `sscli-…` session that comes back — so
-the credential itself is never in a URL, and what the browser saw dies in two minutes. It is its
-own session row, so signing out of the terminal leaves your browser signed in, and the reverse.
-`--no-browser` prints the URL to open somewhere else and waits for the same redirect. The backend
-refreshes the session for as long as it is used.
+`login --no-browser` prints the sign-in URL and waits for the same loopback handoff. Carbon
+sign-in uses OAuth with PKCE; Silicon sign-in uses an app-bound `slt_` token that expires after
+two minutes and can be exchanged once. Space Station never receives an STK.
 
-**Without a browser** — a silicon always, a carbon on a remote machine — run `auth` with a
-short-lived token the `iam` CLI minted for this Application:
+Every command acts as the account in its credential. The session stays saved until it expires,
+is revoked or you log out; network and service failures do not delete it. Browser and CLI
+sessions are independent. Use `--profile personal` or `SPACE_STATION_PROFILE` to keep another
+account without replacing the current one. Credentials are stored with owner-only permissions
+under `<home>/accounts/<server-hash>/<profile>/auth.json` and replaced atomically.
 
-```
-iam login --app-id 'spacestation' --grant-org tos     # a carbon: IAM signs you in and prints the token
-iam silicon-login --app-id 'spacestation'       # a silicon: the iam CLI holds the stk-, and it never leaves it
-spacestation auth <slt> --org tos
-```
-
-The token is the argument, `-` to read it from stdin, or `$SPACE_STATION_TOKEN`. It is good for
-two minutes and for exactly one exchange, which is the whole point: `auth` posts it to Space
-Station, which exchanges it with IAM and hands back the same `sscli-` session a browser login
-would. Nothing prompts, and nothing here takes an IAM bearer, a refresh token, a silicon's
-long-lived `stk-` or an Application secret — `auth` wants a short-lived token and nothing else.
-
-**One session, one account and org.** The session stays bound to the organization selected at
-login. `--org` and `use` cannot retarget an existing session. Keep another context with
-`spacestation --profile personal login --org other`; `--profile work` returns to the work context.
-`SPACE_STATION_PROFILE` also selects a profile; the default is `default`.
-
-**`logout`** ends only the selected profile's session. Credentials live in
-`<home>/iam5/<server-hash>/<profile>/auth.json`, with owner-only permissions and atomic writes.
-Backend URLs have separate stores, so a testing server cannot reuse production credentials.
-The base home is `$SILICON_HOME/.space-station`, else `$SPACE_STATION_HOME`, else
-`~/.space-station`. The recording spool remains shared across profiles. Old root-level
-credentials are retained but require a fresh login after the IAM 5 migration.
-
-An `apikey-` or `spacewindow-` credential can act instead of the stored one — `--api-key`,
-`--access-token`, or `$SPACE_STATION_API_KEY` / `$SPACE_STATION_ACCESS_TOKEN` — and, not being
-stored, it carries no stored org, so name one with `--org`.
+An `apikey-` or `spacewindow-` credential can act instead of the saved session with `--api-key`
+or `--access-token` (or `SPACE_STATION_API_KEY` / `SPACE_STATION_ACCESS_TOKEN`). These credentials
+already identify the account that owns them.
 
 ## Commands
 
-Global options, valid before or after the subcommand: `--org <org>`, `--json`, `--api-key <key>`,
+Global options, valid before or after the subcommand: `--json`, `--api-key <key>`,
 `--access-token <token>`, `--profile <name>`.
 
 ```
-login [--no-browser]                            a carbon: opens Space Station in a browser and keeps the session, bound to --org
-auth [<slt>]                                    a short-lived token from the iam CLI; `-` reads stdin; bound to --org
+login [--no-browser]                            a carbon: opens Space Station in a browser and keeps the session, for the selected account
+auth [<slt>]                                    a short-lived token from the silicon-accounts CLI; `-` reads stdin; for the selected account
 logout                                          forget the stored credential, and end the terminal session at the server
-whoami                                          who this credential is in this org: id, kind, org and tags
-orgs                                            the orgs Space Station knows you in
-use <org>                                       verify this is the selected session's org
+whoami                                          who this credential is: id, uuid, kind and expiry
 record [<JSON>|-] --table-key <key>             send one JSON object; key also from SPACE_STATION_TABLE_KEY, no login needed
 
 tables ls                                       every table you may see, with its records and its watermark
        get <id>                                 one table
-       create <id> [--access a,b]               prints the table key once
-       access <id> --access a,b                 replaces who may use the table
+       create <id>               prints the table key once
        rotate <id>                              prints the new key once; the old one dies
        rm <id>                                  the table and its records
        overview [--window 5h]                   1m 5m 15m 1h 5h 1d 7d 30d
 ```
 
-The `tos` organization owns Space Station's own telemetry table like any other table. Provision
+The `si:tos` account owns Space Station's own telemetry table like any other table. Provision
 it once with the normal command, store the one-time key in the deployment secret store, and send
 events through the same `record`/daemon path:
 
 ```sh
-spacestation --org tos tables create spacestation > spacestation.table-key
+spacestation tables create spacestation > spacestation.table-key
 chmod 600 spacestation.table-key
 ```
 
@@ -141,15 +100,15 @@ Telemetry records should be self-contained and include at least `source`, `step`
 `event`, and a context object. The daemon adds the normal record and system metadata; no separate
 telemetry transport or privileged table path exists.
 
-The Space Station frontend uses two additional `tos` tables: `spacestationfrontendanalytics` for
+The Space Station frontend uses two additional `si:tos` tables: `spacestationfrontendanalytics` for
 sampled automatic browser analytics and `spacestationfrontendevents` for explicit product events.
 The browser never receives their table keys; its authenticated session posts batches to the
 frontend collector. Install the reusable package with `npm i @teamofsilicons/space-station-web`.
 
 ```
-windows ls | get <id>                           a summary: id, name, access, current version and its author
-        create <name> [--access a,b]            name under 20 characters
-        edit <id> [--name n] [--access a,b]     rename, change who may open it, or both; prints the summary
+windows ls | get <id>                           a summary: id, name, current version and its author
+        create <name>            name under 20 characters
+        edit <id> [--name n]     rename; prints the summary
         code <id>                               the current version's processor and renderer
         rm <id>                                 the window, its versions and its state
         versions <id>                           every published version: name, author, date
@@ -167,7 +126,7 @@ notifications ls | get <id>
         subscribe <id> | unsubscribe <id>       adds or removes you from recipients
         test <id>                               rows since the cursors, without advancing them
 
-webhooks ls | create <url> | rm <id>            the org's webhooks; create prints the secret once; rm also
+webhooks ls | create <url> | rm <id>            your account's webhooks; create prints the secret once; rm also
                                                 drops webhook:<id> from every notification's recipients
 webhook set <url> | rm                          this silicon's own delivery webhook; set prints its secret once
 
@@ -178,7 +137,7 @@ keys ls
 token show | rotate                             your access token, for space-station-dev and windows run
 
 query "<sql>"                                   {rows, watermarks}
-errors                                          what went wrong server-side for this org
+errors                                          what went wrong server-side for this account
 daemon [run | status]                           the ingest daemon: foreground (the default), or is one running
 ```
 
@@ -194,7 +153,7 @@ spacestation tables restore orders
 ```
 
 Retirement blocks ingestion through the table's key and hides the table from the default list.
-It preserves history, access rules and window references; the web app lists it under **Retired**.
+It preserves history, account ownership and window references; the web app lists it under **Retired**.
 Restoration re-enables writes. Already accepted records can finish flushing after retirement.
 
 ## Deleting
@@ -213,7 +172,7 @@ it shows up in `spacestation errors`.
 For a silicon, a Space Window *is* the processor's output. `windows ls`, `get` and `edit` print
 a summary and never the code — a listing of twenty windows would otherwise be twenty programs —
 and `windows code <id>` prints the current version's processor and renderer, which is how a
-silicon reads a window it has access to. `windows run` fetches your access
+silicon reads one of its windows. `windows run` fetches your access
 token, unpacks the runtime bundled in the binary into `~/.space-station/runtime/` and starts its
 host in Node with only `PATH` and `SPACE_STATION_ACCESS_TOKEN` in the environment; the host
 spawns the processor in a credential-less child process (`node --permission`, empty environment)
@@ -225,7 +184,7 @@ starting anything; `windows tool` runs one tool against it.
 checks again and answers `secret_in_code`.
 
 The renderer is the one thing a terminal cannot show, so `windows open <id>` prints its page —
-`{app}/o/{org}/windows/{id}` — and opens it when a browser is available. `get`, `create`, `edit`,
+`{app}/a/{uuid}/windows/{id}` — and opens it when a browser is available. `get`, `create`, `edit`,
 `publish` and `run` print the same link on stderr.
 
 ## Recording from the CLI
@@ -254,15 +213,12 @@ that this would exceed the 104/108-byte cap on unix socket paths — a short
 | `SPACE_STATION_URL` | `https://backend.spacestation.teamofsilicons.com` | the Space Station origin (`/api` is appended) |
 | `SILICON_HOME` | `~/.silicon/.space-station` | base directory for this app's `auth.json`, runtime, spool, daemon lock and socket |
 | `SPACE_STATION_HOME` | — | compatibility override used only when `SILICON_HOME` is unset |
-| `SPACE_STATION_PROFILE` | `default` | independent saved account/organization context |
-| `SPACE_STATION_ORG` | — | the org to work in, under `--org` and over the one stored with the credential |
+| `SPACE_STATION_PROFILE` | `default` | independent saved account context |
 | `SPACE_STATION_TOKEN` | — | the short-lived token for `auth`, instead of the argument |
 | `SPACE_STATION_API_KEY` | — | act as this `apikey-` key |
 | `SPACE_STATION_ACCESS_TOKEN` | — | act as this `spacewindow-` token |
-| `SPACE_STATION_UPDATE_URL` | GitHub Releases `latest/download/SHA256SUMS` | signed update manifest URL; its detached `.sig` is verified before install |
-| `SPACE_STATION_UPDATE` | enabled | set to `0` or `false` to opt out of hourly daemon updates |
 
-The CLI reads no `.env` file, never talks to IAM itself, and defaults to the public host: point
+The CLI reads no `.env` file, never talks to Silicon Accounts itself, and defaults to the public host: point
 it at a local stack explicitly.
 
 ## Dev errors

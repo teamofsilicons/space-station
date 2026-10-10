@@ -4,16 +4,12 @@
 //!
 //! What lives in this crate: the tree, the flags, the files an argument names, the links that
 //! let a terminal hand off to the web app, and — in `store` — `~/.space-station/auth.json`: the
-//! one signed-in session and the org it is bound to. Nothing here ever prompts or takes a
-//! credential: a person signs in through the browser, or a person or a silicon hands over the
-//! short-lived token the `iam` CLI minted, and the backend keeps the session it exchanges it for.
+//! one signed-in account session. Nothing here ever prompts or takes a
+//! credential: a person signs in through the browser, or a carbon or a silicon hands over the
+//! short-lived token the `silicon-accounts` CLI minted, and the backend keeps the session it exchanges it for.
 
 mod out;
 mod store;
-#[cfg(test)]
-mod tests;
-#[cfg(all(not(windows), not(feature = "honeycomb-managed")))]
-mod updater;
 
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -31,11 +27,9 @@ const TABLES: &[Col] = &[
     ("RECORDS", "records"),
     ("WATERMARK", "watermark"),
     ("CREATED_BY", "created_by"),
-    ("ACCESS", "access"),
     ("RETIRED_AT", "retired_at"),
 ];
-const WINDOWS: &[Col] =
-    &[("ID", "id"), ("NAME", "name"), ("VERSION", "version.name"), ("CREATED_BY", "created_by"), ("ACCESS", "access")];
+const WINDOWS: &[Col] = &[("ID", "id"), ("NAME", "name"), ("VERSION", "version.name"), ("CREATED_BY", "created_by")];
 const NOTIFICATIONS: &[Col] = &[
     ("ID", "id"),
     ("NAME", "def.name"),
@@ -46,7 +40,6 @@ const NOTIFICATIONS: &[Col] = &[
 const WEBHOOKS: &[Col] = &[("ID", "id"), ("URL", "url"), ("CREATED_BY", "created_by"), ("CREATED_AT", "created_at")];
 const KEYS: &[Col] =
     &[("ID", "id"), ("SCOPES", "scopes"), ("CREATED_BY", "created_by"), ("LAST_USED_AT", "last_used_at")];
-const ORGS: &[Col] = &[("ID", "id"), ("NAME", "name")];
 const APP_ID: &str = "spacestation";
 const REPOSITORY: &str = "https://github.com/teamofsilicons/space-station";
 const DOCS: &str = "https://spacestation.teamofsilicons.com/docs/cli";
@@ -54,18 +47,15 @@ const CRATE: &str = "https://crates.io/crates/space-station";
 
 /// The globals that also come from the environment are read by hand, not through clap's `env`:
 /// clap counts a value it took from a variable as given and then draws it into every usage line
-/// as if it were required (`windows run --org <ORG> <ID>`), where `[OPTIONS]` is the truth.
+/// as if it were required (`windows run --profile <PROFILE> <ID>`), where `[OPTIONS]` is the truth.
 #[derive(Parser)]
 #[command(name = "spacestation", version, about = "Space Station from the terminal: all of the space-station crate")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
-    /// Independent account/organization profile (or $SPACE_STATION_PROFILE).
+    /// Independent account profile (or $SPACE_STATION_PROFILE).
     #[arg(long, global = true)]
     profile: Option<String>,
-    /// The org to work in; else $SPACE_STATION_ORG, else the stored one. Login defaults to IAM's selection
-    #[arg(long, global = true)]
-    org: Option<String>,
     /// Print the JSON of a list instead of columns
     #[arg(long, global = true)]
     json: bool,
@@ -79,10 +69,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Sign in through IAM, either with a short-lived token or through the browser.
+    /// Sign in through Silicon Accounts, either with a short-lived token or through the browser.
     Login {
-        /// The short-lived token minted by `iam login --app-id`; `-` reads it from stdin.
+        /// The short-lived token minted by `silicon-accounts login --app spacestation -q`; `-` reads it from stdin.
         token: Option<String>,
+        /// Read a short-lived token from stdin
+        #[arg(long, conflicts_with = "token")]
+        slt_stdin: bool,
         /// Print the link instead of opening it
         #[arg(long)]
         no_browser: bool,
@@ -90,8 +83,7 @@ enum Cmd {
         #[arg(long)]
         status: bool,
     },
-    /// Sign in with a short-lived token from `iam login --app-id 'spacestation' --org <org>` or
-    /// `iam silicon-login --app-id 'spacestation'`; never prompts
+    /// Sign in with a short-lived token from `silicon-accounts login --app spacestation -q`
     Auth {
         /// The short-lived token; `-` reads it from stdin; else $SPACE_STATION_TOKEN
         #[arg(value_name = "SLT")]
@@ -99,13 +91,9 @@ enum Cmd {
     },
     /// Forget the stored credential, and end a terminal session at the server
     Logout,
-    /// Who this credential is in this org: id, kind, org and tags
+    /// The signed-in account: immutable UUID, public id, and carbon/silicon kind
     Whoami,
-    /// The orgs you belong to
-    Orgs,
-    /// Work in this org from now on
-    Use { org: String },
-    /// Tables: ls, get, create, access, rotate, rm, overview
+    /// Tables: ls, get, create, rotate, rm, overview
     #[command(subcommand)]
     Tables(Tables),
     /// Space windows: ls, get, code, create, edit, rm, versions, publish, run, json, tool, open
@@ -114,7 +102,7 @@ enum Cmd {
     /// Notifications: ls, get, create, edit, rm, events, subscribe, unsubscribe, test
     #[command(subcommand)]
     Notifications(Notifications),
-    /// The org's webhooks: ls, create, rm
+    /// The account's webhooks: ls, create, rm
     #[command(subcommand)]
     Webhooks(Webhooks),
     /// This silicon's own delivery webhook: set, rm
@@ -126,7 +114,7 @@ enum Cmd {
     /// The access token processors use: show, rotate
     #[command(subcommand)]
     Token(Token),
-    /// Run a read-only SQL query over the org's tables
+    /// Run a read-only SQL query over the account's tables
     Query { sql: String },
     /// Send one JSON record with a table key; DATA defaults to stdin
     Record {
@@ -137,10 +125,10 @@ enum Cmd {
         #[arg(long)]
         table_key: Option<String>,
     },
-    /// What went wrong server-side for this org
+    /// What went wrong server-side for this account
     Errors,
-    /// Identify this IAM application and link its source, docs and Rust package
-    Iam,
+    /// Identify this Silicon App and its Accounts sign-in, source, docs and Rust package
+    Accounts,
     /// Open a pre-filled GitHub issue with a reproducible bug report; --pr-ref may link a fix
     #[command(alias = "report-bug", alias = "bug-report")]
     Bug {
@@ -174,18 +162,7 @@ enum Tables {
     /// One table
     Get { id: String },
     /// Create a table and print its key once
-    Create {
-        id: String,
-        /// @actors and tags that may use it, comma separated
-        #[arg(long, value_delimiter = ',')]
-        access: Vec<String>,
-    },
-    /// Replace who may use the table
-    Access {
-        id: String,
-        #[arg(long, value_delimiter = ',', required = true)]
-        access: Vec<String>,
-    },
+    Create { id: String },
     /// Replace the table key and print the new one once
     Rotate { id: String },
     /// Delete the table; its records go too
@@ -211,19 +188,12 @@ enum Windows {
     /// The processor and renderer of the version a window runs
     Code { id: String },
     /// Create a window; the name is what the UI shows, under 20 characters
-    Create {
-        name: String,
-        /// @actors and tags that may open it, comma separated
-        #[arg(long, value_delimiter = ',')]
-        access: Vec<String>,
-    },
-    /// Rename a window, change who may open it, or both
+    Create { name: String },
+    /// Rename a window
     Edit {
         id: String,
         #[arg(long)]
-        name: Option<String>,
-        #[arg(long, value_delimiter = ',')]
-        access: Option<Vec<String>>,
+        name: String,
     },
     /// Delete the window with its versions and its state
     Rm { id: String },
@@ -273,7 +243,7 @@ enum Notifications {
 
 #[derive(Subcommand)]
 enum Webhooks {
-    /// Every webhook of the org
+    /// Every webhook of the account
     Ls,
     /// Add a webhook and print its signing secret once
     Create { url: String },
@@ -291,7 +261,7 @@ enum Webhook {
 
 #[derive(Subcommand)]
 enum Keys {
-    /// Every api key of the org and when it was last used
+    /// Every api key of the account and when it was last used
     Ls,
     /// Create an api key and print it once
     Create {
@@ -320,7 +290,7 @@ enum Daemon {
 
 /// Which credential a run acts with, for what a 401 means afterwards.
 enum Acting {
-    /// The stored session: a 401 ends it, so it is forgotten and the next command says so.
+    /// The stored session; only confirmed expiration or revocation removes it.
     Stored,
     ApiKey,
     AccessToken,
@@ -336,20 +306,13 @@ fn main() {
         args[i + 1] = "--status".into();
     }
     let mut cli = Cli::parse_from(args);
-    cli.org = setting(cli.org, "SPACE_STATION_ORG");
     cli.profile = setting(cli.profile, "SPACE_STATION_PROFILE");
     cli.api_key = setting(cli.api_key, "SPACE_STATION_API_KEY");
     cli.access_token = setting(cli.access_token, "SPACE_STATION_ACCESS_TOKEN");
     let acting = match (&cli.cmd, &cli.api_key, &cli.access_token) {
-        (
-            Cmd::Login { .. }
-            | Cmd::Auth { .. }
-            | Cmd::Logout
-            | Cmd::Use { .. }
-            | Cmd::Daemon { .. }
-            | Cmd::Record { .. },
-            ..,
-        ) => Acting::Nobody,
+        (Cmd::Login { .. } | Cmd::Auth { .. } | Cmd::Logout | Cmd::Daemon { .. } | Cmd::Record { .. }, ..) => {
+            Acting::Nobody
+        }
         (_, Some(_), _) => Acting::ApiKey,
         (_, None, Some(_)) => Acting::AccessToken,
         (_, None, None) => Acting::Stored,
@@ -381,13 +344,15 @@ fn main() {
     }
     if let Err(e) = result {
         let refused = match (acting, &e) {
-            (Acting::Stored, Error::Api { status: 401, .. })
-                if prior_auth
-                    .as_ref()
-                    .is_some_and(|seen| auth_home.as_ref().is_ok_and(|home| store::expire(home, seen).is_ok())) =>
+            (Acting::Stored, ref error)
+                if session_ended(error)
+                    && prior_auth.as_ref().is_some_and(|seen| {
+                        auth_home.as_ref().is_ok_and(|home| store::forget(home, Some(seen)).is_ok())
+                    }) =>
             {
                 out::EXPIRED
             }
+            (Acting::Stored, _) => out::SESSION_UNVERIFIED,
             (Acting::ApiKey, _) => out::KEY_REFUSED,
             (Acting::AccessToken, _) => out::TOKEN_REFUSED,
             _ => out::SIGN_IN,
@@ -403,8 +368,6 @@ fn command_name(cmd: &Cmd) -> &'static str {
         Cmd::Auth { .. } => "auth",
         Cmd::Logout => "logout",
         Cmd::Whoami => "whoami",
-        Cmd::Orgs => "orgs",
-        Cmd::Use { .. } => "use",
         Cmd::Tables(_) => "tables",
         Cmd::Windows(_) => "windows",
         Cmd::Notifications(_) => "notifications",
@@ -415,19 +378,24 @@ fn command_name(cmd: &Cmd) -> &'static str {
         Cmd::Query { .. } => "query",
         Cmd::Record { .. } => "record",
         Cmd::Errors => "errors",
-        Cmd::Iam => "iam",
+        Cmd::Accounts => "accounts",
         Cmd::Bug { .. } => "bug",
         Cmd::Daemon { .. } => "daemon",
     }
 }
 
 /// A flag, else its variable; a blank from either is absent — `set -a; . ./.env` exports
-/// `SPACE_STATION_ACCESS_TOKEN=` bare, and that must not become an empty bearer or org.
+/// `SPACE_STATION_ACCESS_TOKEN=` bare, and that must not become an empty bearer.
 fn setting(flag: Option<String>, var: &str) -> Option<String> {
     flag.or_else(|| env::var(var).ok()).filter(|v| !v.trim().is_empty())
 }
 
-fn login_status(home: &Path, url: &str, org: Option<String>, _as_json: bool) -> Result<(), Error> {
+fn session_ended(error: &Error) -> bool {
+    matches!(error, Error::Api { status: 401, code, .. }
+        if matches!(code.as_str(), "session_expired" | "unauthenticated" | "unauthorized"))
+}
+
+fn login_status(home: &Path, url: &str, _as_json: bool) -> Result<(), Error> {
     let stored = match store::load(home) {
         Ok(stored) => stored,
         Err(_) => {
@@ -435,30 +403,37 @@ fn login_status(home: &Path, url: &str, org: Option<String>, _as_json: bool) -> 
             return Ok(());
         }
     };
-    check_org(org.as_deref(), stored.org.as_deref())?;
-    let org = stored.org.clone();
-    let Some(org) = org else {
-        out::json(&serde_json::json!({"authenticated": false, "reason": "no_org"}))?;
+    if stored.auth.is_expired() {
+        store::forget(home, Some(&stored))?;
+        out::json(&serde_json::json!({"authenticated": false, "reason": "session_expired"}))?;
         return Ok(());
-    };
-    match Space::new(url, stored.auth)?.org(org.clone()).me() {
-        Ok(identity) => out::json(&serde_json::json!({
-            "authenticated": true,
-            "org": org,
-            "identity": identity,
-        }))?,
-        Err(Error::Api { status, code, message }) if status == 401 => out::json(&serde_json::json!({
-            "authenticated": false,
-            "org": org,
-            "reason": code,
-            "message": message,
-            "status": status,
-        }))?,
+    }
+    match Space::new(url, stored.auth.clone())?.me() {
+        Ok(identity) => {
+            store::update(home, |current| {
+                let mut current = current.ok_or_else(store::not_signed_in)?;
+                if current.auth == stored.auth {
+                    current.identity = Some(identity.clone());
+                }
+                Ok(current)
+            })?;
+            out::json(&serde_json::json!({
+                "authenticated": true, "verified": true,
+                "id": identity.id, "uuid": identity.uuid, "kind": identity.kind,
+                "expires_at": stored.auth.expires_at(), "identity": identity,
+            }))?;
+        }
+        Err(e) if session_ended(&e) => {
+            store::forget(home, Some(&stored))?;
+            out::json(&serde_json::json!({"authenticated": false, "reason": out::code(&e)}))?;
+        }
         Err(e) => out::json(&serde_json::json!({
-            "authenticated": false,
-            "org": org,
-            "reason": out::code(&e),
-            "message": e.to_string(),
+            "authenticated": true, "verified": false,
+            "id": stored.identity.as_ref().map(|i| &i.id),
+            "uuid": stored.identity.as_ref().map(|i| &i.uuid),
+            "kind": stored.identity.as_ref().map(|i| i.kind),
+            "expires_at": stored.auth.expires_at(), "identity": stored.identity,
+            "reason": out::code(&e), "message": e.to_string(),
         }))?,
     }
     Ok(())
@@ -483,61 +458,50 @@ fn profile_home(home: &Path, profile: Option<&str>, url: &str) -> Result<PathBuf
     {
         return Err(Error::Local("profile must be 1-64 lowercase letters, digits, hyphens or underscores".into()));
     }
-    // Retired auth.json is never silently adopted. URL separates production and sandbox hosts;
-    // backend rows additionally bind the exact IAM testing world and generation.
-    Ok(home.join("iam5").join(space_station::shared::secrets::sha256_hex(url)).join(profile))
-}
-
-fn check_org(requested: Option<&str>, selected: Option<&str>) -> Result<(), Error> {
-    if selected.is_none() || requested.is_some_and(|org| Some(org) != selected) {
-        return Err(Error::Local(
-            "this profile is bound to another organization; sign in with a separate --profile".into(),
-        ));
-    }
-    Ok(())
+    // Legacy credentials are never adopted. Each server and named account profile is isolated.
+    Ok(home.join("accounts").join(space_station::shared::secrets::sha256_hex(url)).join(profile))
 }
 
 fn run(cli: Cli, home: &Path) -> Result<(), Error> {
-    let Cli { cmd, org, json: as_json, api_key, access_token, profile } = cli;
+    let Cli { cmd, json: as_json, api_key, access_token, profile } = cli;
     let auth_home = profile_home(home, profile.as_deref(), &space_station::default_url())?;
     let url = space_station::default_url();
-    // The credential this run acts with, and the org it works in: `--org` (or $SPACE_STATION_ORG)
-    // above the one stored, which only the stored credential has.
     let space = || -> Result<Space, Error> {
-        let (auth, org) = match (&api_key, &access_token) {
-            (Some(key), _) => (Auth::api_key(key), org.clone()),
-            (None, Some(token)) => (Auth::access_token(token), org.clone()),
+        let auth = match (&api_key, &access_token) {
+            (Some(key), _) => Auth::api_key(key),
+            (None, Some(token)) => Auth::access_token(token),
             (None, None) => {
                 let stored = store::load(&auth_home)?;
-                check_org(org.as_deref(), stored.org.as_deref())?;
-                (stored.auth, stored.org)
+                if stored.auth.is_expired() {
+                    store::forget(&auth_home, Some(&stored))?;
+                    return Err(Error::Api {
+                        status: 401,
+                        code: "session_expired".into(),
+                        message: "the stored session has expired".into(),
+                    });
+                }
+                stored.auth
             }
         };
-        let space = Space::new(&url, auth)?;
-        Ok(match org {
-            Some(org) => space.org(org),
-            None => space,
-        })
+        Space::new(&url, auth)
     };
     match cmd {
-        Cmd::Login { token, no_browser, status } => {
+        Cmd::Login { token, slt_stdin, no_browser, status } => {
             if status {
-                return login_status(&auth_home, &url, org, as_json);
+                return login_status(&auth_home, &url, as_json);
             }
-            let org = org.or_else(|| store::org(&auth_home)).unwrap_or_default();
-            if let Some(token) = token {
+            if let Some(token) = if slt_stdin { Some("-".into()) } else { token } {
                 let slt = if token == "-" { stdin()? } else { token };
-                return signed_in(&auth_home, &url, space_station::exchange(&url, &slt, &org)?, org);
+                return signed_in(&auth_home, &url, space_station::exchange(&url, &slt)?);
             }
-            let auth = space_station::login(&url, &org, |link| {
+            let auth = space_station::login(&url, |link| {
                 if no_browser || !out::open(link) {
                     eprintln!("open this to sign in:\n{link}")
                 }
             })?;
-            signed_in(&auth_home, &url, auth, org)?
+            signed_in(&auth_home, &url, auth)?
         }
         Cmd::Auth { token } => {
-            let org = org.or_else(|| store::org(&auth_home)).unwrap_or_default();
             let slt = match setting(token, "SPACE_STATION_TOKEN").as_deref() {
                 Some("-") => stdin()?,
                 Some(token) => token.to_string(),
@@ -545,11 +509,10 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
                     return Err(Error::Local("no token: pass one, `-` for stdin, or set $SPACE_STATION_TOKEN".into()));
                 }
             };
-            signed_in(&auth_home, &url, space_station::exchange(&url, &slt, &org)?, org)?
+            signed_in(&auth_home, &url, space_station::exchange(&url, &slt)?)?
         }
         Cmd::Logout => {
             let stored = store::load(&auth_home)?;
-            check_org(org.as_deref(), stored.org.as_deref())?;
             let ended = Space::new(&url, stored.auth.clone())?.logout();
             store::forget(&auth_home, Some(&stored))?;
             match ended {
@@ -576,16 +539,6 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
             }
             out::json(&space()?.me()?)?
         }
-        Cmd::Orgs => out::rows(&space()?.orgs()?, ORGS, as_json)?,
-        Cmd::Use { org } => {
-            store::update(&auth_home, |s| {
-                let stored = s.ok_or_else(store::not_signed_in)?;
-                check_org(Some(&org), stored.org.as_deref())?;
-                Ok(stored)
-            })?;
-            eprintln!("working in {org}")
-        }
-
         Cmd::Tables(Tables::Ls { retired, all }) => {
             let tables = if all {
                 space()?.all_tables()?
@@ -597,8 +550,7 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
             out::rows(&tables, TABLES, as_json)?
         }
         Cmd::Tables(Tables::Get { id }) => out::json(&space()?.table(&id)?)?,
-        Cmd::Tables(Tables::Create { id, access }) => once("table key", &space()?.create_table(&id, &refs(&access))?),
-        Cmd::Tables(Tables::Access { id, access }) => out::json(&space()?.set_table_access(&id, &refs(&access))?)?,
+        Cmd::Tables(Tables::Create { id }) => once("table key", &space()?.create_table(&id)?),
         Cmd::Tables(Tables::Rotate { id }) => {
             let key = space()?.rotate_table_key(&id)?;
             out::secret("the new table key, shown once; the old one is already dead", &key.value)
@@ -627,16 +579,15 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
             Some(version) => out::json(&version)?,
             None => return Err(Error::Local(format!("window {id} has no published version yet"))),
         },
-        Cmd::Windows(Windows::Create { name, access }) => {
+        Cmd::Windows(Windows::Create { name }) => {
             let space = space()?;
-            let window = space.create_window(&name, &refs(&access))?;
+            let window = space.create_window(&name)?;
             out::json(&out::summary(&window)?)?;
             page(&space, &window.id)
         }
-        Cmd::Windows(Windows::Edit { id, name, access }) => {
+        Cmd::Windows(Windows::Edit { id, name }) => {
             let space = space()?;
-            let named = access.as_deref().map(refs);
-            out::json(&out::summary(&space.update_window(&id, name.as_deref(), named.as_deref())?)?)?;
+            out::json(&out::summary(&space.update_window(&id, &name)?)?)?;
             page(&space, &id)
         }
         Cmd::Windows(Windows::Rm { id }) => {
@@ -768,9 +719,11 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
             eprintln!("record delivered to the server or saved by the running daemon");
         }
         Cmd::Errors => out::json(&space()?.dev_errors()?)?,
-        Cmd::Iam => out::json(&serde_json::json!({
+        Cmd::Accounts => out::json(&serde_json::json!({
             "app_id": APP_ID,
             "name": "Space Station",
+            "accounts_url": "https://accounts.teamofsilicons.com",
+            "publisher": "si:tos",
             "repository": REPOSITORY,
             "docs": DOCS,
             "crate": CRATE,
@@ -800,27 +753,33 @@ fn run(cli: Cli, home: &Path) -> Result<(), Error> {
             }
         }
         Cmd::Daemon { cmd } => match cmd.unwrap_or(Daemon::Run) {
-            Daemon::Run => {
-                #[cfg(all(not(windows), not(feature = "honeycomb-managed")))]
-                updater::spawn(home.to_path_buf());
-                daemon::run(daemon::Config { home: home.to_path_buf(), url: url.clone() })?
-            }
+            Daemon::Run => daemon::run(daemon::Config { home: home.to_path_buf(), url: url.clone() })?,
             Daemon::Status => out::json(&daemon::status(home)?)?,
         },
     }
     Ok(())
 }
 
-/// Store the session just minted with the org it is bound to, and say where the pages it unlocks
-/// live. The link is a courtesy: signing in worked whether or not the app answers, so a failure
-/// is named, not raised.
-fn signed_in(home: &Path, url: &str, auth: Auth, org: String) -> Result<(), Error> {
+/// Persist sign-in immediately; a failed identity lookup must not discard the new session.
+fn signed_in(home: &Path, url: &str, auth: Auth) -> Result<(), Error> {
+    store::update(home, |_| Ok(Stored { auth: auth.clone(), identity: None }))?;
     let space = Space::new(url, auth.clone())?;
-    let selected = space.session_org()?;
-    check_org(if org.is_empty() { None } else { Some(&org) }, Some(&selected))?;
-    let org = selected;
-    store::update(home, |_| Ok(Stored { auth: auth.clone(), org: Some(org.clone()) }))?;
-    eprintln!("signed in to {org}: {}", auth.describe());
+    match space.me() {
+        Ok(identity) => {
+            store::update(home, |current| {
+                let mut current = current.ok_or_else(store::not_signed_in)?;
+                if current.auth == auth {
+                    current.identity = Some(identity.clone());
+                }
+                Ok(current)
+            })?;
+            eprintln!("signed in as {}", identity.id);
+        }
+        Err(e) => eprintln!("signed in; account details are temporarily unavailable ({})", out::code(&e)),
+    }
+    if let Some(expires_at) = auth.expires_at() {
+        eprintln!("session expires: {expires_at}");
+    }
     match space.app_url() {
         Ok(app) => eprintln!("the app: {app}"),
         Err(e) => eprintln!("the app: unknown ({})", out::code(&e)),
@@ -876,7 +835,7 @@ fn read(path: &Path) -> Result<String, Error> {
     fs::read_to_string(path).map_err(|e| Error::Local(format!("{}: {e}", path.display())))
 }
 
-/// `--access a,b` as the package takes it.
+/// Owned strings as the package takes its scopes and recipients.
 fn refs(values: &[String]) -> Vec<&str> {
     values.iter().map(String::as_str).collect()
 }

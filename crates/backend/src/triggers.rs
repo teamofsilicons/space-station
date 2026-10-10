@@ -1,7 +1,7 @@
 //! Trigger fan-out. Subscriptions and notifications register `(org, table, where)` with a
 //! channel; on every `Flushed` the registry probes each distinct registration once with
 //! `trigger_sql` over `(from, to]` and sends a `Hit` to everyone registered for it. A `where`
-//! that fails at run time is a `dev_errors` row for its org, at most once a minute.
+//! that fails at run time is a `dev_errors` row for its account, at most once a minute.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -129,7 +129,7 @@ async fn probe(state: &AppState, key: Key, flushed: &Flushed) {
     }
 }
 
-/// A `dev_errors` row for the org, once a minute per `where`.
+/// A `dev_errors` row for the account, once a minute per `where`.
 async fn report(state: &AppState, key: &Key, message: &str) {
     {
         let mut inner = lock(&state.triggers.inner);

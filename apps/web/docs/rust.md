@@ -7,10 +7,10 @@ product.
 
 ```toml
 [dependencies]
-space-station = "0.3"
+space-station = "0.4"
 ```
 
-Version 0.3 is published on [crates.io](https://crates.io/crates/space-station). MSRV 1.89.
+Version 0.4 is published on [crates.io](https://crates.io/crates/space-station). MSRV 1.89.
 
 It is synchronous throughout — every call is one request and one answer — and it never opens a
 browser. Supported platforms are macOS, Linux, and Windows 10 1803 or newer, using native local
@@ -29,20 +29,19 @@ use space_station::{Auth, Space, SpaceClient};
 let ss = SpaceClient::new("table-orders-…")?;
 ss.record(serde_json::json!({"id": "o-42", "amount": 12.5}));
 
-// Managing: an identity, an org, and typed calls. The short-lived token came from
-// `iam login --app-id 'spacestation' --grant-org tos` or `iam silicon-login --app-id 'spacestation'`.
+// Managing: the current Carbon or Silicon account.
+// SLT from `silicon-accounts login --app spacestation -q`.
 let url = space_station::default_url();
-let auth = space_station::exchange(&url, &slt, "tos")?;   // a value; the CLI is what stores one
-let space = Space::new(&url, auth)?.org("tos");
+let auth = space_station::exchange(&url, &slt)?;
+let space = Space::new(&url, auth)?;
 let tables = space.tables()?;
-let key = space.create_table("orders", &["@c:alice", "tech"])?;
+let key = space.create_table("orders")?;
 let rows = space.query("SELECT count() FROM orders", &Default::default())?;
 ```
 
-`Space::new` takes the Space Station URL and an `Auth`; `.org(id)` scopes it. Every org call
-needs one, and a session is bound to the organization selected through IAM. Pass that explicit
-organization; neither a Carbon ID (`c:alice`) nor a Silicon ID (`si:bot`) contains it. Changing
-`.org(id)` cannot retarget a session. Keep separate `Auth` values and caches for separate contexts.
+`Space::new` takes the Space Station URL and an `Auth`. All calls use that credential's account;
+keep separate credentials and caches for different accounts. Account UUIDs are immutable,
+while `c:` and `si:` handles are display identifiers.
 
 ## Stateless
 
@@ -60,7 +59,7 @@ it verbatim is one `serde_json::to_string`.
 The recording half is stateful on purpose — the spool and the daemon lock are what survive a
 crash — but never ambient: `Builder::home` and `daemon::Config` name the directory, and
 `run_window` takes the directory it may unpack the runtime into. The [CLI](/docs/cli) is the one
-that stores each account context in `<home>/iam5/<server-hash>/<profile>/auth.json`; select one
+that stores each account context in `<home>/accounts/<server-hash>/<profile>/auth.json`; select one
 with `--profile` or `$SPACE_STATION_PROFILE`. The recording spool stays in the shared base home.
 
 ## Auth
@@ -71,50 +70,29 @@ with `--profile` or `$SPACE_STATION_PROFILE`. The recording spool stays in the s
 |---|---|---|
 | `Auth::session(sscli)` | a carbon or a silicon signed in from a terminal | the `sscli-` session the backend minted and refreshes |
 | `Auth::access_token(t)` | window and processor code | a `spacewindow-` token |
-| `Auth::api_key(k)` | a program acting for the org | an `apikey-` key |
+| `Auth::api_key(k)` | a program acting for the account | an `apikey-` key |
 
 `Auth::describe()` says what it is and never what it holds; `Debug` prints the same. There is no
-constructor that takes an IAM bearer, a refresh token or a silicon's long-lived `stk-` token, and
-nothing here prompts. **Never a credential, always a short-lived token**: a carbon or a silicon
-obtains one from IAM by their own means — `iam login --app-id 'spacestation' --grant-org o`, `iam
-silicon-login --app-id 'spacestation'`, or the browser — and hands that over; Space Station
-exchanges it once and holds the resulting session itself.
+constructor that takes a Silicon Accounts bearer, refresh token or Silicon STK.
 
-Two actions produce a session without keeping one, and both are brokered by the backend, because
-only the backend is the registered IAM Application and only it holds that secret:
-
-**Carbon browser flow.** `space_station::login(url, org, visit)` binds `127.0.0.1:0`, hands
-`{url}/api/auth/login?org={org}&cli={port}&state={nonce}` to `visit` — which opens or prints the
-link and returns at once — and waits for the one request the backend redirects there. What
-arrives is the **short-lived token** IAM minted (`?slt=…&state=…`), not a session credential.
-The backend has already exchanged it and verified the Carbon identity. `login` checks `state`,
-then posts the SLT to `/api/auth/session` to redeem the matching backend receipt without a second
-IAM exchange. The `sscli-` credential is returned only by that POST. `cli` is a bare port number,
-so loopback is the only reachable target. It returns `Auth::session`, bound to the selected org,
-and stores nothing:
+**Carbon browser flow.** `space_station::login(url, visit)` opens a loopback listener and passes
+a sign-in URL to `visit`. The backend performs the OAuth/PKCE exchange and redirects a one-time
+handoff. The client verifies its state and redeems the handoff over POST for a session.
 
 ```rust
-let auth = space_station::login(&space_station::default_url(), "tos", |link| {
+let auth = space_station::login(&space_station::default_url(), |link| {
     eprintln!("open this to sign in:\n{link}");
 })?;
 ```
 
-**No browser.** `space_station::exchange(url, slt, org)` posts a short-lived token — minted by
-`iam login --app-id` or `iam silicon-login --app-id`, good for two minutes and one exchange — as
-`POST /api/auth/session {slt, org}` and returns the `Auth::session` the backend minted for it,
-bound to `org`. Anything shaped like a credential is refused before it leaves the machine.
-Both Carbons and Silicons can use this direct SLT flow.
+**Silicon token flow.** `space_station::exchange(url, slt)` posts the `slt_` token issued by
+`silicon-accounts login --app spacestation -q` to `/api/auth/session`. It returns a session
+and its absolute expiry. The token can be exchanged once within two minutes.
 
-Either way the `sscli-` session is its own row: `Space::logout()` ends it and leaves any browser
-signed in, and vice versa. A session is bound to one account and org; for another context,
-obtain a separate session. The backend refreshes it while IAM permits; a 401 requires a fresh
-login. Legacy credentials cannot be reused after the IAM 5 migration.
-
-**Why nothing here talks to IAM.** The backend is the registered Application, holds its secret
-and speaks to IAM through the official `silicon-iam-client`; this crate never talks to IAM at all.
-A short-lived token is minted by the `iam` CLI or by the browser, and the backend is the only party
-that exchanges it. The one host this crate ever reaches is Space Station — which is also why it
-carries no IAM dependency and keeps its MSRV at 1.89.
+The backend alone holds the app secret and refreshes Silicon Accounts access tokens. Browser
+and terminal sessions persist independently until expiration, revocation or logout. Temporary
+network and service errors do not clear the saved credential. `Auth::expires_at()` exposes the
+server session expiry when known.
 
 See [Credentials](/docs/credentials) for what each one may do.
 
@@ -123,12 +101,12 @@ See [Credentials](/docs/credentials) for what each one may do.
 One method per operation. Each returns a typed value or `Error`.
 
 ```
-orgs()  me()  app_url()                                    the selected org, who you are here, where the UI lives
+me()  app_url()                                          who you are, where the UI lives
 
-tables()  table(id)  create_table(id, access) -> Key       set_table_access(id, access)
+tables()  table(id)  create_table(id) -> Key
 rotate_table_key(id) -> Key   delete_table(id)   overview(window)
 
-windows()  window(id)  create_window(name, access)  update_window(id, name, access)
+windows()  window(id)  create_window(name)  update_window(id, name)
 delete_window(id)  versions(id)  publish(id, name, processor, renderer)  window_state(id)
 run_window(id, runtime_dir, on_line)  window_tool(id, runtime_dir, name, args)  window_url(id)
 
@@ -143,13 +121,10 @@ access_token()  rotate_access_token()
 query(sql, restrict)  dev_errors()  logout()
 ```
 
-`me()` is `Identity { kind, id, org, tags }`: who this credential is inside the org, with the
-tags IAM reported at the login and re-check (see [Credentials](/docs/credentials)); `orgs()` is
-`[Org { id, name }]` for the selected session's organization, with the name once IAM reports it. Access lists are `&[&str]` of `@actor` ids and IAM tag names; `Key` is a secret
-the server shows exactly once (a table key, an API key, a webhook signing secret) and
-`AccessToken` is the one it can still read back. `update_window` and `update_notification` take
-`Option`s: `None` leaves that half alone. Every returned type is `Serialize`, so printing the JSON
-needs no second shape — which is exactly what the CLI does with them.
+`me()` returns the account's `kind`, display `id`, immutable `uuid`, `app`, and session expiry.
+Each account owns its data. `Key` is a secret the server
+shows once; `AccessToken` can be read back. `update_window` and `update_notification` accept
+`Option`s: `None` leaves that field alone. Every returned type implements `Serialize`.
 
 `delete_table`, `delete_window` and `delete_notification` need the same access as reading the
 thing. A window takes its versions and its state with it, a notification its versions and its
@@ -191,7 +166,7 @@ let detail = space.window_tool("w_01", &dir, "order_detail", &serde_json::json!(
 
 What the crate deliberately does not do is draw. A renderer is an iframe, a chart is pixels, and
 neither belongs in a process with no screen — so `window_url(id)` returns
-`{app}/o/{org}/windows/{id}`, where `{app}` is where the UI lives according to `GET /me`, and you
+`{app}/a/{uuid}/windows/{id}`, where `{app}` is where the UI lives according to `GET /me`, and you
 hand that to a browser. That is the rule for anything visual: the package returns a link, the app
 renders it.
 
@@ -236,8 +211,8 @@ message:
 | `SizeExceeded { bytes }` · `QueueFull` | a record refused before it left the process |
 | `Rejected { record_id, code, reason }` | the server's verdict on one record |
 | `Transport(..)` | Space Station could not be reached |
-| `Api { code, message }` | it answered, and said no; `code` is snake_case and stable — `not_a_member` is a session bound to another org |
-| `Local(..)` | nothing left the machine: no credential, no org, no `node`, a secret in the code |
+| `Api { code, message }` | it answered, and said no; `code` is snake_case and stable — `context_changed` means the selected account changed |
+| `Local(..)` | nothing left the machine: no credential, no `node`, a secret in the code |
 | `Io(..)` · `Ws(..)` | |
 
 ## Environment
@@ -248,7 +223,7 @@ that wants the conventions, and they are the only place the environment is consu
 | | |
 |---|---|
 | `default_url()` | `$SPACE_STATION_URL`, else the public Space Station |
-| `default_home()` | `$SILICON_HOME/.space-station`, else `$SPACE_STATION_HOME`, else `~/.space-station` — the shared base for the spool, lock and daemon socket. The CLI stores credentials below `iam5/<server-hash>/<profile>/` |
+| `default_home()` | `$SILICON_HOME/.space-station`, else `$SPACE_STATION_HOME`, else `~/.space-station` — the shared base for the spool, lock and daemon socket. The CLI stores credentials below `accounts/<server-hash>/<profile>/` |
 
 The URL defaults to the *public* host, so point it at a local stack explicitly rather than by
 omission. Or skip the helpers and pass your own values to `Space::new`, `exchange`, `login` and

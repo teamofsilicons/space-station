@@ -6,12 +6,10 @@ through one door.
 
 ## The mirage
 
-You write `FROM orders`. There is no ClickHouse table called `orders`: every org's records live in
-one physical table, and the backend parses your query, checks every table reference and rewrites
-it to a sub-select scoped to your org and that table id. A row policy on the ClickHouse user
-enforces the org boundary a second time. You only ever see your org's tables, and only the ones
-your access lists let you see unless you are an org owner or admin (API keys and the notification
-engine see the whole org).
+You write `FROM orders`. Logical tables share one physical ClickHouse table. The backend
+parses the query, checks each table reference and scopes it to the authenticated account UUID
+and table id. A ClickHouse row policy enforces the account boundary again. API keys and the
+notification engine stay within the same owning account.
 
 Queries run read-only (`readonly=1`, `allow_ddl=0`) with a 10 s limit, at most 100 000 rows /
 16 MB per result, and no access to system tables or logs.
@@ -124,15 +122,10 @@ missing `to` becomes that table's watermark at query start — which is what com
 - Anything that is not exactly one `SELECT` (with `WITH`, `UNION`, sub-selects and joins allowed).
 - `SETTINGS`, `FORMAT`, `INTO OUTFILE` — at any nesting level.
 - Table functions: `url()`, `remote()`, `file()`, `s3()`, `mysql()`, …
-- Qualified names (`db.table`), `system.*`, and any table your access lists do not include (unless
-  you are an org owner or admin).
+- Qualified names (`db.table`), `system.*`, and any table outside your account.
 - Identifiers inside `IN (…)` that are not columns of the query (`x IN (system.one)`).
 
 A refused query is an error with a `code` — a dev error in a window, `dev_errors` for a
 notification, `Error::Api { code, .. }` from the package, a message in the CLI.
 
-A table your access list does not include is refused the same way. Actor syntax is validated,
-but tag and member existence is not looked up, so `["Tech"]` on a
-table whose readers carry the tag `tech` is saved without complaint and lets nobody but its
-author in. When a query you expect to work answers `table_not_found`, check the spelling and the
-case of the tag before anything else.
+Tables outside the authenticated account are unavailable.

@@ -53,7 +53,7 @@ function Doc(p: { slug: string; href: (slug: string) => string; go: (slug: strin
 export function DocsPage() {
   const tab = useTab();
   const slug = () => tab.route().id || "getting-started";
-  const base = () => `/o/${tab.route().org}/docs/`;
+  const base = () => `/a/${tab.route().actor}/docs/`;
   tab.title(DOCS.find((d) => d.slug === slug())?.title || "Docs");
   return (
     <div class="page-body">

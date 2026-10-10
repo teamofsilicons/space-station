@@ -9,7 +9,6 @@ export type HostOptions = {
   runtimeUrl: string;
   api: { base: string; headers?: Record<string, string> };
   ws: string;
-  org: string;
   window: { id: string; name: string; version: { name: string; processor: string; renderer: string } | null };
   code?: { processor: string; renderer: string };
   mount: HTMLElement;

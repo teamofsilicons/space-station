@@ -1,20 +1,19 @@
-// The workspace's tabs on screen: the controller over lib/tabs (persisted per org, mirrored to the
+// The workspace's tabs on screen: the controller over lib/tabs (persisted per actor, mirrored to the
 // address bar and to browser back/forward), the strip, the panes that keep every tab mounted so a
 // live window keeps running behind other tabs, and `Link`, which opens things the way Chrome does:
 // click here, ⌘/Ctrl-click or middle-click behind, ⌘⇧-click in front, ⇧-click in a split.
 import { createContext, createEffect, createMemo, createSignal, ErrorBoundary, For, on, onCleanup, Show, untrack, useContext, type Component, type JSX, type Accessor, type Resource } from "solid-js";
 import { createStore } from "solid-js/store";
 import * as T from "../lib/tabs";
-import type { Me, Org, SpaceWindow, Table } from "../lib/api";
+import type { Me, SpaceWindow, Table } from "../lib/api";
 import type { RunError } from "../lib/runtime";
 import { ErrorText, openMenu, TabContext, type MenuItem, type Mark as TabMark, type TabApi } from "./ui";
 import { Icon, Mark } from "./icons";
 
 export type Toast = { text: string; title?: string; tone?: "ok" | "bad" | "note"; action?: { label: string; run: () => void } };
 export type Workspace = {
-  org: string;
+  actor: string;
   me: Me;
-  orgs: Accessor<Org[]>;
   tables: { data: Resource<Table[]>; reload: () => unknown };
   windows: { data: Resource<SpaceWindow[]>; reload: () => unknown };
   tabs: ReturnType<typeof createTabs>;
@@ -44,13 +43,13 @@ export const KIND_ICON: Record<T.Kind, string> = {
 
 type Nav = { tab?: string; i?: number } | null;
 
-export function createTabs(org: string, home: string, first: string, context: string) {
-  const key = `ss-tabs:${context}:${org}`;
+export function createTabs(actor: string, home: string, first: string, context: string) {
+  const key = `ss-tabs:${context}:${actor}`;
   let saved: string | null = null;
   try {
     saved = localStorage.getItem(key);
   } catch {}
-  const [state, set] = createSignal<T.Tabs>(T.restore(saved, org) ?? T.initial(first));
+  const [state, set] = createSignal<T.Tabs>(T.restore(saved, actor) ?? T.initial(first));
   const [marks, setMarks] = createStore<Record<string, TabMark>>({});
   const [revs, setRevs] = createStore<Record<string, number>>({});
   const [widths, setWidths] = createSignal<number[]>([1]);
@@ -91,7 +90,7 @@ export function createTabs(org: string, home: string, first: string, context: st
     const t = nav?.tab ? tab(nav.tab) : undefined;
     if (t && T.active(s)?.id !== t.id) set(T.show(s, t.id));
     else if (t) set(T.seek(s, t.id, location.pathname, (nav!.i ?? 0) < t.back.length));
-    else if (T.route(location.pathname)?.org === org) set(T.arrive(s, location.pathname));
+    else if (T.route(location.pathname)?.actor === actor) set(T.arrive(s, location.pathname));
   };
   addEventListener("popstate", pop);
   onCleanup(() => removeEventListener("popstate", pop));
@@ -319,7 +318,7 @@ function Crumbs(p: { path: string; title: string }) {
   const ws = useWorkspace();
   const steps = (): { label: string; href?: string }[] => {
     const r = T.route(p.path);
-    const o = `/o/${ws.org}`;
+    const o = `/a/${ws.actor}`;
     if (!r) return [{ label: "Not found" }];
     const name = ws.windows.data()?.find((w) => w.id === r.id)?.name || p.title;
     const up: Partial<Record<T.Kind, [string, string][]>> = {
@@ -333,7 +332,7 @@ function Crumbs(p: { path: string; title: string }) {
   };
   return (
     <span class="crumbs">
-      <span class="crumb-org">{ws.org}</span>
+      <span class="crumb-actor">{ws.me.id}</span>
       <For each={steps()}>
         {(s) => (
           <>
@@ -359,7 +358,7 @@ function Frame(p: { id: string; pages: Record<T.Kind, Component> }) {
   const pane = createMemo(() => t.state().panes.indexOf(p.id));
   const visible = createMemo(() => pane() >= 0);
   // By value: the strip changing around this tab must not look like this tab navigating.
-  const r = createMemo(() => T.route(tab()?.path || ""), undefined, { equals: (a, b) => a?.kind === b?.kind && a?.id === b?.id && a?.org === b?.org });
+  const r = createMemo(() => T.route(tab()?.path || ""), undefined, { equals: (a, b) => a?.kind === b?.kind && a?.id === b?.id && a?.actor === b?.actor });
   const [drop, setDrop] = createSignal<"here" | "beside">();
   const api: TabApi = {
     id: p.id,
@@ -466,8 +465,8 @@ function NotFound() {
   return (
     <div class="page-body narrow">
       <h1>Page not found</h1>
-      <p class="muted">Nothing lives at this address in {ws.org}.</p>
-      <Link href={`/o/${ws.org}`}>Open a new tab page</Link>
+      <p class="muted">Nothing lives at this address for {ws.me.id}.</p>
+      <Link href={`/a/${ws.actor}`}>Open a new tab page</Link>
     </div>
   );
 }

@@ -24,13 +24,12 @@ const tableName = (id: string) => {
   return `\`${id}\``;
 };
 
-export async function openSnapshot(org: string, id: string): Promise<Snapshot> {
+export async function openSnapshot(id: string): Promise<Snapshot> {
   const table = tableName(id);
-  const root = `/orgs/${encodeURIComponent(org)}`;
   const openedAt = new Date();
   const [tables, result] = await Promise.all([
-    api<Table[]>(`${root}/tables?retired=all`),
-    api<Query<{ last: string; count: string }>>(`${root}/query`, "POST", {
+    api<Table[]>(`/tables?retired=all`),
+    api<Query<{ last: string; count: string }>>(`/query`, "POST", {
       sql: `SELECT toString(max(cursor)) AS last, toString(count()) AS count FROM ${table}`,
     }),
   ]);
@@ -61,14 +60,13 @@ export function pageQuery(
 }
 
 export async function loadRecordPage(
-  org: string,
   id: string,
   snapshot: string,
   before: string | undefined,
   limit: number,
 ) {
   const result = await api<Query<TableRecord>>(
-    `/orgs/${encodeURIComponent(org)}/query`,
+    `/query`,
     "POST",
     pageQuery(id, snapshot, before, limit),
   );

@@ -23,7 +23,7 @@ export function Home() {
   const ws = useWorkspace();
   const tab = useTab();
   tab.title("New tab");
-  const o = `/o/${ws.org}`;
+  const o = `/a/${ws.actor}`;
   const hour = new Date().getHours();
   return (
     <div class="page-body home">
@@ -32,7 +32,7 @@ export function Home() {
         <h1>
           {hour < 5 ? "Night shift" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening"}, {ws.me.id.replace(/^(c|si):/, "")}
         </h1>
-        <p class="muted">You are aboard {ws.org}. Open anything in this tab, or ⌘-click to keep it for later.</p>
+        <p class="muted">You are signed in as {ws.me.id}. Open anything in this tab, or ⌘-click to keep it for later.</p>
         <div class="home-search">
           <Finder autofocus={tab.visible()} empty={false} placeholder="Search windows, tables, docs and actions" />
         </div>

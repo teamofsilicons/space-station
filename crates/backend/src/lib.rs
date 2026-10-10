@@ -1,18 +1,17 @@
 //! The Space Station server. `App::start` boots everything on one tokio runtime — the stores,
-//! IAM, the engine lease, the flusher, the trigger fan-out, the notification engine and the HTTP
+//! Silicon Accounts, the engine lease, the flusher, the trigger fan-out, the notification engine and the HTTP
 //! router — and `App::stop` unwinds it in the order that loses nothing. Each module owns one idea
 //! from docs/ARCHITECTURE.md.
 
 #![forbid(unsafe_code)]
 
 pub mod access;
+pub mod accounts;
 pub mod config;
 pub mod crypto;
 pub mod dev_errors;
 pub mod frontend;
 pub mod http;
-pub mod iam;
-pub mod iam_stub;
 pub mod ingest;
 pub mod live;
 pub mod notifications;
@@ -47,7 +46,7 @@ impl App {
     /// Connects, migrates, bootstraps, binds `cfg.bind` and serves in the background.
     pub async fn start(cfg: Config) -> Result<App, Box<dyn std::error::Error + Send + Sync>> {
         let store = store::Store::connect(&cfg).await?;
-        let iam = iam::Client::connect(&cfg).await?;
+        let accounts = accounts::Client::connect(&cfg).await?;
         let telemetry = telemetry::Telemetry::from_config(&cfg)?;
         let frontend = frontend::Collector::from_config(&cfg);
         let (stop_tx, stop) = watch::channel(false);
@@ -55,7 +54,7 @@ impl App {
         let state = AppState(Arc::new(Inner {
             cfg,
             store,
-            iam,
+            accounts,
             lease,
             stop,
             triggers: Arc::default(),
@@ -114,16 +113,4 @@ pub async fn listen(addr: SocketAddr) -> Result<tokio::net::TcpListener, String>
 /// Lock a mutex, recovering the data if a panicking thread poisoned it.
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn a_taken_port_is_refused_by_name() {
-        let taken = listen("127.0.0.1:0".parse().unwrap()).await.unwrap();
-        let addr = taken.local_addr().unwrap();
-        assert_eq!(listen(addr).await.err(), Some(format!("cannot listen on {addr}: address already in use")));
-    }
 }

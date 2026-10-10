@@ -1,17 +1,10 @@
-//! Who you are, as a value. `Auth` holds one credential and nothing about where it came from or
-//! where it goes: the `sscli-` session the backend minted for a terminal, a `spacewindow-` access
-//! token or an `apikey-` key. It reads no file, no environment and no browser; the caller builds
-//! it and may serialize it verbatim. No IAM credential has a place here: a person or a silicon
-//! hands Space Station a *short-lived token*, the backend exchanges it once at IAM and holds the
-//! Application session it gets back, so nothing on this side ever rotates. Two things touch the
-//! network, and both return an `Auth::session`: [`exchange`], which spends a short-lived token,
-//! and [`login`], the loopback half of a browser sign-in, which catches one and spends it the
-//! same way.
+//! Account authentication through Silicon Accounts. The server owns and refreshes the upstream
+//! session; this client holds only the stable Space Station session and its absolute expiry.
 
 use std::fmt;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -29,6 +22,10 @@ const SESSION: &str = "sscli-";
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Auth {
     bearer: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expires_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expires_at_unix: Option<i64>,
 }
 
 impl Auth {
@@ -43,13 +40,25 @@ impl Auth {
         Self::bearer(token)
     }
 
-    /// An `apikey-` key, acting for the org inside its scopes.
+    /// An `apikey-` key, acting for the account inside its scopes.
     pub fn api_key(key: &str) -> Auth {
         Self::bearer(key)
     }
 
     fn bearer(bearer: &str) -> Auth {
-        Auth { bearer: bearer.trim().into() }
+        Auth { bearer: bearer.trim().into(), expires_at: None, expires_at_unix: None }
+    }
+
+    /// The server session's absolute expiration, when this credential came from sign-in.
+    pub fn expires_at(&self) -> Option<&str> {
+        self.expires_at.as_deref()
+    }
+
+    /// Whether the server-issued absolute session lifetime has ended, without a network call.
+    pub fn is_expired(&self) -> bool {
+        self.expires_at_unix.is_some_and(|expires| {
+            SystemTime::now().duration_since(UNIX_EPOCH).is_ok_and(|now| expires <= now.as_secs() as i64)
+        })
     }
 
     /// What this is, in words, revealing none of it.
@@ -80,62 +89,55 @@ impl fmt::Debug for Auth {
     }
 }
 
-/// A short-lived token, spent. `slt` is what `iam login --app-id` or `iam silicon-login --app-id`
-/// printed — two minutes old at most and good for one exchange — and `org` the organization the
-/// session is bound to. `POST {url}/api/auth/session {slt, org}` has the backend exchange it at
-/// IAM, open the session and answer `{token: sscli-…}`, which comes back as `Auth::session`.
-/// Anything shaped like a credential is refused before it leaves the machine: Space Station never
-/// takes one, only a token minted to be handed over.
-pub fn exchange(url: &str, slt: &str, org: &str) -> Result<Auth, Error> {
+/// Spend an app-bound short-lived token from `silicon-accounts login --app spacestation -q`.
+/// The server exchanges it with Accounts; a Silicon's STK never goes to Space Station.
+pub fn exchange(url: &str, slt: &str) -> Result<Auth, Error> {
     let slt = slt.trim();
-    if slt.is_empty() || secrets::find_secret(slt).is_some() {
-        let why = "not a short-lived token: `iam login --app-id` or `iam silicon-login --app-id` prints one; \
-                   a credential is never handed over";
-        return Err(Error::Local(why.into()));
+    if !slt.starts_with("slt_") || slt.len() <= 4 || secrets::find_secret(slt).is_some() {
+        return Err(Error::Local("expected an slt_ token from `silicon-accounts login --app spacestation -q`".into()));
     }
-    let body = if org.is_empty() { json!({"slt": slt}) } else { json!({"slt": slt, "org": org}) };
-    let minted: Minted = api::call(&api::agent(), &api::origin(url)?, "POST", "/auth/session", None, Some(&body))?;
-    Ok(Auth::session(&minted.token))
+    session(url, json!({"slt": slt}))
 }
 
-/// `{"token": "sscli-…"}`, the answer to an exchange.
+fn session(url: &str, body: serde_json::Value) -> Result<Auth, Error> {
+    let minted: Minted = api::call(&api::agent(), &api::origin(url)?, "POST", "/auth/session", None, Some(&body))?;
+    Ok(Auth { bearer: minted.session_token, expires_at: minted.expires_at, expires_at_unix: minted.expires_at_unix })
+}
+
 #[derive(Deserialize)]
 struct Minted {
-    token: String,
+    #[serde(alias = "token")]
+    session_token: String,
+    #[serde(default)]
+    expires_at: Option<String>,
+    #[serde(default)]
+    expires_at_unix: Option<i64>,
 }
 
-/// A carbon, through the browser (RFC 8252 loopback). Binds `127.0.0.1:0`, hands
-/// `{url}/api/auth/login?org={org}&cli={port}&state={nonce}` to `visit` — which opens or prints
-/// the link and returns at once — then serves the one request the backend redirects there with
-/// `?slt=…&state=…`, checks the state, spends the short-lived token through [`exchange`], answers
-/// a small page and returns the `sscli-` session, bound to `org`. Nothing is stored.
-pub fn login(url: &str, org: &str, visit: impl FnOnce(&str)) -> Result<Auth, Error> {
+/// Sign in a carbon through the browser using a loopback callback. The server exchanges the
+/// Accounts authorization code with PKCE and redirects a one-time handoff to this listener.
+/// Nothing is stored; callers persist the returned session until expiry or explicit logout.
+pub fn login(url: &str, visit: impl FnOnce(&str)) -> Result<Auth, Error> {
     let origin = api::origin(url)?;
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let port = listener.local_addr()?.port();
     let nonce = Uuid::new_v4().simple().to_string();
-    let scope = if org.is_empty() { String::new() } else { format!("org={org}&") };
-    visit(&format!("{origin}/api/auth/login?{scope}cli={port}&state={nonce}"));
+    visit(&format!("{origin}/api/auth/login?cli={port}&state={nonce}"));
     let (mut stream, _) = listener.accept()?;
     stream.set_read_timeout(Some(REDIRECT_TIMEOUT))?;
     let mut line = String::new();
     BufReader::new(&stream).read_line(&mut line)?;
     let query = line.split(' ').nth(1).and_then(|t| t.split_once('?')).map(|(_, q)| q).unwrap_or_default();
-    let outcome = match (param(query, "slt"), param(query, "state")) {
+    let outcome = match (param(query, "code"), param(query, "state")) {
         (_, state) if state != Some(nonce.as_str()) => {
             Err(Error::Local("the sign-in reply carried another state".into()))
         }
-        (Some(slt), _) => exchange(&origin, slt, org),
-        (None, _) if param(query, "token").is_some() => Err(Error::Local(
-            "the sign-in reply carried a session token instead of a short-lived one: this Space Station is older \
-             than this client and its session was not accepted"
-                .into(),
-        )),
-        (None, _) => Err(Error::Local("the sign-in reply carried no short-lived token".into())),
+        (Some(code), _) => session(&origin, json!({"code": code, "state": nonce})),
+        (None, _) => Err(Error::Local("the sign-in reply carried no one-time code".into())),
     };
     match &outcome {
         Ok(_) => answer(&mut stream, "Signed in", "You can close this tab and go back to the terminal."),
-        Err(e) => answer(&mut stream, "Not signed in", &format!("{e}. Start again from the terminal.")),
+        Err(_) => answer(&mut stream, "Not signed in", "The sign-in could not finish. Start again from the terminal."),
     }
     outcome
 }

@@ -5,8 +5,8 @@ one small JSON document — the *SiliconJSON* — and exposes tools. The rendere
 a sandboxed iframe that shows it. Carbons look at the renderer; silicons read the SiliconJSON and
 call the tools.
 
-Create a window under **Space Windows** (a name under 20 characters and an access list), or with
-`spacestation windows create "Orders" --access @c:alice,tech`. The window page shows a **prompt
+Create a window under **Space Windows** (a name under 20 characters), or with
+`spacestation windows create "Orders"`. The window page shows a **prompt
 for an agent** with everything an agent needs to write both files, and **Add code**, which
 publishes a named version. Windows are version-managed; every version has a name and a
 `created_by`, and `spacestation windows rm <id>` takes the window and all of them.
@@ -162,20 +162,19 @@ server that mimics production exactly: the same runtime, the same processor/rend
 the same queries — only the credential differs.
 
 ```
-npm i -g @teamofsilicons/space-station        # until it is published: npm i -g ./packages/space-station from a checkout
+npm i -g @teamofsilicons/space-station
 mkdir orders-board && cd orders-board
 cat > .env <<'EOF'
 SPACE_STATION_URL=https://space.example.com
 SPACE_STATION_ACCESS_TOKEN=spacewindow-…
-SPACE_STATION_ORG=tos
 SPACE_STATION_WINDOW=win_…          # optional: seeds the page from a published window
 EOF
 space-station-dev            # serves ./processor.js + ./renderer.html at http://127.0.0.1:4747
 ```
 
-`SPACE_STATION_ORG` is the organization the queries run in. `SPACE_STATION_ACCESS_TOKEN` is the
+`SPACE_STATION_ACCESS_TOKEN` is the
 **access token** shown at the top of every window page. It
-is yours (one per person per org, rotatable there), not the window's, and it lets mission control
+is yours (one per account, rotatable there), not the window's, and it lets mission control
 run queries on your behalf. The dev server is the only thing that holds it: your code never sees
 it, the page reloads on change, and `.env` is never served. Errors from the processor and the
 renderer show in the dev page; in the app, **Option+Shift+D** opens the same panel.
@@ -192,11 +191,11 @@ spacestation windows publish <window-id> --name v1 --processor processor.js --re
 
 or paste both files into **Add code** on the window page with a version name. Either way the
 server scans the code for anything shaped like a credential — `spacewindow-…`, `apikey-…`,
-`whsec-…`, `table-{id}-…` and IAM tokens — including inside comments, and refuses the version
+`whsec-…`, `table-{id}-…` and Silicon Accounts tokens — including inside comments, and refuses the version
 with `secret_in_code`. Dev code that reads the token from anywhere is not publishable by
 construction: the runtime injects credentials, your code never touches them.
 
-The published version becomes the window's current version. Anyone with access who opens the
+The published version becomes the window's current version. The owning account opening the
 window runs it in their browser; the server keeps the last SiliconJSON the window produced (one
 per window, whichever version wrote it last) so a fresh open shows the latest state at once (with
 `is_live` false until the run is connected).
@@ -215,14 +214,14 @@ spacestation windows open <id>             print this window's page, and open it
 
 `run` starts the same host the app runs, with the processor in a credential-less Node child, and
 keeps the server's copy of the SiliconJSON current while it runs. `json` and `tool` read that
-copy without starting anything. `ls`, `get` and `edit` print a summary — id, name, access, the
+copy without starting anything. `ls`, `get` and `edit` print a summary — id, name, the
 current version's name and author — and `code` prints the code, so a listing stays readable and a
-silicon that wants to read a window it has access to asks for exactly that. The renderer is the
+silicon that wants to read one of its windows asks for exactly that. The renderer is the
 one part a terminal cannot show, so `open` hands it to a browser instead — see the
 [CLI](/docs/cli) and the [Rust package](/docs/rust).
 
 ## The prompt for an agent
 
 The window page has a copyable prompt that packs this page and [SQL](/docs/sql) into
-instructions for an agent — the window's id and name, the org's table ids, both APIs, the
+instructions for an agent — the window's id and name, the account's table ids, both APIs, the
 limits, the dev loop and the publish command. Hand it to any agent; paste what comes back.

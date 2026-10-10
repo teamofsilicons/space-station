@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the local v1 stack without changing .env or the user's CLI identity."""
+"""Run the local stack without changing .env or the user's CLI identity."""
 import argparse
 import json
 import os
@@ -19,7 +19,7 @@ STATE = RUN / "processes.json"
 BUILD_DIR = RUN / "build-directory"
 TARGET = Path(os.environ.get("CARGO_TARGET_DIR") or
               (BUILD_DIR.read_text().strip() if BUILD_DIR.exists() else ROOT / "target" / "main")).resolve()
-PORTS = {"iam": 8099, "backend": 8080, "web": 3000}
+PORTS = {"backend": 8080, "web": 3000}
 
 
 def alive(pid):
@@ -98,31 +98,33 @@ def start(skip_build):
     if not all(listening(port) for port in (8123, 5433, 6379)):
         subprocess.run(["docker", "compose", "-f", "infra/local/docker-compose.yml", "up", "-d", "--wait"],
                        cwd=ROOT, check=True, timeout=180)
-    # A separate Postgres database and Redis database keep the app out of integration tests.
+    # Keep this launcher in its own local database.
     admin = "postgres://dev:dev@localhost:5433/postgres"
     exists = subprocess.check_output(["psql", admin, "-Atc",
-                                      "SELECT 1 FROM pg_database WHERE datname = 'space_station_v1'"], text=True)
+                                      "SELECT 1 FROM pg_database WHERE datname = 'space_station_local'"], text=True)
     if not exists.strip():
-        subprocess.run(["psql", admin, "-c", "CREATE DATABASE space_station_v1"], check=True)
-    env = os.environ.copy()
-    for line in (ROOT / ".env.example").read_text().splitlines():
-        if line and not line.startswith("#") and "=" in line:
-            key, value = line.split("=", 1)
-            env[key] = value.strip().strip("'\"")
-    # These are a local fixture's credentials, never the real IAM environment.
-    env.pop("SILICON_IAM_TEST_KEY", None)
-    env.pop("SILICON_IAM_WEBHOOK_SECRET_PREVIOUS", None)
+        subprocess.run(["psql", admin, "-c", "CREATE DATABASE space_station_local"], check=True)
+    env = {}
+    for source in (ROOT / ".env.example", ROOT / ".env"):
+        if not source.exists():
+            continue
+        for line in source.read_text().splitlines():
+            if line and not line.startswith("#") and "=" in line:
+                key, value = line.split("=", 1)
+                env[key] = value.strip().strip("'\"")
+    env.update(os.environ)
+    if not env.get("SILICON_ACCOUNTS_APP_SECRET"):
+        raise RuntimeError("Set SILICON_ACCOUNTS_APP_SECRET in .env or the environment; register the localhost callback in Silicon Developer.")
     keyfile = RUN / "encryption-key"
     if not keyfile.exists():
         keyfile.write_text(secrets.token_hex(32))
-    env.update(SS_KEY=keyfile.read_text().strip(), DATABASE_URL=admin.replace("/postgres", "/space_station_v1"),
+    env.update(SS_KEY=keyfile.read_text().strip(), DATABASE_URL=admin.replace("/postgres", "/space_station_local"),
                REDIS_URL="redis://localhost:6379/6", CARGO_TARGET_DIR=str(TARGET),
-               SS_BACKEND_URL="http://localhost:8080", IAM_STUB_ADDR="127.0.0.1:8099")
-    env.pop("IAM_STUB_SEED", None)
+               SS_BACKEND_URL="http://localhost:8080", SS_ORIGIN="http://localhost:3000")
     env.pop("VITE_WS_URL", None)
     if not skip_build:
         subprocess.run(["cargo", "build", "-p", "space-station-backend", "-p", "space-station-cli",
-                        "--bins", "--examples"], cwd=ROOT, env=env, check=True)
+                        "--bins"], cwd=ROOT, env=env, check=True)
     for folder in (ROOT / "apps/web", ROOT / "packages/space-station"):
         if not (folder / "node_modules").exists():
             # Both workspaces commit lockfiles; `ci` is reproducible and avoids
@@ -139,8 +141,6 @@ def start(skip_build):
         return process
 
     try:
-        iam = spawn("iam", [str(TARGET / "debug/examples/iam-stub")])
-        wait_http("http://127.0.0.1:8099/api/version", iam, expected=422)
         backend = spawn("backend", [str(TARGET / "debug/space-station-backend")])
         wait_http("http://localhost:8080/api/health", backend)
         web = spawn("web", ["npm", "run", "dev", "--", "--host", "localhost", "--port", "3000"], ROOT / "apps/web")
@@ -149,8 +149,8 @@ def start(skip_build):
         stop()
         raise
     print("\nSpace Station: http://localhost:3000\nBackend:       http://localhost:8080/api/health")
-    print("Sign in to org tos as Alice using the local IAM page. All records persist across restarts.")
-    print(f"CLI: SPACE_STATION_URL=http://localhost:8080 {TARGET / 'debug/spacestation'} login --org tos")
+    print("Sign in with Silicon Accounts. All records persist across restarts.")
+    print(f"CLI: SPACE_STATION_URL=http://localhost:8080 {TARGET / 'debug/spacestation'} login")
     print(f"Logs: {RUN}\nStop: python3 scripts/dev.py stop")
 
 

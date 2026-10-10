@@ -21,8 +21,8 @@ use std::time::Instant;
 use tokio::sync::watch;
 use uuid::Uuid;
 
+use crate::accounts;
 use crate::config::Config;
-use crate::iam;
 use crate::sql::GuardError;
 use crate::store::{ChError, Lease, Store};
 use crate::telemetry::Telemetry;
@@ -36,7 +36,7 @@ pub struct AppState(pub Arc<Inner>);
 pub struct Inner {
     pub cfg: Config,
     pub store: Store,
-    pub iam: iam::Client,
+    pub accounts: accounts::Client,
     pub lease: Lease,
     /// Set once on shutdown; long-lived loops leave when it changes.
     pub stop: watch::Receiver<bool>,
@@ -59,8 +59,8 @@ pub fn router(state: AppState) -> Router {
     let api = Router::new()
         .route("/health", get(health))
         .merge(auth::routes())
-        .merge(iam::session::routes())
-        .merge(iam::webhook::routes())
+        .merge(accounts::session::routes())
+        .merge(accounts::webhook::routes())
         .merge(tables::routes())
         .merge(query::routes())
         .merge(tokens::routes())
@@ -73,11 +73,6 @@ pub fn router(state: AppState) -> Router {
         .merge(notifications::routes());
     Router::new()
         .nest("/api", api)
-        // The URL registered with IAM (`--webhook-url …/webhooks/api/`); changing it there needs
-        // a review cycle, so the receiver answers at both paths — and, since axum matches a
-        // trailing slash strictly, with and without it.
-        .merge(iam::webhook::routes_at("/webhooks/api/"))
-        .merge(iam::webhook::routes_at("/webhooks/api"))
         .fallback(async || ApiError::not_found("route"))
         .layer(middleware::from_fn_with_state(state.clone(), observe))
         .with_state(state)
@@ -88,11 +83,12 @@ pub fn router(state: AppState) -> Router {
 async fn observe(State(state): State<AppState>, req: Request<axum::body::Body>, next: Next) -> Response {
     let path = req.uri().path().to_owned();
     let skip = matches!(path.as_str(), "/api/health" | "/api/ws/ingest" | "/api/ingest" | "/api/web/telemetry")
-        || path.starts_with("/webhooks/api");
+        || path == "/api/accounts/webhook";
     let method = req.method().to_string();
     let trace_id = Uuid::new_v4();
     let started = Instant::now();
-    let response = next.run(req).await;
+    let mut response = next.run(req).await;
+    response.headers_mut().insert(axum::http::header::CACHE_CONTROL, axum::http::HeaderValue::from_static("no-store"));
     if !skip && let Some(telemetry) = &state.telemetry {
         telemetry.request(trace_id, &method, &path, response.status().as_u16(), started);
     }

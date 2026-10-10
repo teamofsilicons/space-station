@@ -23,21 +23,20 @@ function Row(p: { title: string; hint: string; children: any }) {
 
 export function Settings() {
   const ws = useWorkspace();
-  const root = `/orgs/${encodeURIComponent(ws.org)}`;
   const [telemetry, setTelemetry] = createSignal(frontendTelemetryEnabled());
   return (
     <div class="page-body">
       <header class="page-head">
         <div>
           <h1>Settings</h1>
-          <p class="muted">For {ws.org}, as @{ws.me.id}.</p>
+          <p class="muted">Signed in as {ws.me.id}.</p>
         </div>
       </header>
-      <Row title="Access token" hint="Mission control runs your queries with it while you develop a window or a notification. Tied to you and this org; keep it in .env, never in code.">
-        <AccessToken root={root} hint={false} />
+      <Row title="Access token" hint="Mission control runs your queries with it while you develop a window or a notification. Tied to your account; keep it in .env, never in code.">
+        <AccessToken hint={false} />
       </Row>
-      <Webhooks root={root} />
-      <Keys root={root} />
+      <Webhooks />
+      <Keys />
       <Row title="Appearance" hint="Follows your system unless you choose. Kept in this browser.">
         <Segmented<Theme> label="Theme" value={theme()} options={["system", "light", "dark"]} names={{ system: "System", light: "Light", dark: "Dark" }} onChange={setTheme} />
       </Row>
@@ -60,8 +59,8 @@ export function Settings() {
   );
 }
 
-function Webhooks(p: { root: string }) {
-  const rows = resource(() => api<Webhook[]>(p.root + "/webhooks")),
+function Webhooks() {
+  const rows = resource(() => api<Webhook[]>("/webhooks")),
     a = action();
   const [url, setUrl] = createSignal(""),
     [made, setMade] = createSignal<{ id: string; secret: string }>();
@@ -89,7 +88,7 @@ function Webhooks(p: { root: string }) {
                     onClick={() => {
                       if (confirm("Delete this webhook? Deliveries to it will stop."))
                         a.run(async () => {
-                          await api(p.root + "/webhooks/" + h.id, "DELETE");
+                          await api("/webhooks/" + h.id, "DELETE");
                           await rows.reload();
                         });
                     }}
@@ -115,7 +114,7 @@ function Webhooks(p: { root: string }) {
         onSubmit={(e) => {
           e.preventDefault();
           a.run(async () => {
-            setMade(await api(p.root + "/webhooks", "POST", { url: url().trim() }));
+            setMade(await api("/webhooks", "POST", { url: url().trim() }));
             setUrl("");
             await rows.reload();
           });
@@ -131,13 +130,13 @@ function Webhooks(p: { root: string }) {
   );
 }
 
-function Keys(p: { root: string }) {
-  const rows = resource(() => api<ApiKey[]>(p.root + "/api-keys")),
+function Keys() {
+  const rows = resource(() => api<ApiKey[]>("/api-keys")),
     a = action();
   const [scopes, setScopes] = createSignal(["tables"]),
     [made, setMade] = createSignal<{ id: string; key: string }>();
   return (
-    <Row title="API keys" hint="Read tables and run queries, or read notifications, on behalf of the organization rather than a person.">
+    <Row title="API keys" hint="Read tables and run queries, or read notifications, as your signed-in carbon or silicon.">
       <Show when={rows.data()} fallback={<Loading error={rows.data.error} />}>
         {(items) => (
           <div class="items">
@@ -162,7 +161,7 @@ function Keys(p: { root: string }) {
                     onClick={() => {
                       if (confirm("Delete this API key? Requests with it will fail."))
                         a.run(async () => {
-                          await api(p.root + "/api-keys/" + k.id, "DELETE");
+                          await api("/api-keys/" + k.id, "DELETE");
                           await rows.reload();
                         });
                     }}
@@ -188,7 +187,7 @@ function Keys(p: { root: string }) {
         onSubmit={(e) => {
           e.preventDefault();
           a.run(async () => {
-            setMade(await api(p.root + "/api-keys", "POST", { scopes: scopes() }));
+            setMade(await api("/api-keys", "POST", { scopes: scopes() }));
             await rows.reload();
           });
         }}

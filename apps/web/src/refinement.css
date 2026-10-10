@@ -1,12 +1,18 @@
-/* Quiet UIArc controls over the existing multi-pane workspace. */
-:root { --bg:light-dark(#f3f5f8,#101318); --bg-2:light-dark(#e9edf3,#1d222c); --surface:light-dark(#fff,#191e27); --surface-2:light-dark(#fafbfc,#1d232d); --surface-3:light-dark(#f3f5f8,#262d39); --line:light-dark(#e6eaf0,#2d3541); --line-2:light-dark(#d6dde7,#414b5b); --ink:light-dark(#202a38,#e9eef5); --ink-2:light-dark(#4c5b6f,#c5cedc); --muted:light-dark(#65758a,#a0afc3); --faint:light-dark(#718096,#8b9bb1); --accent:light-dark(#2468d5,#8db6fa); --accent-soft:light-dark(#edf3ff,#253550); --accent-line:light-dark(#c7d9f7,#425d89); --r:14px; --r-sm:9px;
- --arc-surface:var(--surface); --arc-surface-muted:var(--surface-3); --arc-foreground:var(--ink); --arc-background:var(--bg); --arc-border:var(--line); --arc-border-strong:var(--line-2); --arc-text-secondary:var(--ink-2); --arc-text-muted:var(--muted); --arc-accent:var(--accent); --arc-accent-strong:light-dark(#1c54af,#a2c5ff); --arc-focus-ring:var(--accent); }
+/* Quiet Silicon UI controls over the existing multi-pane workspace. */
+:root {
+ --bg:var(--background); --bg-2:var(--surface-muted); --surface-2:var(--surface-raised); --surface-3:var(--surface-muted);
+ --line:var(--border); --line-2:var(--border-strong); --ink:var(--foreground); --ink-2:var(--text-secondary); --muted:var(--text-muted); --faint:var(--text-muted);
+ --accent-soft:var(--accent-subtle); --accent-line:color-mix(in oklab,var(--accent) 25%,var(--border)); --accent-ink:var(--accent-foreground);
+ --ok:var(--success); --warn:var(--warning); --bad:var(--danger); --r:var(--radius-container); --r-sm:var(--radius-control);
+ --shadow-1:var(--shadow-resting); --shadow-2:var(--shadow-floating); --control-height-md:38px;
+ --font-display:var(--display); --font-body:var(--sans);
+}
 body { -webkit-font-smoothing:antialiased; }
 .station { grid-template-columns:240px minmax(0,1fr); }
 .sidebar { padding:12px 10px; }
 .side-head { margin-bottom:14px; }
-.org-button { border:1px solid var(--line); box-shadow:none; border-radius:11px; height:42px; background:var(--surface); }
-.org-badge { border-radius:7px; background:var(--accent-soft); color:var(--accent); }
+.actor-button { border:1px solid var(--line); box-shadow:none; border-radius:11px; height:42px; background:var(--surface); }
+.actor-badge { border-radius:7px; background:var(--accent-soft); color:var(--accent); }
 .side-nav { gap:3px; }
 .side-link { height:34px; border-radius:9px; }
 .side-link.on { background:var(--accent-soft); color:var(--accent); box-shadow:none; }
@@ -26,15 +32,22 @@ h1 { font-size:28px; font-weight:500; letter-spacing:-.035em; }
 .panel { border-radius:16px; padding:22px; }
 .panel-head h2 { font-size:14px; font-weight:550; }
 .stat>b { font-weight:450; letter-spacing:-.035em; }
-button.primary,.button.primary,.arc-button.primary { color:var(--accent-ink); border-radius:10px; min-height:36px; }
-.arc-button { min-height:32px; height:auto; font-family:var(--sans); font-size:13px; }
-.arc-button.icon,.arc-button.small,.arc-button.ghost { min-height:28px; }
-.arc-button.ghost { padding:0 10px; }
-input.arc-input { min-height:38px; font-family:var(--sans); background:var(--surface); }
+button.primary,.button.primary,.silicon-button.primary { color:var(--accent-ink); border-radius:10px; min-height:36px; }
+.silicon-button { min-height:32px; height:auto; font-family:var(--sans); font-size:13px; }
+.silicon-button.icon,.silicon-button.small,.silicon-button.ghost { min-height:28px; }
+.silicon-button.ghost { padding:0 10px; }
+input.silicon-input { min-height:38px; font-family:var(--sans); background:var(--surface); }
 .segmented { border-radius:10px; padding:3px; max-width:100%; overflow-x:auto; }
-.segmented .arc-button { min-height:28px; height:28px; padding:0 10px; border:0; border-radius:7px; background:transparent; flex-shrink:0; }
-.segmented .arc-button.on { background:var(--surface); color:var(--ink); box-shadow:0 1px 3px #12223b12; }
+.segmented .silicon-button { min-height:28px; height:28px; padding:0 10px; border:0; border-radius:7px; background:transparent; flex-shrink:0; }
+.segmented .silicon-button.on { background:var(--surface); color:var(--ink); box-shadow:0 1px 3px #12223b12; }
 .dialog { border-radius:18px; }
-.crumb-org,.crumb-org+.crumb-sep { display:inline; }
+.crumb-actor,.crumb-actor+.crumb-sep { display:inline; }
 @container pane (max-width:720px) { .page-body { padding:24px 18px 44px; } .panel { padding:18px; } }
-@media(max-width:760px) { .station,.station.collapsed { grid-template-columns:minmax(0,1fr); } .sidebar { padding:16px 12px; } .station.nav-open .sidebar { background:var(--bg); } .frame { border-radius:0; } .strip-row { height:44px; } .crumb-org { font-size:12px; } }
+@media(max-width:760px) { .station,.station.collapsed { grid-template-columns:minmax(0,1fr); } .sidebar { padding:16px 12px; } .station.nav-open .sidebar { background:var(--bg); } .frame { border-radius:0; } .strip-row { height:44px; } .crumb-actor { font-size:12px; } }
+
+.silicon-login { display:grid; gap:16px; margin-top:24px; }
+.silicon-login label { margin:0; }
+.silicon-login .hint { margin:0; }
+.login-copy .row { gap:12px; }
+
+.saved-accounts { margin-bottom:24px; }

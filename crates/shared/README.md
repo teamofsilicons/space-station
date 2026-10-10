@@ -26,8 +26,8 @@ assert!(secrets::find_secret("// leftover: apikey-0123456789abcdef0123456789abcd
 - `wire` — `Batch`, `Entry`, `Metadata`, `Ack`, `Rejection`, `Code`: what a daemon sends and what
   the server answers.
 - `secrets` — minting, hashing and parsing table keys, access tokens, API keys and webhook
-  secrets, plus `find_secret`, the scanner that refuses window code carrying any of them or an IAM
-  credential (`stk-`, `ask_`, and every bearer and refresh token).
+  secrets, plus `find_secret`, the scanner that refuses window code carrying any of them or a Silicon Accounts
+  credential (STKs, refresh tokens, app secrets, and JWTs).
 - `sanitize` — the middle cut, the `[FILETYPE:SIZE]` replacement, and the record size check.
 
 MIT.

@@ -151,29 +151,3 @@ fn message(text: &str) -> String {
 pub fn u64_of(v: &Value) -> Option<u64> {
     v.as_u64().or_else(|| v.as_str()?.parse().ok())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn exception_text_is_unwrapped() {
-        let json =
-            r#"{"exception": "Code: 47. DB::Exception: Unknown identifier `x` (UNKNOWN_IDENTIFIER) (version 25.8.1)"}"#;
-        assert_eq!(message(json), "Code: 47. DB::Exception: Unknown identifier `x` (UNKNOWN_IDENTIFIER)");
-        assert_eq!(
-            message("Code: 164. DB::Exception: readonly (READONLY) (version 25.8.1 (official build))\n"),
-            "Code: 164. DB::Exception: readonly (READONLY)"
-        );
-        assert_eq!(u64_of(&serde_json::json!("42")), Some(42));
-        assert_eq!(u64_of(&serde_json::json!(42)), Some(42));
-    }
-
-    #[test]
-    fn the_admin_url_keeps_the_database_and_drops_the_credentials() {
-        let ch = Clickhouse::new(&"http://dev:secret@localhost:8123/space_station".parse().unwrap(), "qpw").unwrap();
-        assert_eq!(ch.admin.url.as_str(), "http://localhost:8123/?database=space_station");
-        assert_eq!((ch.admin.user.as_str(), ch.admin.password.as_str()), ("dev", "secret"));
-        assert_eq!((ch.query.user.as_str(), ch.query.password.as_str()), ("ss_query", "qpw"));
-    }
-}

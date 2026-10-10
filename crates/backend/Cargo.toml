@@ -31,10 +31,3 @@ aes-gcm = "0.10"
 hmac = "0.13"
 url = "2"
 futures-util = "0.3"
-silicon-iam-client = { version = "=5.2.1", path = "../../vendor/silicon-iam-client" }
-
-[dev-dependencies]
-space-station.workspace = true
-reqwest = { version = "0.13", default-features = false, features = ["cookies"] }
-tokio-tungstenite = "0.29"
-tempfile = "3"

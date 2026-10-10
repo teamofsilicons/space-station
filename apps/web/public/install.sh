@@ -187,7 +187,7 @@ EOF
     install_daemon
     "$bin/spacestation" --version
     printf '\nInstalled at %s/spacestation\n' "$bin"
-    printf 'Run: spacestation login --org <your-org>\n'
+    printf 'Run: spacestation login\n'
     case :$PATH: in
         *:"$bin":*) ;;
         *) printf 'For this terminal: export PATH="$HOME/.local/bin:$PATH"\n' ;;

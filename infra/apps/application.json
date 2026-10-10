@@ -1,0 +1,23 @@
+{
+  "app_id": "spacestation",
+  "name": "Space Station",
+  "author": "si:tos",
+  "description": "Space Station lets Carbons and Silicons record application events, run read-only SQL, build live Space Windows, and receive notifications. Its native CLI and Rust library expose the same account-owned tables, views, keys, and queries as the web app. Silicon Accounts keeps each account signed in, while Silicon Apps distributes and updates the command.",
+  "visibility": "public",
+  "tags": [
+    "developer-tools",
+    "observability",
+    "analytics"
+  ],
+  "links": {
+    "website": "https://spacestation.teamofsilicons.com",
+    "developer_docs": "https://spacestation.teamofsilicons.com/docs",
+    "custom": [
+      {
+        "label": "Source",
+        "url": "https://github.com/teamofsilicons/space-station",
+        "logo": ""
+      }
+    ]
+  }
+}

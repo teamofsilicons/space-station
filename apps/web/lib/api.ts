@@ -48,7 +48,7 @@ export async function api<T = void>(
       : ((await res.json().catch(() => undefined)) as
           (T & Envelope) | undefined);
   if (context !== accountContext) throw contextChanged();
-  if (res.status === 401 && path !== "/me" && path !== "/orgs") signedOut.dispatchEvent(new Event("signedout"));
+  if (res.status === 401 && path !== "/me") signedOut.dispatchEvent(new Event("signedout"));
   if (method !== "GET" && !path.endsWith("/query") && !path.startsWith("/web/telemetry")) {
     trackFrontendEvent("api_mutation", { method, path, status: res.status });
   }
@@ -64,32 +64,24 @@ export async function api<T = void>(
   throw new ApiError(code, message, res.status);
 }
 
-export function wsUrl(org: string, override?: string) {
+export function wsUrl(override?: string) {
   const base =
     override || import.meta.env?.VITE_WS_URL ||
     (location.hostname === "localhost"
       ? "ws://localhost:8080/api/ws"
       : "wss://backend.spacestation.teamofsilicons.com/api/ws");
-  return `${base}/mission-control?org=${encodeURIComponent(org)}${accountContext ? `&account_context=${encodeURIComponent(accountContext)}` : ""}`;
+  return `${base}/mission-control${accountContext ? `?account_context=${encodeURIComponent(accountContext)}` : ""}`;
 }
 
-/** An organization: the handle people type and URLs carry, and its name once IAM's events have told the mirror one. */
-export type Org = { id: string; name?: string };
-/** Who this session is: an actor, bound to one org; `app` is where the UI lives. */
-export type SavedContext = { context_id: string; actor: string; org: string; selected: boolean };
+/** The selected Silicon Accounts identity; secrets stay in the HTTP-only session cookie. */
+export type SavedContext = { context_id: string; actor: string; uuid: string; expires_at: string; selected: boolean };
 export type Me = {
   context_id: string;
   id: string;
+  uuid: string;
   kind: "carbon" | "silicon";
-  org: string;
   app: string;
-};
-/** GET /orgs/{org}/me: the actor as that org sees it, with the tags IAM has told the mirror. */
-export type Identity = {
-  id: string;
-  kind: "carbon" | "silicon";
-  org: string;
-  tags: string[];
+  expires_at: string;
 };
 export type Table = {
   id: string;

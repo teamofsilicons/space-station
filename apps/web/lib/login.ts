@@ -1,8 +1,7 @@
 export type IdentityKind = "carbon" | "silicon";
 
-export function loginUrl(kind: IdentityKind, next = "/", org?: string, attempt?: string) {
+export function loginUrl(kind: IdentityKind, next = "/", attempt?: string) {
   const query = new URLSearchParams({ identity_kind: kind, next });
-  if (org) query.set("org", org);
   if (attempt) {
     query.set("attempt_id", attempt);
     query.set("display", "popup");
@@ -14,16 +13,16 @@ let cancelPending: (() => void) | undefined;
 export function cancelLogin() { cancelPending?.(); }
 
 /** Only the server callback can complete this attempt; a closed popup never signs us in. */
-export function beginLogin(kind: IdentityKind, next = "/", org?: string): Promise<void> {
+export function beginLogin(kind: IdentityKind, next = "/"): Promise<void> {
   const origin = window.location.origin;
   const destination = new URL(next, origin);
   if (!next.startsWith("/") || next.startsWith("//") || next.includes("\\") || destination.origin !== origin)
     return Promise.reject(new Error("The return destination must be a page in this application."));
   cancelLogin();
   const attempt = crypto.randomUUID();
-  const popup = window.open(loginUrl(kind, next, org, attempt), "_blank", "popup=yes,width=560,height=720");
+  const popup = window.open(loginUrl(kind, next, attempt), "_blank", "popup=yes,width=560,height=720");
   if (!popup) {
-    window.location.assign(loginUrl(kind, next, org));
+    window.location.assign(loginUrl(kind, next));
     return Promise.resolve();
   }
   return new Promise((resolve, reject) => {

@@ -24,9 +24,9 @@ put() {
 }
 restore() {
   [ -x "$bin/space-station-backend.previous" ] || return 1
-  # IAM 5 invalidates legacy sessions. A pre-cutover binary would accept them again.
-  if [ "$(cat "$contract.previous" 2>/dev/null || true)" != 5 ]; then
-    printf 'Refusing rollback across the IAM 5 session boundary; deploy a repaired IAM 5 build\n' >&2
+  # Accounts sessions and ownership must never be read by an old IAM executable.
+  if [ "$(cat "$contract.previous" 2>/dev/null || true)" != accounts-1 ]; then
+    printf 'Refusing rollback across the Accounts boundary; deploy a repaired Accounts build\n' >&2
     return 1
   fi
   put "$bin/space-station-backend.previous"
@@ -47,7 +47,7 @@ if [ -x "$bin/space-station-backend" ]; then cp -p "$bin/space-station-backend" 
 if [ -f "$revision" ]; then cp -p "$revision" "$revision.previous"; fi
 if [ -f "$contract" ]; then cp -p "$contract" "$contract.previous"; else rm -f "$contract.previous"; fi
 put "$release/space-station-backend"
-printf '5\n' > "$contract"
+printf 'accounts-1\n' > "$contract"
 systemctl daemon-reload
 systemctl enable space-station
 systemctl restart space-station

@@ -1,7 +1,7 @@
 //! Where a fired notification goes. The `notification` frame reaches every mission-control
 //! socket the recipients name — that is what a `@carbon` gets, and a `@silicon` too when it has
 //! one open — and the same event is POSTed to every webhook behind them: a silicon's own
-//! delivery webhook, and any `webhook:{id}` of the org. The body is exactly
+//! delivery webhook, and any `webhook:{id}` of the account. The body is exactly
 //! `{dedup_key, text, metadata}`, signed over `"{seconds}.{body}"`, tried at 0 s, 10 s and 60 s,
 //! and only the last failure becomes a `dev_errors` row.
 
@@ -40,7 +40,7 @@ pub fn send(state: &AppState, org: &str, recipients: Vec<String>, frame: Value) 
     });
 }
 
-/// The webhooks behind `recipients`: a silicon's own delivery webhook for `@silicon`, the org's
+/// The webhooks behind `recipients`: a silicon's own delivery webhook for `@silicon`, the account's
 /// for `webhook:{id}`. A carbon has none — a carbon is the WS frame and the stored event.
 async fn targets(state: &AppState, org: &str, recipients: &[String]) -> Result<Vec<(String, String)>, sqlx::Error> {
     let (mut actors, mut ids) = (Vec::new(), Vec::new());
@@ -66,7 +66,7 @@ async fn targets(state: &AppState, org: &str, recipients: &[String]) -> Result<V
         .collect())
 }
 
-/// One webhook, up to three times; the final failure is the org's to see.
+/// One webhook, up to three times; the final failure is the account's to see.
 async fn post(state: &AppState, org: &str, frame: &Value, (url, secret): (String, String)) {
     let body = json!({"dedup_key": frame["dedup_key"], "text": frame["text"], "metadata": frame["metadata"]});
     let body = serde_json::to_vec(&body).unwrap_or_default();

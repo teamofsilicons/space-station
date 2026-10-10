@@ -10,9 +10,14 @@ const read = (): Theme => {
     return "system";
   }
 };
-const apply = (t: Theme) => (t === "system" ? delete document.documentElement.dataset.theme : (document.documentElement.dataset.theme = t));
+const system = matchMedia("(prefers-color-scheme: dark)");
+const apply = (t: Theme) => {
+  document.documentElement.dataset.theme = t === "system" ? (system.matches ? "dark" : "light") : t;
+  document.documentElement.dataset.accent = "blue";
+};
 const [theme, set] = createSignal<Theme>(read());
 apply(theme());
+system.addEventListener("change", () => { if (theme() === "system") apply("system"); });
 
 export { theme };
 export function setTheme(t: Theme) {

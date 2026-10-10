@@ -1,7 +1,5 @@
-//! Access lists: `["@c:alice", "@si:bot", "tech"]`. `@` names an actor, `webhook:` an org webhook
-//! (recipients only), anything else is a tag matched exactly. Whoever creates or edits something
-//! is on its list, so every check is one membership test and nothing can be left unreachable.
-//! `visible_tables` is that test over an org's tables, cached per identity for 60 s.
+//! Account-owned visibility and legacy access-list serialization. Historical lists remain
+//! readable, while notification delivery matches only an explicit Carbon or Silicon handle.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -9,8 +7,8 @@ use std::time::Instant;
 
 use serde_json::Value;
 
+use crate::accounts::{CACHE_TTL, Identity, Kind};
 use crate::http::{ApiError, AppState};
-use crate::iam::{CACHE_TTL, Identity, Kind};
 use crate::lock;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -32,18 +30,13 @@ impl<'a> Entry<'a> {
     }
 }
 
-/// Does `list` name this identity or one of its tags?
+/// Does the recipient list name this account?
 pub fn matches(identity: &Identity, list: &[String]) -> bool {
     list.iter().any(|entry| match Entry::parse(entry) {
         Entry::Actor(actor) => actor == identity.id,
-        Entry::Tag(tag) => identity.tags.iter().any(|mine| mine == tag),
+        Entry::Tag(_) => false,
         Entry::Webhook(_) => false,
     })
-}
-
-/// IAM org owners and admins can inspect every table in their org.
-pub fn can_view_all(role: Option<&str>) -> bool {
-    matches!(role, Some("owner" | "admin"))
 }
 
 /// `list` with `@actor` appended when absent: the actor writing an access list stays on it, so
@@ -83,7 +76,7 @@ pub struct Cache(Mutex<HashMap<(String, String), Visible>>);
 
 type Visible = (Vec<String>, Instant);
 
-/// The org's tables this identity may read, sorted; one Postgres read per identity per minute.
+/// The account's tables this identity may read, sorted; one Postgres read per identity per minute.
 pub async fn visible_tables(state: &AppState, identity: &Identity) -> Result<Vec<String>, ApiError> {
     let key = (identity.org.clone(), identity.id.clone());
     if let Some((tables, at)) = lock(&state.visible.0).get(&key)
@@ -91,82 +84,15 @@ pub async fn visible_tables(state: &AppState, identity: &Identity) -> Result<Vec
     {
         return Ok(tables.clone());
     }
-    let role: Option<String> =
-        sqlx::query_scalar("SELECT org_role FROM iam_members WHERE org = $1 AND actor = $2 AND status = 'active'")
-            .bind(&identity.org)
-            .bind(&identity.id)
-            .fetch_optional(&state.store.pg)
-            .await?;
-    let rows: Vec<(String, Value)> = sqlx::query_as("SELECT id, access FROM tables WHERE org = $1 ORDER BY id")
+    let tables: Vec<String> = sqlx::query_scalar("SELECT id FROM tables WHERE org = $1 ORDER BY id")
         .bind(&identity.org)
         .fetch_all(&state.store.pg)
         .await?;
-    let tables: Vec<String> = rows
-        .into_iter()
-        .filter(|(_, access)| can_view_all(role.as_deref()) || matches(identity, &list(access)))
-        .map(|(id, _)| id)
-        .collect();
     lock(&state.visible.0).insert(key, (tables.clone(), Instant::now()));
     Ok(tables)
 }
 
-/// A table was created or its access changed: the org's cached visibility is stale.
+/// A table was created or its access changed: the account's cached visibility is stale.
 pub fn forget(state: &AppState, org: &str) {
     lock(&state.visible.0).retain(|(o, _), _| o != org);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::iam::Kind;
-
-    fn alice() -> Identity {
-        Identity { kind: Kind::Carbon, id: "c:alice".into(), org: "tos".into(), tags: vec!["tech".into()] }
-    }
-
-    fn strings(list: &[&str]) -> Vec<String> {
-        list.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn entries_parse_by_prefix() {
-        assert_eq!(Entry::parse("@c:alice"), Entry::Actor("c:alice"));
-        assert_eq!(Entry::parse("@si:bot"), Entry::Actor("si:bot"));
-        assert_eq!(Entry::parse("webhook:abc"), Entry::Webhook("abc"));
-        assert_eq!(Entry::parse("tech"), Entry::Tag("tech"));
-    }
-
-    #[test]
-    fn an_actor_matches_by_id_or_tag_and_never_by_webhook() {
-        assert!(matches(&alice(), &strings(&["@c:alice"])));
-        assert!(matches(&alice(), &strings(&["@c:bob", "tech"])));
-        assert!(!matches(&alice(), &strings(&["@c:bob", "ops", "Tech"])), "tags are case-sensitive");
-        assert!(!matches(&alice(), &strings(&["webhook:alice", "c:alice"])));
-        assert!(!matches(&alice(), &[]));
-    }
-
-    #[test]
-    fn only_owners_and_admins_see_every_table() {
-        assert!(can_view_all(Some("owner")));
-        assert!(can_view_all(Some("admin")));
-        assert!(!can_view_all(Some("member")));
-        assert!(!can_view_all(None));
-    }
-
-    #[test]
-    fn the_writing_actor_is_appended_once() {
-        assert_eq!(with_actor(strings(&["ops"]), "c:alice"), strings(&["ops", "@c:alice"]));
-        assert_eq!(with_actor(strings(&["@c:alice", "ops"]), "c:alice"), strings(&["@c:alice", "ops"]));
-    }
-
-    #[test]
-    fn webhooks_and_empty_names_are_not_access_entries() {
-        assert!(validate(&strings(&["@c:alice", "@si:bot", "tech"])).is_ok());
-        for old in ["@alice", "@bot:tos", "@c:si:bot"] {
-            assert_eq!(validate(&strings(&[old])).unwrap_err().code, "invalid_access");
-        }
-        assert_eq!(validate(&strings(&["webhook:x"])).unwrap_err().code, "invalid_access");
-        assert_eq!(validate(&strings(&["@"])).unwrap_err().code, "invalid_access");
-        assert_eq!(validate(&strings(&[""])).unwrap_err().code, "invalid_access");
-    }
 }

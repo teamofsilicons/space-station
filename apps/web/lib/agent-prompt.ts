@@ -1,17 +1,17 @@
 // The text a carbon hands to an agent so it can write a window's processor and renderer without
 // reading the docs first. Pure: built from what the window page already has. The processor example
-// is the one in docs/space-windows.md, word for word (agent-prompt.test.ts holds them together),
-// over the org's table when it has exactly one.
+// is the one in docs/space-windows.md, word for word,
+// over the actor's table when it has exactly one.
 
-export function agentPrompt(p: { org: string; window: { id: string; name: string }; tables: string[] }): string {
-  const { org, window: w } = p;
+export function agentPrompt(p: { actor: string; window: { id: string; name: string }; tables: string[] }): string {
+  const { actor, window: w } = p;
   const tables = p.tables.length ? p.tables.join(", ") : "(none yet — create one under Tables first)";
   const table = p.tables.length === 1 ? p.tables[0] : "orders";
   return `You are writing a Space Window for Space Station. A Space Window is a processor (JavaScript)
 that turns records into one small JSON document, plus a renderer (HTML) that shows it live.
 Deliver two files: processor.js and renderer.html.
 
-Org: ${org}. Window: "${w.name}" (id ${w.id}). Tables in this org: ${tables}.
+Account: ${actor}. Window: "${w.name}" (id ${w.id}). Tables owned by this account: ${tables}.
 
 ## processor.js
 
@@ -69,9 +69,9 @@ mission_control and stale in scope when Vue is on the page. The renderer cannot 
 </script>
 
 ## Develop, then publish
-- npm i -g @teamofsilicons/space-station. Put SPACE_STATION_URL, SPACE_STATION_ACCESS_TOKEN and
-  SPACE_STATION_ORG in a .env next to processor.js and renderer.html (the token is on the window
-  page; it belongs to the person, not the window). Run space-station-dev and open
+- npm i -g @teamofsilicons/space-station. Put SPACE_STATION_URL and SPACE_STATION_ACCESS_TOKEN
+  in a .env next to processor.js and renderer.html (the token is on the window
+  page; it belongs to the account, not the window). Run space-station-dev and open
   http://127.0.0.1:4747: the same runtime as production, reloading on change.
 - Never put the access token (spacewindow-<32 hex>), a table key or an API key in the code, not
   even in a comment: the server refuses such a version (secret_in_code).

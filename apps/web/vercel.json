@@ -8,15 +8,7 @@
       "destination": "https://backend.spacestation.teamofsilicons.com/api/:path*"
     },
     {
-      "source": "/webhooks/api/",
-      "destination": "https://backend.spacestation.teamofsilicons.com/webhooks/api/"
-    },
-    {
-      "source": "/webhooks/api",
-      "destination": "https://backend.spacestation.teamofsilicons.com/webhooks/api"
-    },
-    {
-      "source": "/((?!api/|webhooks/|assets/|brand/|mission-control.js|install.sh|downloads/).*)",
+      "source": "/((?!api/|assets/|brand/|mission-control.js|install.sh|downloads/|licenses/).*)",
       "destination": "/index.html"
     }
   ],
@@ -66,15 +58,6 @@
         {
           "key": "Cache-Control",
           "value": "private, no-store"
-        }
-      ]
-    },
-    {
-      "source": "/webhooks/:path*",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "no-store"
         }
       ]
     },

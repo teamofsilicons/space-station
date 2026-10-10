@@ -6,12 +6,16 @@ import { parseDefinition, testSummary } from "../lib/notification-def";
 import { action, ago, Empty, ErrorText, Loading, Modal, resource, when } from "./ui";
 import { useWorkspace } from "./tabs";
 import { Icon } from "./icons";
+import { SiliconCard } from "./silicon-ui";
 
 export function Notifications() {
   const ws = useWorkspace();
-  const root = `/orgs/${encodeURIComponent(ws.org)}`,
-    rows = resource(() => api<Notification[]>(root + "/notifications"), 15000);
+  const rows = resource(() => api<Notification[]>("/notifications"), 15000);
   const [editing, setEditing] = createSignal<{ id?: string; text: string }>();
+  const editable = (n: Notification) => {
+    const { access: _legacyAccess, ...definition } = n.def as Notification["def"] & { access?: string[] };
+    return JSON.stringify({ ...definition, enabled: n.enabled, recipients: n.recipients }, null, 2);
+  };
   const template = () => {
     const table = ws.tables.data()?.[0]?.id || "orders",
       actor = ws.me.id;
@@ -24,7 +28,6 @@ export function Notifications() {
         sql: `SELECT toString(record_id) AS dedup_key, 'New record in ${table}' AS text, map('table', '${table}') AS metadata FROM ${table}`,
         delay: "2s",
         cooldown: "10m",
-        access: [`@${actor}`],
         recipients: [`@${actor}`],
       },
       null,
@@ -61,11 +64,10 @@ export function Notifications() {
               <For each={items()}>
                 {(n) => (
                   <NotificationCard
-                    root={root}
                     n={n}
                     actor={ws.me.id}
                     reload={rows.reload}
-                    edit={() => setEditing({ id: n.id, text: JSON.stringify({ ...n.def, enabled: n.enabled, recipients: n.recipients }, null, 2) })}
+                    edit={() => setEditing({ id: n.id, text: editable(n) })}
                   />
                 )}
               </For>
@@ -76,7 +78,6 @@ export function Notifications() {
       <Show when={editing()} keyed>
         {(edit) => (
           <NotificationEditor
-            root={root}
             initial={edit.text}
             id={edit.id}
             close={() => setEditing(undefined)}
@@ -91,14 +92,14 @@ export function Notifications() {
   );
 }
 
-function NotificationCard(p: { root: string; n: Notification; actor: string; reload: () => unknown; edit: () => void }) {
+function NotificationCard(p: { n: Notification; actor: string; reload: () => unknown; edit: () => void }) {
   const a = action(),
     [events, setEvents] = createSignal<NotificationEvent[]>(),
     [result, setResult] = createSignal("");
-  const path = () => p.root + "/notifications/" + p.n.id;
+  const path = () => "/notifications/" + p.n.id;
   const subscribed = () => p.n.recipients.includes("@" + p.actor);
   return (
-    <section class="panel notification" classList={{ paused: !p.n.enabled }}>
+    <SiliconCard class="panel notification" classList={{ paused: !p.n.enabled }}>
       <div class="n-head">
         <span class="title-icon"><Icon name="bell" /></span>
         <div class="grow">
@@ -194,11 +195,11 @@ function NotificationCard(p: { root: string; n: Notification; actor: string; rel
           </Show>
         )}
       </Show>
-    </section>
+    </SiliconCard>
   );
 }
 
-function NotificationEditor(p: { root: string; initial: string; id?: string; close: () => void; saved: () => void }) {
+function NotificationEditor(p: { initial: string; id?: string; close: () => void; saved: () => void }) {
   const [text, setText] = createSignal(p.initial),
     a = action();
   const check = () => parseDefinition(text()).errors;
@@ -210,7 +211,7 @@ function NotificationEditor(p: { root: string; initial: string; id?: string; clo
           a.run(async () => {
             const parsed = parseDefinition(text());
             if (!parsed.body) throw Error(parsed.errors.join("\n"));
-            await api(p.root + "/notifications" + (p.id ? "/" + p.id : ""), p.id ? "PUT" : "POST", parsed.body);
+            await api("/notifications" + (p.id ? "/" + p.id : ""), p.id ? "PUT" : "POST", parsed.body);
             p.saved();
           });
         }}

@@ -15,7 +15,6 @@ webhook) and webhooks.
   "sql": "SELECT record.id::String AS dedup_key, concat('Order ', record.id::String) AS text, map('amount', record.amount::String) AS metadata FROM orders WHERE record.amount::Float64 > 100",
   "delay": "2s",
   "cooldown": "10m",
-  "access": ["@c:alice", "ops"],
   "recipients": ["@c:alice", "webhook:7f3a1c22-9b40-4d2e-9a1e-0f5c3b8e6d11"]
 }
 ```
@@ -28,8 +27,7 @@ webhook) and webhooks.
 | `sql` | must return `dedup_key`, `text`, `metadata` per row — see [SQL](/docs/sql) |
 | `delay` | how long after a trigger the SQL runs, so tables it joins have time to fill. Default `2s`, at most `1h` |
 | `cooldown` | how long the same `dedup_key` is silenced after it fired. Default `10m`, at most `30d` |
-| `access` | who can see and edit the notification: `@actor` ids and tag names; the creator is added |
-| `recipients` | who gets it: `@actor` and `webhook:<id>`. Optional; a subset of `access` |
+| `recipients` | who gets it: your own `@c:handle` or `@si:handle`, or an account-owned `webhook:<id>`. Optional |
 
 `delay` and `cooldown` are `<integer><unit>` with units `ms`, `s`, `m`, `h`, `d` — `"500ms"`,
 `"2s"`, `"10m"`, `"1h"`, `"7d"`.
@@ -72,13 +70,12 @@ in the last hour") and scheduled summaries — anything snapshot-shaped:
   "triggers": [{ "schedule": "0 * * * *" }],
   "sql": "SELECT 'quiet' AS dedup_key, 'No signups in the last hour' AS text, map() AS metadata FROM signups HAVING countIf(registered_ts_ms > toUnixTimestamp64Milli(now64()) - 3600000) = 0",
   "cooldown": "3h",
-  "access": ["growth"]
 }
 ```
 
 A trigger that arrives while the notification is already running re-arms it for one more run
 after the current one. A SQL error leaves the cursors where they were and is written to the dev
-errors (Option+Shift+D on any tab of the org, `spacestation errors` in the CLI).
+errors (Option+Shift+D on any tab of the account, `spacestation errors` in the CLI).
 
 ## dedup_key and cooldown
 
@@ -92,21 +89,16 @@ are bad rows: nothing is sent and a dev error is recorded.
 
 ## Recipients and subscribing
 
-`recipients` is the delivery set. Anyone in `access` can **subscribe** (adds their complete `@c:` or `@si:` ID) and
-**unsubscribe** — in the app, or with `spacestation notifications subscribe <id>` /
-`unsubscribe <id>` — and whoever edits the definition can set the whole list. It must stay a
-subset of `access`; a `webhook:<id>` recipient is the exception, being a thing and not a member.
+`recipients` is the delivery set. **Subscribe** adds your own complete `@c:` or `@si:` ID;
+**Unsubscribe** removes it. You can also deliver to a webhook owned by your account.
 
-- `@c:alice` — appears in the Notifications tab and arrives live in any open window.
-- `@si:bot` — is POSTed to the silicon's own delivery webhook (`spacestation webhook set`;
-  `webhook rm` removes it, after which a delivery to that silicon is a dev error until it sets one).
-- `webhook:<id>` — is POSTed to that org webhook (Settings → Webhooks). Deleting the webhook
-  (`spacestation webhooks rm <id>`) also removes it from every notification's recipients, so no
-  definition keeps addressing a thing that no longer exists.
+- Your `@c:handle` receives updates live in open windows.
+- Your `@si:handle` receives deliveries at the Silicon's own webhook (`spacestation webhook set`).
+- `webhook:<id>` receives a signed POST at that account webhook (Settings → Webhooks).
+  Deleting it removes it from every notification's recipients.
 
-Recipient actor syntax is validated, and each actor must be named in the access list, already
-subscribed, or the person saving it. Existence is not looked up: a well-formed `@c:bob` who is
-not in the org receives nothing. Tags are access entries, not recipients.
+Recipients must identify the owning account or one of its webhooks. Another account's handle
+or webhook cannot be used to deliver data from this namespace.
 
 ## Testing
 

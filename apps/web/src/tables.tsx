@@ -1,12 +1,12 @@
-import { ArcButton, ArcInput } from './arc';
+import { SiliconBadge, SiliconButton, SiliconInput } from './silicon-ui';
 // Tables: the overview (count, records, average lag, the most active over a period, polled every
-// 5 s), the list with access, key rotation and retirement, the create dialog that shows the key
+// 5 s), the list with ownership, key rotation and retirement, the create dialog that shows the key
 // once, and one table's records — a snapshot, newest first, paged by cursor.
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 import { api, TABLE_ID, type Overview, type Table } from "../lib/api";
 import { loadRecordPage, openSnapshot, type Snapshot, type TableRecord } from "../lib/table-records";
 import { trackFrontendEvent } from "../lib/telemetry";
-import { Access, action, ago, count, Empty, ErrorText, Loading, Modal, openMenu, resource, Secret, Segmented, useTab, when } from "./ui";
+import { action, ago, count, Empty, ErrorText, Loading, Modal, openMenu, resource, Secret, Segmented, useTab, when } from "./ui";
 import { Link, useWorkspace } from "./tabs";
 import { Icon } from "./icons";
 
@@ -29,7 +29,7 @@ export function NewTable(p: { close: () => void; rotated?: { table: string; key:
               a.run(async () => {
                 if (!TABLE_ID.test(id())) throw Error("Use 1–50 lowercase letters and digits.");
                 const table = id();
-                const { key } = await api<{ key: string }>(`/orgs/${encodeURIComponent(ws.org)}/tables`, "POST", { id: table });
+                const { key } = await api<{ key: string }>(`/tables`, "POST", { id: table });
                 trackFrontendEvent("table_created", { table });
                 setMade({ table, key });
                 ws.tables.reload();
@@ -38,13 +38,13 @@ export function NewTable(p: { close: () => void; rotated?: { table: string; key:
           >
             <label>
               Table ID
-              <ArcInput required pattern="[a-z0-9]{1,50}" maxlength={50} placeholder="orders" value={id()} onInput={(e) => setId(e.currentTarget.value.toLowerCase())} autofocus />
+              <SiliconInput required pattern="[a-z0-9]{1,50}" maxlength={50} placeholder="orders" value={id()} onInput={(e) => setId(e.currentTarget.value.toLowerCase())} autofocus />
             </label>
-            <p class="hint">Lowercase letters and digits, unique in {ws.org}. Records sent with the table's key land here.</p>
+            <p class="hint">Lowercase letters and digits, unique to your account. Records sent with the table's key land here.</p>
             <ErrorText message={a.error()} />
             <div class="dialog-foot">
-              <ArcButton type="button" onClick={p.close}>Cancel</ArcButton>
-              <ArcButton class="primary" disabled={a.busy()}>Create table</ArcButton>
+              <SiliconButton type="button" onClick={p.close}>Cancel</SiliconButton>
+              <SiliconButton class="primary" disabled={a.busy()}>Create table</SiliconButton>
             </div>
           </form>
         }
@@ -59,15 +59,15 @@ export function NewTable(p: { close: () => void; rotated?: { table: string; key:
               <a class="button ghost" href="/docs/getting-started" target="_blank">
                 Send your first records <Icon name="external" />
               </a>
-              <ArcButton
+              <SiliconButton
                 class="primary"
                 onClick={() => {
                   p.close();
-                  ws.tabs.reveal(`/o/${ws.org}/tables/${m().table}`, "tab");
+                  ws.tabs.reveal(`/a/${ws.actor}/tables/${m().table}`, "tab");
                 }}
               >
                 Open {m().table}
-              </ArcButton>
+              </SiliconButton>
             </div>
           </>
         )}
@@ -78,11 +78,10 @@ export function NewTable(p: { close: () => void; rotated?: { table: string; key:
 
 export function Tables() {
   const ws = useWorkspace();
-  const root = `/orgs/${encodeURIComponent(ws.org)}`;
   const [retired, setRetired] = createSignal(false);
   const [period, setPeriod] = createSignal<(typeof PERIODS)[number]>("5h");
-  const tables = resource(() => api<Table[]>(`${root}/tables?retired=${retired()}`), 5000, () => (retired() ? "retired" : "active"));
-  const overview = resource(() => api<Overview>(`${root}/tables/overview?window=${period()}&retired=${retired()}`), 5000, () => `${period()}:${retired()}`);
+  const tables = resource(() => api<Table[]>(`/tables?retired=${retired()}`), 5000, () => (retired() ? "retired" : "active"));
+  const overview = resource(() => api<Overview>(`/tables/overview?window=${period()}&retired=${retired()}`), 5000, () => `${period()}:${retired()}`);
   const [rotated, setRotated] = createSignal<{ table: string; key: string }>();
   const a = action();
   const reload = () => Promise.all([tables.reload(), ws.tables.reload()]);
@@ -90,18 +89,18 @@ export function Tables() {
   const top = () => Math.max(1, ...(overview.data()?.top.map((t) => t.records) || []));
   const menu = (e: MouseEvent, t: Table) =>
     openMenu(e, [
-      { label: "Open in new tab", icon: "external", run: () => ws.tabs.open(`/o/${ws.org}/tables/${t.id}`, "tab") },
-      { label: "Open in split view", icon: "split", run: () => ws.tabs.open(`/o/${ws.org}/tables/${t.id}`, "split") },
+      { label: "Open in new tab", icon: "external", run: () => ws.tabs.open(`/a/${ws.actor}/tables/${t.id}`, "tab") },
+      { label: "Open in split view", icon: "split", run: () => ws.tabs.open(`/a/${ws.actor}/tables/${t.id}`, "split") },
       "-",
       ...(retired()
-        ? [{ label: "Restore", icon: "reload", run: () => a.run(async () => { await api(`${root}/tables/${t.id}/unretire`, "POST"); trackFrontendEvent("table_restored", { table: t.id }); await reload(); }) }]
+        ? [{ label: "Restore", icon: "reload", run: () => a.run(async () => { await api(`/tables/${t.id}/unretire`, "POST"); trackFrontendEvent("table_restored", { table: t.id }); await reload(); }) }]
         : [
             {
               label: "Rotate key",
               icon: "key",
               run: () =>
                 confirm(`Rotate the key for ${t.id}? The current key will stop working.`) &&
-                a.run(async () => setRotated({ table: t.id, key: (await api<{ key: string }>(`${root}/tables/${t.id}/rotate-key`, "POST")).key })),
+                a.run(async () => setRotated({ table: t.id, key: (await api<{ key: string }>(`/tables/${t.id}/rotate-key`, "POST")).key })),
             },
             {
               label: "Retire",
@@ -109,7 +108,7 @@ export function Tables() {
               danger: true,
               run: () =>
                 confirm(`Retire ${t.id}? Its key will stop accepting new records, while existing records remain queryable.`) &&
-                a.run(async () => { await api(`${root}/tables/${t.id}/retire`, "POST"); trackFrontendEvent("table_retired", { table: t.id }); await reload(); }),
+                a.run(async () => { await api(`/tables/${t.id}/retire`, "POST"); trackFrontendEvent("table_retired", { table: t.id }); await reload(); }),
             },
           ]),
     ]);
@@ -121,9 +120,9 @@ export function Tables() {
           <p class="muted">Records arrive with a table's key. Space Windows and notifications read them with SQL.</p>
         </div>
         <Show when={!retired()}>
-          <ArcButton class="primary" onClick={() => ws.create("table")}>
+          <SiliconButton class="primary" onClick={() => ws.create("table")}>
             <Icon name="plus" /> New table
-          </ArcButton>
+          </SiliconButton>
         </Show>
       </header>
       <Show when={!retired() && rows() && !rows()!.length} fallback={
@@ -156,7 +155,7 @@ export function Tables() {
                     <Show when={o().top.length} fallback={<p class="muted">Nothing arrived in this period.</p>}>
                       <For each={o().top}>
                         {(t) => (
-                          <Link href={`/o/${ws.org}/tables/${t.id}`} class="bar-row">
+                          <Link href={`/a/${ws.actor}/tables/${t.id}`} class="bar-row">
                             <code>{t.id}</code>
                             <span class="bar"><i style={{ width: `${(t.records / top()) * 100}%` }} /></span>
                             <span class="num">{count(t.records)}</span>
@@ -180,27 +179,27 @@ export function Tables() {
                   <div class="gt-head" role="row">
                     <span>Table</span>
                     <span class="num">Records</span>
-                    <span class="wide">Access</span>
+                    <span class="wide">Owner</span>
                     <span class="wide">Created</span>
                     <span />
                   </div>
                   <For each={list()}>
                     {(t) => (
                       <div class="gt-row" role="row" onContextMenu={(e) => menu(e, t)}>
-                        <Link href={`/o/${ws.org}/tables/${t.id}`} class="gt-main">
+                        <Link href={`/a/${ws.actor}/tables/${t.id}`} class="gt-main">
                           <Icon name="table" />
                           <code>{t.id}</code>
                         </Link>
                         <span class="num">{t.records.toLocaleString()}</span>
                         <span class="wide">
-                          <Access value={t.access} save={async (access) => { await api(`${root}/tables/${t.id}`, "PUT", { access }); await reload(); }} />
+                          <SiliconBadge>{ws.me.id}</SiliconBadge>
                         </span>
                         <span class="wide muted" title={when(t.created_at)}>
                           @{t.created_by} · {ago(t.created_at)}
                         </span>
-                        <ArcButton class="icon" aria-label={`Actions for ${t.id}`} disabled={a.busy()} onClick={(e) => menu(e, t)}>
+                        <SiliconButton class="icon" aria-label={`Actions for ${t.id}`} disabled={a.busy()} onClick={(e) => menu(e, t)}>
                           <Icon name="more" />
-                        </ArcButton>
+                        </SiliconButton>
                       </div>
                     )}
                   </For>
@@ -213,12 +212,12 @@ export function Tables() {
         <div class="hero-empty">
           <Empty icon="table" title="No tables yet">
             <p>A table is where an app's records land. It only needs an id; its key is shown once.</p>
-            <ArcButton class="primary large" onClick={() => ws.create("table")}>
+            <SiliconButton class="primary large" onClick={() => ws.create("table")}>
               <Icon name="plus" /> Create your first table
-            </ArcButton>
+            </SiliconButton>
           </Empty>
           <p class="hero-foot">
-            <ArcButton class="link" onClick={() => setRetired(true)}>Show retired tables</ArcButton>
+            <SiliconButton class="link" onClick={() => setRetired(true)}>Show retired tables</SiliconButton>
           </p>
         </div>
       </Show>
@@ -286,7 +285,7 @@ export function TableView() {
     try {
       const before = index ? pages()[index - 1]?.at(-1)?.cursor : undefined;
       if (index && !before) throw Error("No more records in this snapshot.");
-      const result = total() ? await loadRecordPage(ws.org, id(), current.cursor, before, Math.min(size(), total() - index * size())) : [];
+      const result = total() ? await loadRecordPage(id(), current.cursor, before, Math.min(size(), total() - index * size())) : [];
       if (token !== generation) return;
       setPages((old) => {
         const next = [...old];
@@ -312,7 +311,7 @@ export function TableView() {
     setBusy(true);
     setError("");
     try {
-      const result = await openSnapshot(ws.org, id());
+      const result = await openSnapshot(id());
       if (token !== generation) return;
       setSnapshot(result);
       await go(0, token);
@@ -355,14 +354,14 @@ export function TableView() {
               <p class="meta">
                 <span><b>{s().count.toLocaleString()}</b> records</span>
                 <span>created by @{s().table.created_by} · {ago(s().table.created_at)}</span>
-                <Access value={s().table.access} />
+                <SiliconBadge>{ws.me.id}</SiliconBadge>
               </p>
             )}
           </Show>
         </div>
-        <ArcButton disabled={busy()} onClick={() => void enter()} title="Take a new snapshot to see records that arrived since">
+        <SiliconButton disabled={busy()} onClick={() => void enter()} title="Take a new snapshot to see records that arrived since">
           <Icon name="reload" /> Refresh
-        </ArcButton>
+        </SiliconButton>
       </header>
       <Show when={snapshot()}>
         {(s) => (
@@ -384,7 +383,7 @@ export function TableView() {
         >
           <label class="inline">
             Last
-            <ArcInput aria-label="Last N records" type="number" min="1" max="10000" step="1" value={draftLimit()} onInput={(e) => setDraftLimit(e.currentTarget.value)} onBlur={() => draftLimit() !== String(limit()) && apply()} disabled={busy()} />
+            <SiliconInput aria-label="Last N records" type="number" min="1" max="10000" step="1" value={draftLimit()} onInput={(e) => setDraftLimit(e.currentTarget.value)} onBlur={() => draftLimit() !== String(limit()) && apply()} disabled={busy()} />
             records
           </label>
           <label class="inline">
@@ -397,12 +396,12 @@ export function TableView() {
             <span class="muted">
               {total() ? page() * size() + 1 : 0}–{Math.min(page() * size() + rows().length, total())} of {total().toLocaleString()}
             </span>
-            <ArcButton type="button" class="icon" aria-label="Previous page" disabled={busy() || page() === 0} onClick={() => void go(page() - 1)}>
+            <SiliconButton type="button" class="icon" aria-label="Previous page" disabled={busy() || page() === 0} onClick={() => void go(page() - 1)}>
               <Icon name="back" />
-            </ArcButton>
-            <ArcButton type="button" class="icon" aria-label="Next page" disabled={busy() || page() + 1 >= pageCount() || rows().length < size()} onClick={() => void go(page() + 1)}>
+            </SiliconButton>
+            <SiliconButton type="button" class="icon" aria-label="Next page" disabled={busy() || page() + 1 >= pageCount() || rows().length < size()} onClick={() => void go(page() + 1)}>
               <Icon name="forward" />
-            </ArcButton>
+            </SiliconButton>
           </span>
         </form>
         <Show when={rows().length} fallback={<Show when={!busy() && !error()}><p class="empty-line">No records in this snapshot.</p></Show>}>
@@ -415,11 +414,11 @@ export function TableView() {
             <For each={rows()}>
               {(row) => (
                 <div class="rec" classList={{ open: open() === row.record_id }} role="row">
-                  <ArcButton type="button" class="rec-line" onClick={() => setOpen(open() === row.record_id ? undefined : row.record_id)} aria-expanded={open() === row.record_id}>
+                  <SiliconButton type="button" class="rec-line" onClick={() => setOpen(open() === row.record_id ? undefined : row.record_id)} aria-expanded={open() === row.record_id}>
                     <span title={time(row.registered_ts_ms).toLocaleString()}>{time(row.registered_ts_ms).toLocaleTimeString()}<small>{time(row.registered_ts_ms).toLocaleDateString()}</small></span>
                     <span title={time(row.event_ts_ms).toLocaleString()}>{time(row.event_ts_ms).toLocaleTimeString()}<small>+{Math.max(0, Number(row.registered_ts_ms) - Number(row.event_ts_ms)).toLocaleString()} ms</small></span>
                     <Preview value={row.record} />
-                  </ArcButton>
+                  </SiliconButton>
                   <Show when={open() === row.record_id}>
                     <div class="rec-detail">
                       <div>
@@ -443,7 +442,7 @@ export function TableView() {
         </Show>
         <ErrorText message={error()} />
         <Show when={error() && !busy() && (!snapshot() || retryPage() !== undefined)}>
-          <ArcButton onClick={() => (snapshot() ? void go(retryPage()!) : void enter())}>Retry</ArcButton>
+          <SiliconButton onClick={() => (snapshot() ? void go(retryPage()!) : void enter())}>Retry</SiliconButton>
         </Show>
       </section>
     </div>

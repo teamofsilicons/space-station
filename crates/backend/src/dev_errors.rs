@@ -1,4 +1,4 @@
-//! Dev errors: what went wrong server-side for an org — a flushed row ClickHouse refused, a
+//! Dev errors: what went wrong server-side for an account — a flushed row ClickHouse refused, a
 //! trigger `where` that fails, a notification run or delivery that failed. `insert` never fails
 //! its caller; the Option+Shift+D panel and the CLI read the newest 200.
 
@@ -21,7 +21,7 @@ pub async fn insert(store: &Store, org: &str, source: &str, ref_: &str, message:
 }
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/orgs/{org}/dev-errors", get(list))
+    Router::new().route("/dev-errors", get(list))
 }
 
 #[derive(sqlx::FromRow, Serialize)]

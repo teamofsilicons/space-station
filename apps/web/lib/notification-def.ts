@@ -13,12 +13,11 @@ export type NotificationDef = {
   sql: string;
   delay?: string;
   cooldown?: string;
-  access: string[];
 };
 
 export type Body = { def: NotificationDef; recipients: string[] };
 
-const KEYS = ["name", "description", "enabled", "triggers", "sql", "delay", "cooldown", "access", "recipients"];
+const KEYS = ["name", "description", "enabled", "triggers", "sql", "delay", "cooldown", "recipients"];
 const UNIT_MS: Record<string, number> = { ms: 1, s: 1e3, m: 6e4, h: 36e5, d: 864e5 };
 const HOUR = 36e5;
 const MONTH = 30 * 864e5;
@@ -68,8 +67,6 @@ export function parseDefinition(text: string): { body: Body | null; errors: stri
     if (ms === null) bad(`${k}: like "2s", "10m" or "1h"`);
     else if (ms > max) bad(`${k}: at most ${label}`);
   }
-  if (!isStrings(d.access) || d.access.some((a) => a.startsWith("@") && !ACTOR.test(a)))
-    bad('access: an array of "@c:<handle>", "@si:<handle>" and tag names');
   if (d.recipients !== undefined && (!isStrings(d.recipients) || !d.recipients.every((r) => ACTOR.test(r) || /^webhook:.+/.test(r))))
     bad('recipients: an array of "@c:<handle>", "@si:<handle>" or "webhook:<id>"');
 

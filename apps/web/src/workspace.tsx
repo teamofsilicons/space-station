@@ -1,13 +1,13 @@
-// The signed-in station: a sidebar of the org's windows and tables, a strip of tabs over up to
+// The signed-in station: a sidebar of the actor's windows and tables, a strip of tabs over up to
 // three panes, the ⌘K palette, a developer-errors drawer (⌥⇧D), toasts, and the keyboard.
-import { createEffect, createSignal, For, on, onCleanup, Show, type Accessor, type Component } from "solid-js";
-import { api, type DevError, type Me, type Org, type SpaceWindow, type Table, type SavedContext } from "../lib/api";
+import { createEffect, createSignal, For, on, onCleanup, Show, type Component } from "solid-js";
+import { api, type DevError, type Me, type SpaceWindow, type Table, type SavedContext } from "../lib/api";
 import type { RunError } from "../lib/runtime";
 import * as T from "../lib/tabs";
 import { trackFrontendEvent } from "../lib/telemetry";
-import { beginLogin, cancelLogin, type IdentityKind } from "../lib/login";
+import { LoginButtons } from "./login";
 import { createTabs, Link, Panes, TabStrip, useWorkspace, WorkspaceContext, type Toast, type Workspace as W } from "./tabs";
-import { closeMenu, count, Loading, MenuHost, openMenu, resource, when, type MenuItem } from "./ui";
+import { closeMenu, count, Loading, MenuHost, Modal, openMenu, resource, when, type MenuItem } from "./ui";
 import { Icon, Mark } from "./icons";
 import { Palette } from "./palette";
 import { Home } from "./home";
@@ -30,15 +30,14 @@ const PAGES: Record<T.Kind, Component> = {
   docs: DocsPage,
 };
 
-export function Workspace(p: { me: Me; orgs: Accessor<Org[]>; path: string }) {
-  const org = p.me.org,
-    home = `/o/${org}`,
-    root = `/orgs/${encodeURIComponent(org)}`;
-  const tables = resource(() => api<Table[]>(`${root}/tables`), 15000);
-  const windows = resource(() => api<SpaceWindow[]>(`${root}/windows`), 30000);
+export function Workspace(p: { me: Me; path: string }) {
+  const actor = p.me.uuid,
+    home = `/a/${actor}`;
+  const tables = resource(() => api<Table[]>(`/tables`), 15000);
+  const windows = resource(() => api<SpaceWindow[]>(`/windows`), 30000);
   const arrived = T.route(p.path);
-  const fresh = !localStorage.getItem(`ss-tabs:${p.me.context_id}:${org}`) && (!arrived || arrived.kind === "home");
-  const tabs = createTabs(org, home, arrived && arrived.kind !== "home" ? p.path : `${home}/windows`, p.me.context_id);
+  const fresh = !localStorage.getItem(`ss-tabs:${p.me.context_id}:${actor}`) && (!arrived || arrived.kind === "home");
+  const tabs = createTabs(actor, home, arrived && arrived.kind !== "home" ? p.path : `${home}/windows`, p.me.context_id);
   if (arrived) tabs.arrive(p.path);
   // A first visit opens Space Windows once tables exist, Tables before that — once, never again.
   let decided = !fresh;
@@ -59,9 +58,8 @@ export function Workspace(p: { me: Me; orgs: Accessor<Org[]>; path: string }) {
   let toastId = 0;
   const seen = new Set<string>();
   const ws: W = {
-    org,
+    actor,
     me: p.me,
-    orgs: p.orgs,
     tables,
     windows,
     tabs,
@@ -195,14 +193,10 @@ export function Workspace(p: { me: Me; orgs: Accessor<Org[]>; path: string }) {
 
 function Sidebar(p: { collapsed: boolean; toggle: () => void; dev: boolean }) {
   const ws = useWorkspace();
-  const o = `/o/${ws.org}`;
+  const o = `/a/${ws.actor}`;
   const here = () => ws.tabs.active()?.path;
   const open = (path: string) => ws.tabs.state().tabs.some((t) => t.path === path);
-  const addAccount = async (kind: IdentityKind) => {
-    try { await beginLogin(kind); }
-    catch (error) { ws.toast({ tone: "bad", title: "Sign-in not completed", text: (error as Error).message }); }
-  };
-  onCleanup(cancelLogin);
+  const [addingAccount, setAddingAccount] = createSignal(false);
   const item = (path: string, icon: string, label: string, extra?: any) => (
     <Link href={path} reuse class="side-link" classList={{ on: here() === path, open: open(path) && here() !== path }} title={label}>
       <Icon name={icon} />
@@ -210,21 +204,21 @@ function Sidebar(p: { collapsed: boolean; toggle: () => void; dev: boolean }) {
       {extra}
     </Link>
   );
-  const orgMenu = async (e: MouseEvent) => {
+  const accountMenu = async (e: MouseEvent) => {
+    const anchor = e.currentTarget as HTMLElement;
     try {
       const rows = await api<SavedContext[]>("/auth/contexts");
       openMenu(e, [
-        ...rows.map((x): MenuItem => ({ label: `${x.actor} · ${x.org}`, icon: x.selected ? "check" : "blank", run: async () => {
+        ...rows.map((x): MenuItem => ({ label: x.actor, icon: x.selected ? "check" : "blank", run: async () => {
           if (x.selected) return;
           try {
             await api("/auth/context", "POST", { context_id: x.context_id });
-            location.assign(`/o/${encodeURIComponent(x.org)}`);
+            location.assign(`/a/${encodeURIComponent(x.uuid)}`);
           } catch (error) { ws.toast({ tone: "bad", title: "Account switch failed", text: (error as Error).message }); }
         } })),
         "-",
-        { label: "Continue as Carbon", icon: "plus", run: () => addAccount("carbon") },
-        { label: "Continue as Silicon", icon: "plus", run: () => addAccount("silicon") },
-      ]);
+        { label: "Add account", icon: "plus", run: () => setAddingAccount(true) },
+      ], anchor);
     } catch (error) { ws.toast({ tone: "bad", title: "Accounts unavailable", text: (error as Error).message }); }
   };
   const account = (e: MouseEvent) =>
@@ -248,6 +242,7 @@ function Sidebar(p: { collapsed: boolean; toggle: () => void; dev: boolean }) {
       },
     ]);
   return (
+    <>
     <aside class="sidebar" aria-label="Station">
       <div class="side-head">
         <a class="brand" href={o} onClick={(e) => (e.preventDefault(), ws.tabs.reveal(o, "tab"))} title="Space Station">
@@ -258,9 +253,9 @@ function Sidebar(p: { collapsed: boolean; toggle: () => void; dev: boolean }) {
           <Icon name="panel" />
         </button>
       </div>
-      <button class="org-button" onClick={orgMenu} title="Switch account or organization">
-        <span class="org-badge">{ws.org.slice(0, 1).toUpperCase()}</span>
-        <span class="side-label">{ws.orgs().find((x) => x.id === ws.org)?.name || ws.org}</span>
+      <button class="actor-button" onClick={accountMenu} title="Switch account">
+        <span class="actor-badge">{ws.me.id.replace(/^(c|si):/, "").slice(0, 1).toUpperCase()}</span>
+        <span class="side-label">{ws.me.id}</span>
         <Icon name="chevron" />
       </button>
       <button class="side-search" onClick={ws.palette} title="Search (⌘K)">
@@ -320,18 +315,25 @@ function Sidebar(p: { collapsed: boolean; toggle: () => void; dev: boolean }) {
         </button>
       </div>
     </aside>
+    <Show when={addingAccount()}>
+      <Modal title="Add account" close={() => setAddingAccount(false)}>
+        <p class="muted">Sign in as a carbon or silicon. Your saved accounts stay available.</p>
+        <LoginButtons next="/" />
+      </Modal>
+    </Show>
+    </>
   );
 }
 
 function DevDrawer(p: { close: () => void }) {
   const ws = useWorkspace();
-  const errors = resource(() => api<DevError[]>(`/orgs/${encodeURIComponent(ws.org)}/dev-errors`), 5000);
+  const errors = resource(() => api<DevError[]>(`/dev-errors`), 5000);
   return (
     <section class="drawer" aria-label="Developer errors">
       <div class="drawer-head">
         <Icon name="bug" />
         <strong>Developer errors</strong>
-        <span class="muted">this browser's open windows, then the server's for {ws.org}; newest first</span>
+        <span class="muted">this browser's open windows, then the server's for {ws.me.id}; newest first</span>
         <span class="grow" />
         <button class="icon" aria-label="Refresh" onClick={() => errors.reload()}>
           <Icon name="reload" />

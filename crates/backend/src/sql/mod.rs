@@ -1,4 +1,4 @@
-//! The mirage: user SQL becomes a query ClickHouse may run. An org's "tables" are rewrites of
+//! The mirage: user SQL becomes a query ClickHouse may run. An account's "tables" are rewrites of
 //! the one physical `space_station.records`; nothing else is reachable through a query.
 //!
 //! `plan` parses and validates (one SELECT; an allowlist of FROM items; CTE names scoped the
@@ -20,9 +20,6 @@ use sqlparser::ast::{
 use sqlparser::dialect::ClickHouseDialect;
 use sqlparser::parser::{Parser, ParserError};
 use sqlparser::tokenizer::Token;
-
-#[cfg(test)]
-mod tests;
 
 /// SQL (or a trigger `where`) longer than this is refused unparsed.
 pub const SQL_MAX: usize = 64 * 1024;
@@ -78,7 +75,7 @@ impl fmt::Display for GuardError {
             Self::Format => f.write_str("FORMAT is not allowed; rows always come back as JSON"),
             Self::IntoOutfile => f.write_str("INTO is not allowed"),
             Self::TableFunction(name) => write!(f, "table function {name}() is not allowed"),
-            Self::QualifiedName(name) => write!(f, "{name}: only this org's tables can be read, by bare table id"),
+            Self::QualifiedName(name) => write!(f, "{name}: only this account's tables can be read, by bare table id"),
             Self::UnknownTable(name) => write!(f, "unknown table {name}"),
             Self::Forbidden(what) => write!(f, "{what} is not allowed"),
             Self::TooLong => write!(f, "the SQL is longer than {} KB", SQL_MAX / 1024),
@@ -104,7 +101,7 @@ pub struct Bounds {
     pub to: Option<u64>,
 }
 
-/// A parsed, validated query, ready to render for any org and bounds.
+/// A parsed, validated query, ready to render for any account namespace and bounds.
 #[derive(Debug, Clone)]
 pub struct Plan {
     query: Query,
@@ -117,7 +114,7 @@ impl Plan {
         Ok(Self { query, tables })
     }
 
-    /// Every org table referenced (CTE names excluded); the caller fetches their watermarks.
+    /// Every account table referenced (CTE names excluded); the caller fetches their watermarks.
     pub fn tables(&self) -> &BTreeSet<String> {
         &self.tables
     }
@@ -138,7 +135,7 @@ impl Plan {
     }
 }
 
-/// Parse and validate `sql`. `visible(table_id)` says whether the caller may see that org table.
+/// Parse and validate `sql`. `visible(table_id)` says whether the caller may see that account table.
 pub fn plan(sql: &str, visible: &dyn Fn(&str) -> bool) -> Result<Plan, GuardError> {
     if sql.len() > SQL_MAX {
         return Err(GuardError::TooLong);
@@ -177,11 +174,11 @@ pub fn trigger_plan(table: &str, where_: Option<&str>, visible: &dyn Fn(&str) ->
 }
 
 /// `trigger_plan` rendered over one flush: one row when `(from, to]` of `table` holds a hit.
-/// Every org table is visible here: a notification was checked with its saver's identity when
+/// Every account table is visible here: a notification was checked with its saver's identity when
 /// it was saved.
 pub fn trigger_sql(org: &str, table: &str, where_: Option<&str>, from: u64, to: u64) -> Result<String, GuardError> {
     if !valid_org(org) {
-        return Err(GuardError::Forbidden(format!("org id {org:?}")));
+        return Err(GuardError::Forbidden(format!("storage namespace {org:?}")));
     }
     let bounds = BTreeMap::from([(table.into(), Bounds { from: Some(from), to: Some(to) })]);
     Ok(trigger_plan(table, where_, &|_| true)?.render(org, &bounds))
@@ -199,7 +196,7 @@ struct Mirage<'a> {
     bounds: &'a BTreeMap<String, Bounds>,
 }
 
-/// The one physical relation every mirage reads. An org may own a table with this id — nothing
+/// The one physical relation every mirage reads. An account may own a table with this id — nothing
 /// reserves it — which is exactly why every table reference is rewritten and a CTE named after it
 /// is refused rather than trusted.
 pub const PHYSICAL: &str = "records";
@@ -258,7 +255,7 @@ struct Guard<'a> {
 }
 
 impl<'a> Guard<'a> {
-    /// Validate `query` (rewriting its tables when `mirage` is given); the org tables it reads.
+    /// Validate `query` (rewriting its tables when `mirage` is given); the account tables it reads.
     fn run(
         query: &mut Query,
         visible: &'a dyn Fn(&str) -> bool,

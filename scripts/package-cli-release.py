@@ -1,14 +1,15 @@
-"""Package six native CLI builds for the website and Honeycomb (Python >= 3.11)."""
+"""Package six native CLI builds for the website and Silicon Apps (Python >= 3.11)."""
 import gzip
 import hashlib
 import io
 import os
 from pathlib import Path
+import shutil
 import tarfile
 import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
-# Website asset name, Honeycomb target, Rust target triple.
+# Website asset name, Silicon Apps target, Rust target triple.
 TARGETS = (
     ('darwin-arm64', 'macos-aarch64', 'aarch64-apple-darwin'),
     ('darwin-x64', 'macos-x86_64', 'x86_64-apple-darwin'),
@@ -33,7 +34,7 @@ def archive(path, entries):
 def package(root=ROOT, target_dir=None):
     target_dir = target_dir or Path(os.environ.get('CARGO_TARGET_DIR', root / 'target'))
     version = tomllib.loads((root / 'crates/cli/Cargo.toml').read_text())['package']['version']
-    manifest = f'format_version: 1\napp_id: spacestation\nversion: {version}\nbin:\n  spacestation: main\ntargets:\n'
+    manifest = f'schema_version: 1\napp_id: spacestation\nversion: {version}\ncommand: spacestation\ntargets:\n'
     payloads = []
     # Read every build before producing artifacts, so a missing platform fails the release.
     for asset, target, triple in TARGETS:
@@ -41,22 +42,23 @@ def package(root=ROOT, target_dir=None):
         executable = f'spacestation{suffix}'
         directory = target_dir / triple / 'release'
         binary = (directory / executable).read_bytes()
-        managed = (directory / f'spacestation-honeycomb{suffix}').read_bytes()
-        if not binary or not managed:
+        if not binary:
             raise ValueError(f'{triple}: executable is empty')
-        payloads.append((asset, target, executable, binary, managed))
-        manifest += f'  {target}:\n    root: targets/{target}\n    executables:\n      main: {executable}\n'
+        payloads.append((asset, target, executable, binary))
+        manifest += f'  {target}:\n    binary: targets/{target}/{executable}\n'
 
     out = root / 'apps/web/public/downloads'
     out.mkdir(parents=True, exist_ok=True)
     dist = root / 'dist'
     dist.mkdir(exist_ok=True)
-    honeycomb = dist / f'spacestation-honeycomb-{version}.tar.gz'
-    archive(honeycomb, [('honeycomb.yaml', manifest.encode(), 0o644)] + [
-        (f'targets/{target}/{exe}', managed, 0o755) for _, target, exe, _, managed in payloads
+    apps = dist / f'spacestation-apps-{version}.tar.gz'
+    archive(apps, [('apps.yaml', manifest.encode(), 0o644)] + [
+        (f'targets/{target}/{exe}', binary, 0o755) for _, target, exe, binary in payloads
     ])
-    assets = [honeycomb]
-    for name, _, executable, binary, _ in payloads:
+    website_apps = out / apps.name
+    shutil.copyfile(apps, website_apps)
+    assets = [website_apps]
+    for name, _, executable, binary in payloads:
         asset = out / f'spacestation-{name}.tar.gz'
         archive(asset, [(executable, binary, 0o755)])
         assets.append(asset)
@@ -65,7 +67,7 @@ def package(root=ROOT, target_dir=None):
         f'{hashlib.sha256(asset.read_bytes()).hexdigest()}  {asset.name}\n' for asset in assets
     ))
     (root / 'apps/web/public/install.sh').write_bytes((root / 'scripts/install.sh').read_bytes())
-    return honeycomb
+    return apps
 
 
 if __name__ == '__main__':

@@ -64,10 +64,6 @@ EOF
         home_env_name=SILICON_HOME
         silicon_home=$HOME/.silicon
     fi
-    case ${SPACE_STATION_UPDATE:-} in
-        0|false|FALSE|False) update_setting=0 ;;
-        *) update_setting=1 ;;
-    esac
     temp=$(mktemp -d "${TMPDIR:-/tmp}/spacestation.XXXXXXXX")
     trap 'rm -rf "$temp"' EXIT HUP INT TERM
     artifact="spacestation-$platform-$arch.tar.gz"
@@ -148,7 +144,6 @@ EOF
                     printf '%s\n' '<string>daemon</string>' '<string>run</string>'
                     printf '%s\n' '</array><key>EnvironmentVariables</key><dict>'
                     printf '<key>%s</key><string>%s</string>\n' "$home_env_name" "$(xml "$silicon_home")"
-                    printf '%s\n' "<key>SPACE_STATION_UPDATE</key><string>$update_setting</string>"
                     printf '%s\n' '</dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/></dict></plist>'
                 } > "$plist"
                 uid=$(id -u)
@@ -172,7 +167,6 @@ After=default.target
 [Service]
 ExecStart=$(systemd_quote "$bin/spacestation") daemon run
 Environment=$home_env_name=$(systemd_quote "$silicon_home")
-Environment=SPACE_STATION_UPDATE=$update_setting
 Restart=always
 RestartSec=5
 
@@ -187,7 +181,7 @@ EOF
     install_daemon
     "$bin/spacestation" --version
     printf '\nInstalled at %s/spacestation\n' "$bin"
-    printf 'Run: spacestation login --org <your-org>\n'
+    printf 'Run: spacestation login\n'
     case :$PATH: in
         *:"$bin":*) ;;
         *) printf 'For this terminal: export PATH="$HOME/.local/bin:$PATH"\n' ;;

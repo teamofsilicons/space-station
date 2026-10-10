@@ -4,7 +4,7 @@ import { createSpaceStationWeb } from "@teamofsilicons/space-station-web";
 export const webTelemetry = createSpaceStationWeb({
   analyticsTable: "spacestationfrontendanalytics",
   eventsTable: "spacestationfrontendevents",
-  endpoint: "/api/web/telemetry?org=tos",
+  endpoint: "/api/web/telemetry",
   enabled: typeof localStorage === "undefined" || localStorage.getItem("spacestation-telemetry") !== "off",
 });
 

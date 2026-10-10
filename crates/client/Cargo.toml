@@ -1,6 +1,6 @@
 [package]
 name = "space-station"
-description = "The Space Station interface: record events, and manage orgs, tables, space windows, notifications and keys."
+description = "The Space Station interface: record events, and manage account tables, space windows, notifications and keys."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,4 +1,4 @@
-//! Tables: an org's mirage tables as Postgres rows — id, hashed key, access list — with record
+//! Tables: an account's mirage tables as Postgres rows — id, hashed key, access list — with record
 //! counts and watermarks from ClickHouse on every read, the one-time key on create and rotate,
 //! the overview the Tables tab polls, and the delete that takes the records with it.
 
@@ -14,21 +14,21 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use space_station_shared::secrets::{sha256_hex, table_key, valid_table_id};
 
+use crate::accounts::Identity;
 use crate::http::auth::Auth;
 use crate::http::{ApiError, AppState, Json, Path, Query};
-use crate::iam::Identity;
 use crate::store::clickhouse::u64_of;
 use crate::store::now_ms;
 use crate::{access, dev_errors};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/orgs/{org}/tables", get(list).post(create))
-        .route("/orgs/{org}/tables/overview", get(overview))
-        .route("/orgs/{org}/tables/{table}", put(update).delete(remove))
-        .route("/orgs/{org}/tables/{table}/retire", post(retire))
-        .route("/orgs/{org}/tables/{table}/unretire", post(unretire))
-        .route("/orgs/{org}/tables/{table}/rotate-key", post(rotate))
+        .route("/tables", get(list).post(create))
+        .route("/tables/overview", get(overview))
+        .route("/tables/{table}", put(update).delete(remove))
+        .route("/tables/{table}/retire", post(retire))
+        .route("/tables/{table}/unretire", post(unretire))
+        .route("/tables/{table}/rotate-key", post(rotate))
 }
 
 #[derive(sqlx::FromRow)]
@@ -43,7 +43,7 @@ struct Row {
 
 const SELECT: &str = "SELECT id, key_hash, access, created_by, created_at, retired_at FROM tables";
 
-/// The org's tables, visible ones only, with counts and watermarks.
+/// The account's tables, visible ones only, with counts and watermarks.
 async fn list(
     State(state): State<AppState>,
     auth: Auth,
@@ -71,7 +71,7 @@ async fn item(state: &AppState, org: &str, row: Row, counts: &HashMap<String, u6
               "created_by": row.created_by, "created_at": row.created_at, "retired_at": row.retired_at}))
 }
 
-/// Records per table in the org, counted under the row policy.
+/// Records per table in the account, counted under the row policy.
 async fn counts(state: &AppState, org: &str) -> Result<HashMap<String, u64>, ApiError> {
     let sql = "SELECT table_id, count() AS n FROM space_station.records GROUP BY table_id FORMAT JSONEachRow";
     let rows = state.store.ch.query_org(org, sql).await?;
@@ -87,7 +87,7 @@ async fn mine(state: &AppState, me: &Identity, table: &str) -> Result<Row, ApiEr
         .fetch_optional(&state.store.pg)
         .await?
         .ok_or_else(|| ApiError::not_found("table"))?;
-    if access::matches(me, &access::list(&row.access)) { Ok(row) } else { Err(ApiError::forbidden()) }
+    Ok(row)
 }
 
 #[derive(Deserialize)]
@@ -134,7 +134,7 @@ struct Update {
 async fn update(
     State(state): State<AppState>,
     auth: Auth,
-    Path((_, table)): Path<(String, String)>,
+    Path(table): Path<String>,
     Json(body): Json<Update>,
 ) -> Result<Json<Value>, ApiError> {
     let me = auth.actor()?;
@@ -148,11 +148,7 @@ async fn update(
     Ok(Json(item(&state, &me.org, Row { access, ..row }, &counts).await?))
 }
 
-async fn retire(
-    State(state): State<AppState>,
-    auth: Auth,
-    Path((_, table)): Path<(String, String)>,
-) -> Result<StatusCode, ApiError> {
+async fn retire(State(state): State<AppState>, auth: Auth, Path(table): Path<String>) -> Result<StatusCode, ApiError> {
     let me = auth.actor()?;
     let row = mine(&state, me, &table).await?;
     let result = sqlx::query("UPDATE tables SET retired_at = COALESCE(retired_at, now()) WHERE org = $1 AND id = $2")
@@ -171,7 +167,7 @@ async fn retire(
 async fn unretire(
     State(state): State<AppState>,
     auth: Auth,
-    Path((_, table)): Path<(String, String)>,
+    Path(table): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let me = auth.actor()?;
     let row = mine(&state, me, &table).await?;
@@ -188,11 +184,7 @@ async fn unretire(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn rotate(
-    State(state): State<AppState>,
-    auth: Auth,
-    Path((_, table)): Path<(String, String)>,
-) -> Result<Json<Value>, ApiError> {
+async fn rotate(State(state): State<AppState>, auth: Auth, Path(table): Path<String>) -> Result<Json<Value>, ApiError> {
     let me = auth.actor()?;
     let row = mine(&state, me, &table).await?;
     let key = table_key(&table);
@@ -204,11 +196,7 @@ async fn rotate(
 
 /// The definition goes now — so the id is free to reuse at once and the key stops resolving —
 /// and the records follow on ClickHouse's own clock.
-async fn remove(
-    State(state): State<AppState>,
-    auth: Auth,
-    Path((_, table)): Path<(String, String)>,
-) -> Result<StatusCode, ApiError> {
+async fn remove(State(state): State<AppState>, auth: Auth, Path(table): Path<String>) -> Result<StatusCode, ApiError> {
     let me = auth.actor()?;
     let row = mine(&state, me, &table).await?;
     sqlx::query("DELETE FROM tables WHERE org = $1 AND id = $2")
@@ -223,7 +211,7 @@ async fn remove(
 }
 
 /// `DELETE FROM records` for a dropped table. A ClickHouse delete is a mutation, so nobody waits
-/// for it; a failure becomes a dev error for the org rather than silence.
+/// for it; a failure becomes a dev error for the account rather than silence.
 fn drop_records(state: AppState, org: String, table: String) {
     tokio::spawn(async move {
         let sql = "DELETE FROM records WHERE org_id = {org:String} AND table_id = {table:String}";

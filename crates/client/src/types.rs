@@ -10,18 +10,19 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// A carbon or a silicon, inside one org: the public id people know it by (stored and sent
-/// without the `@` a UI prepends) and the tag names the directory mirror holds for it there. No
-/// display name: the id includes its `c:` or `si:` namespace.
+/// A carbon or silicon. UUID is stable; the public c:/si: handle can change.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Identity {
     pub kind: Kind,
     pub id: String,
-    pub org: String,
-    pub tags: Vec<String>,
+    pub uuid: String,
+    #[serde(default)]
+    pub context_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
 }
 
-/// A human (`c:<handle>`) or a machine (`si:<handle>`), as explicitly identified by IAM.
+/// A human (`c:<handle>`) or a machine (`si:<handle>`), as explicitly identified by Silicon Accounts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
@@ -29,22 +30,13 @@ pub enum Kind {
     Silicon,
 }
 
-/// An IAM organization, as the directory mirror knows it. Everything else is scoped to one; the
-/// name is there once IAM has told the mirror about the org.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Org {
-    pub id: String,
-    pub name: Option<String>,
-}
-
-/// A logical table inside an org: records go in through its key, queries read it by id.
+/// A logical table owned by an account: records go in through its key, queries read it by id.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Table {
     pub id: String,
     pub records: u64,
     /// The highest cursor a query on this table can currently see.
     pub watermark: u64,
-    pub access: Vec<String>,
     pub created_by: String,
     pub created_at: String,
     #[serde(default)]
@@ -73,7 +65,6 @@ pub struct TopTable {
 pub struct Window {
     pub id: String,
     pub name: String,
-    pub access: Vec<String>,
     pub created_by: String,
     pub created_at: String,
     pub version: Option<Version>,
@@ -135,8 +126,6 @@ pub struct Def {
     pub delay: String,
     #[serde(default = "default_cooldown")]
     pub cooldown: String,
-    #[serde(default)]
-    pub access: Vec<String>,
 }
 
 /// A row landing in a table, or the clock.
@@ -183,7 +172,7 @@ pub struct TestRun {
     pub last_trigger_at: Option<String>,
 }
 
-/// An org webhook a notification can deliver to. The signing secret is shown once, on creation.
+/// An account webhook a notification can deliver to. The signing secret is shown once, on creation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Webhook {
     pub id: String,
@@ -192,7 +181,7 @@ pub struct Webhook {
     pub created_at: String,
 }
 
-/// A programmatic key acting for the org inside its scopes (`tables`, `notifications`).
+/// A programmatic key acting for the account inside its scopes (`tables`, `notifications`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiKey {
     pub id: String,
@@ -213,7 +202,7 @@ pub struct Key {
     pub value: String,
 }
 
-/// The access token processors and dev servers use. One per (org, actor), rotatable, and shown
+/// The access token processors and dev servers use. One per account, rotatable, and shown
 /// as often as you like — unlike a `Key`, the server can still read this one back.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccessToken {
@@ -242,7 +231,7 @@ pub struct Bounds {
     pub to: Option<u64>,
 }
 
-/// Something a processor, a renderer or a notification did wrong, recorded for its org.
+/// Something a processor, a renderer or a notification did wrong, recorded for its account.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DevError {
     pub id: i64,

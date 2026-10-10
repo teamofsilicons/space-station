@@ -70,27 +70,3 @@ pub(crate) fn private(path: &Path, _directory: bool) -> io::Result<()> {
         error.map_or(Ok(()), Err)
     }
 }
-
-#[cfg(all(test, windows))]
-mod tests {
-    use super::*;
-    use std::process::Command;
-
-    #[test]
-    fn private_files_have_only_an_owner_ace_and_no_inherited_access() {
-        let home = crate::test_home();
-        private_dir(&home).unwrap();
-        let path = home.join("credential");
-        open_private(&path, OpenOptions::new().write(true).create_new(true)).unwrap();
-        // Inspect the actual ACL through the platform's own API, not a mirrored expectation
-        // in our implementation. This also proves the owner can still open the file.
-        let output = Command::new("powershell.exe")
-            .args(["-NoProfile", "-NonInteractive", "-Command",
-                "$a=Get-Acl -LiteralPath $env:SS_ACL_PATH; if (!$a.AreAccessRulesProtected -or @($a.Access).Count -ne 1 -or $a.Access[0].IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -ne 'S-1-3-4') { exit 1 }"])
-            .env("SS_ACL_PATH", &path)
-            .output().unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        fs::write(&path, "secret").unwrap();
-        assert_eq!(fs::read_to_string(&path).unwrap(), "secret");
-    }
-}

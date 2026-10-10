@@ -9,7 +9,7 @@ A separate `t4g.large` with 128 GB encrypted gp3 runs ClickHouse 26.8 LTS.
 There are no containers or virtualized application runtimes. Both EC2 instances are private,
 managed through SSM, and require IMDSv2. Only the dedicated HTTPS load balancer can reach the
 API, and only the API security group can reach ClickHouse. PostgreSQL and Redis bind locally.
-Docker Compose in `infra/local/` supplies local development and integration-test dependencies
+Docker Compose in `infra/local/` supplies local development dependencies
 only. Production runs one prebuilt backend executable: it is compiled off the servers, and no
 server has a Rust toolchain in the deploy path.
 
@@ -24,9 +24,7 @@ restricted by the backend, and processors and renderers run in separate sandboxe
 
 ## Deploy
 
-The identifier schema change requires the coordinated [migration procedure](../../docs/PUBLIC-ID-MIGRATION.md)
-before starting this backend against an existing database. Update the deployed app ID to
-`spacestation` while retaining its existing app secret and encryption key.
+The Accounts cutover is described in [Accounts migration](../../docs/ACCOUNTS-MIGRATION.md). It preserves records and configuration, maps the legacy `tos` namespace to the verified `si:tos` UUID, and invalidates only old IAM sessions. Store the new app and webhook credentials in the existing runtime secret while retaining the database credentials and `SS_KEY`.
 
 `template.py` emits `stack.json`. The parameters select the VPC, private subnet, Ubuntu ARM64
 AMI and ACM certificate; the public gateway spans two public subnets in that VPC.
@@ -53,12 +51,7 @@ to `/opt/space-station/release`; nothing is compiled there.
 On the API host `install-backend.sh` keeps the running executable as
 `/opt/space-station/bin/space-station-backend.previous`, installs the new one atomically, restarts
 `space-station.service` and waits up to a minute for `/api/health`. If the API is not healthy, it
-restores the previous executable only when it also enforces IAM 5; the deploy fails either way. `--rollback` (or `install-backend.sh
---rollback` on the host) swaps the previous one back by hand. Schema migrations run at startup,
-so a schema change must stay compatible with an eligible rollback executable.
-The IAM 5 cutover invalidates legacy sessions without deleting application data. The installer
-records authentication contract 5 beside each binary and refuses to restore a pre-cutover
-executable. Repair an unsuccessful first cutover with another IAM 5 build; do not restore IAM 4.
+restores the previous executable only when it enforces the same Accounts contract. `--rollback` swaps that eligible executable back by hand. Schema migrations run at startup. The installer records `accounts-1` beside each binary and refuses to restore an IAM executable after cutover; repair a failed initial cutover with another Accounts build.
 
 `--setup` first runs `setup-native.sh` on each host, ClickHouse first: apt packages (PostgreSQL
 and Redis on the API host, ClickHouse from its LTS repository), `configure-native.py`
@@ -84,10 +77,10 @@ stops and restarts the instance on the next stack update, so remove them only wi
 restart.
 Do not put secrets in those scripts or print the runtime environment.
 
-For the frontend, run `npm --prefix apps/web run check-all`. Vercel uses `apps/web` as the project
+For the frontend, run `npm --prefix apps/web run build`. Vercel uses `apps/web` as the project
 root. Upload only frontend source, public assets and project configuration: do not upload the
 repository's `.local`, environment files, Cargo targets or credentials. `vercel.json` proxies
-`/api/*` and both exact IAM webhook paths, and serves the SPA for application routes.
+`/api/*` and the Accounts webhook endpoint, and serves the SPA for application routes.
 The browser connects directly to the API's WSS endpoint. Session and login cookies are Secure,
 HttpOnly and scoped to `spacestation.teamofsilicons.com`, so both application hosts share them.
 
@@ -118,10 +111,12 @@ but there is no database replica or automatic application failover. A native res
 interrupts service. Redis uses AOF; loss of both its durable storage and client spools can lose
 records that have not yet reached ClickHouse.
 
-## IAM
+## Silicon Accounts
 
-The application is `spacestation`. Its approved, active webhook is
-`https://spacestation.teamofsilicons.com/webhooks/api/`. The receiver verifies IAM signatures and
-records event IDs transactionally, so retries are idempotent. The live deployment has received
-real IAM events. `iam app dead-letters 'spacestation'` inspects exhausted deliveries;
-`iam app replay 'spacestation' --delivery <id>` retries a repaired delivery.
+The app ID is `spacestation`, authored by `si:tos`. Manage catalog details and releases through `silicon-apps`; manage sign-in through Silicon Developer or `silicon-accounts app`.
+
+- Callback: `https://spacestation.teamofsilicons.com/api/auth/callback`.
+- Signed webhook: `https://spacestation.teamofsilicons.com/api/accounts/webhook`.
+- Runtime: `SILICON_ACCOUNTS_URL`, `SILICON_ACCOUNTS_APP_ID`, `SILICON_ACCOUNTS_APP_SECRET`, and `SILICON_ACCOUNTS_WEBHOOK_SECRET`.
+
+Credentials live in AWS Secrets Manager and the root-readable runtime environment. After changing the secret, refresh that file before restarting the API. Do not print tokens or copy credentials into SSM command text. Use `silicon-accounts app webhook deliveries` to inspect delivery status and `app webhook replay --failed` to retry after a receiver repair.

@@ -11,7 +11,7 @@ import { Icon } from "./icons";
 export type Item = { label: string; group: string; icon: string; hint?: string; keys?: string; path?: string; run?: () => void; open?: boolean };
 
 export function items(ws: Workspace, extra: Item[] = []): Item[] {
-  const o = `/o/${ws.org}`,
+  const o = `/a/${ws.actor}`,
     t = ws.tabs,
     here = t.active()?.path;
   const page = (label: string, path: string, icon: string): Item => ({ label, group: "Pages", icon, path });
