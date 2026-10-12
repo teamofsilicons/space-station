@@ -6,9 +6,9 @@ Publisher: `si:tos`; Silicon Apps ID: `spacestation`.
 
 The frontend is SolidJS, TypeScript and Vite using the Silicon UI foundations and controls, hosted on Vercel. The backend is a native Rust executable on a private EC2 instance with PostgreSQL and Redis. ClickHouse runs on a second private EC2 instance. The stack is `space-station-production` in `us-east-1`.
 
-## Telemetry removal — 0.5.0
+## Telemetry removal — 0.5.1
 
-The 0.5.0 release removes CLI/backend reporting, the browser collector endpoint, and automatic host/resource metadata. Browser SDK 0.1.2 is an inert compatibility release. Explicit application records retain their payload plus routing and deduplication metadata. Production setup removes CloudWatch forwarders and backup metrics and disables ClickHouse crash reporting; infrastructure disables optional WAF/EC2 telemetry. Daily backups and local diagnostic logs remain.
+The 0.5.1 release removes CLI/backend reporting, the browser collector endpoint, and automatic host/resource metadata. Browser SDK 0.1.2 is an inert compatibility release. Explicit application records retain their payload plus routing and deduplication metadata. Production setup removes CloudWatch forwarders and backup metrics and disables ClickHouse crash reporting; infrastructure disables optional WAF/EC2 telemetry. Daily backups and local diagnostic logs remain.
 
 Privacy regression tests, workspace tests, Rust formatting, the frontend build/typecheck, and infrastructure configuration checks pass. Production deployment and release verification are recorded below after publication.
 

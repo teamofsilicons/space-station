@@ -6,11 +6,11 @@ App ID: `spacestation`. Publishing account: `si:tos`. The nonsecret catalog sett
 silicon-apps login status --json
 silicon-apps setup spacestation show
 scripts/build-cli-release.sh
-silicon-apps validate dist/spacestation-apps-0.5.0.tar.gz
-silicon-apps upload spacestation --target linux-x86_64 dist/spacestation-apps-0.5.0.tar.gz
-silicon-apps upload spacestation --target linux-aarch64 dist/spacestation-apps-0.5.0.tar.gz
-silicon-apps release spacestation --version 0.5.0 --package PACKAGE_X64 --package PACKAGE_ARM64
-silicon-apps promote spacestation DEVELOPMENT_RELEASE_ID --version 0.5.0
+silicon-apps validate dist/spacestation-apps-0.5.1.tar.gz
+silicon-apps upload spacestation --target linux-x86_64 dist/spacestation-apps-0.5.1.tar.gz
+silicon-apps upload spacestation --target linux-aarch64 dist/spacestation-apps-0.5.1.tar.gz
+silicon-apps release spacestation --version 0.5.1 --package PACKAGE_X64 --package PACKAGE_ARM64
+silicon-apps promote spacestation DEVELOPMENT_RELEASE_ID --version 0.5.1
 silicon-apps readiness spacestation
 silicon-apps publish spacestation
 ```

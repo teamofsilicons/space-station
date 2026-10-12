@@ -2223,7 +2223,7 @@ dependencies = [
 
 [[package]]
 name = "space-station"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2237,7 +2237,7 @@ dependencies = [
 
 [[package]]
 name = "space-station-backend"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "aes-gcm",
  "axum",
@@ -2263,7 +2263,7 @@ dependencies = [
 
 [[package]]
 name = "space-station-cli"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "clap",
  "serde",
@@ -2274,7 +2274,7 @@ dependencies = [
 
 [[package]]
 name = "space-station-shared"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde",
  "serde_json",

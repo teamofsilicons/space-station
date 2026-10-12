@@ -25,6 +25,7 @@ pub(crate) use uds_windows::UnixStream;
 use space_station_shared::limits::BATCH_MAX;
 use space_station_shared::secrets::sha256_hex;
 use space_station_shared::wire::{Ack, Code, Entry};
+use tungstenite::client::IntoClientRequest;
 use tungstenite::{Bytes, Message, WebSocket, stream::MaybeTlsStream};
 
 use crate::spool::{Batch, Spool};
@@ -264,7 +265,12 @@ fn connect_ws(url: &str) -> Result<Ws, Error> {
     tcp.set_read_timeout(Some(ACK_TIMEOUT))?;
     tcp.set_write_timeout(Some(ACK_TIMEOUT))?;
     let socket = tcp.try_clone()?;
-    let (ws, _) = tungstenite::client_tls(url, tcp).map_err(|e| Error::Ws(e.to_string()))?;
+    let mut request = url.into_client_request().map_err(|e| Error::Ws(e.to_string()))?;
+    // The production gateway requires a User-Agent; omit versions and device information.
+    request
+        .headers_mut()
+        .insert(tungstenite::http::header::USER_AGENT, tungstenite::http::HeaderValue::from_static("space-station"));
+    let (ws, _) = tungstenite::client_tls(request, tcp).map_err(|e| Error::Ws(e.to_string()))?;
     socket.set_read_timeout(Some(POLL))?;
     Ok(ws)
 }
@@ -347,4 +353,29 @@ fn settle(batch: &Batch, ack: Ack, shared: &Shared, on_error: &Hook, log: &Log) 
     }
     log(format_args!("ack {}: {} accepted, {rejected} rejected", batch.id, batch.count.saturating_sub(rejected)));
     shared.ack(batch)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::connect_ws;
+    use std::net::TcpListener;
+    use std::thread;
+    use tungstenite::handshake::server::{Request, Response};
+
+    #[test]
+    fn websocket_handshake_supplies_generic_user_agent_for_gateway_compatibility() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            tungstenite::accept_hdr(stream, |request: &Request, response: Response| {
+                assert_eq!(request.headers().get("user-agent").unwrap(), "space-station");
+                Ok(response)
+            })
+            .unwrap();
+        });
+
+        connect_ws(&format!("ws://{addr}/api/ws/ingest")).unwrap();
+        server.join().unwrap();
+    }
 }

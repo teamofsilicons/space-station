@@ -68,6 +68,7 @@ impl Client {
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(15))
                 .redirect(reqwest::redirect::Policy::none())
+                .user_agent("space-station")
                 .build()?,
             url: cfg.accounts_url.clone(),
             app: cfg.accounts_app_id.clone(),
