@@ -30,7 +30,7 @@ Accounts are keyed by their permanent UUID. Public handles (`c:alice`, `si:tos`)
 
 ```toml
 [dependencies]
-space-station = "0.4"
+space-station = "0.5"
 ```
 
 ```rust,ignore
@@ -41,7 +41,7 @@ let recorder = SpaceClient::new("table-orders-…")?;
 recorder.record(serde_json::json!({"id": "o-42", "amount": 12.5}));
 ```
 
-The Rust library exposes every operation. The CLI is a shell over it; the browser shows tables, live windows, and notifications. For Space Window development, install `@teamofsilicons/space-station`; for browser event recording, use `@teamofsilicons/space-station-web`.
+The Rust library exposes every operation. The CLI is a shell over it; the browser shows tables, live windows, and notifications. For Space Window development, install `@teamofsilicons/space-station`.
 
 ## Repository
 
@@ -50,13 +50,15 @@ The Rust library exposes every operation. The CLI is a shell over it; the browse
 - `crates/cli`: native `spacestation` command and private local sessions.
 - `crates/backend`: Axum API, Accounts integration, SQL guard, ingestion, live views, and notifications.
 - `apps/web`: SolidJS frontend using [Silicon UI](https://ui.teamofsilicons.com) and public docs.
-- `packages/`: JavaScript runtime and browser recording SDK.
+- `packages/`: JavaScript runtime and retired browser SDK compatibility package.
 - `infra/production`: native AWS deployment; `infra/apps`: Silicon Apps publishing.
 
 ## Development and production
 
 See [development](docs/DEVELOPING.md), [architecture](docs/ARCHITECTURE.md), [Accounts migration](docs/ACCOUNTS-MIGRATION.md), [production operations](infra/production/README.md), and [release publishing](infra/apps/README.md).
 
-Automated test suites and the old identity fixtures have been removed. Validate changes with workspace builds, the frontend typecheck/build, and real account, ingestion, query, and logout smoke checks.
+Validate changes with workspace tests/builds, the frontend typecheck/build, and account, ingestion, query, and logout smoke checks.
+
+Space Station does not automatically collect or send usage, browser, CLI, server, or machine telemetry. Records are sent only through explicit application recording. The retired browser SDK is inert as of `0.1.2`.
 
 [MIT](LICENSE).

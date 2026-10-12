@@ -9,7 +9,7 @@ crate and has no capability of its own; the web app is a subset.
 
 ```toml
 [dependencies]
-space-station = "0.4"
+space-station = "0.5"
 ```
 
 ## Recording
@@ -28,22 +28,8 @@ default prints to stderr). `.url(..)` and `.home(..)` override `$SPACE_STATION_U
 (`https://backend.spacestation.teamofsilicons.com`) and the default home
 (`$SILICON_HOME/.space-station`, else `$SPACE_STATION_HOME`, else `~/.space-station`).
 
-### Space Station telemetry
-
-Provision the ordinary `si:tos/spacestation` table once and keep its one-time key in
-`SPACE_STATION_TELEMETRY_KEY` or `<SILICON_HOME>/.space-station/telemetry.key`. Then use the same
-daemon and spool for context-rich events:
-
-```rust
-use space_station::Telemetry;
-
-if let Some(telemetry) = Telemetry::from_env()? {
-    telemetry.record("daemon", "ship", Some(0.5), "batch_sent", serde_json::json!({"count": 12}));
-}
-```
-
-Set `SPACE_STATION_TELEMETRY=0` to opt out. Missing telemetry configuration is treated as
-disabled so an application never fails to start because observability is unavailable.
+The library sends only records explicitly supplied by the caller. It does not collect usage
+events or host and hardware information.
 
 ## Managing
 
@@ -159,14 +145,10 @@ owes.
 ## Metadata
 
 ```json
-{"record_id": "…uuid…", "table_id": "orders", "event_ts_ms": 1725000000000,
- "system": {"hostname": "…", "os": "…", "arch": "…", "cpu": "…", "cores": 8, "ram_mb": 16384},
- "cpu_pct": 12.5, "gpu_pct": null, "ram_pct": 41.0, "disk_free_mb": 120000}
+{"record_id": "…uuid…", "table_id": "orders", "event_ts_ms": 1725000000000}
 ```
 
-The first three are stamped by `record()`. The rest is sampled by the daemon when the batch leaves:
-`system` once per daemon, the live values at most once a second (`gpu_pct` via `nvidia-smi` when it
-is installed, otherwise `null`). `disk_free_mb` is the volume that holds `~/.space-station`.
+`record()` stamps these identifiers and timestamp for routing and deduplication.
 
 ## Limits
 

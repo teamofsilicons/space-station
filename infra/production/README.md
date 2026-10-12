@@ -55,8 +55,8 @@ restores the previous executable only when it enforces the same Accounts contrac
 
 `--setup` first runs `setup-native.sh` on each host, ClickHouse first: apt packages (PostgreSQL
 and Redis on the API host, ClickHouse from its LTS repository), `configure-native.py`
-(configuration, the Postgres role and database, the systemd unit) and `operations.py` (logging,
-CloudWatch, daily backups). The initial deployment alone uses `--initialize`, which implies
+(configuration, the Postgres role and database, the systemd unit) and `operations.py` (local
+logging and daily backups). The initial deployment alone uses `--initialize`, which implies
 `--setup` and refuses existing secrets. Runtime credentials are fetched using each instance role
 from its own Secrets Manager secret, and written only to root-readable
 `/etc/space-station/runtime.env`. No credentials are in CloudFormation or SSM command strings.
@@ -86,14 +86,15 @@ HttpOnly and scoped to `spacestation.teamofsilicons.com`, so both application ho
 
 ## Operations and recovery
 
-Native CloudWatch agents collect API/ClickHouse error logs (30 days), memory and root disk usage.
-CloudWatch alarms cover unhealthy API targets, memory above 90%, disk above 80%, failed/missing
-daily backups, and EC2 system checks. System-check alarms automatically request instance recovery.
-Capacity and backup alarms are visible in CloudWatch; no external notification subscription is
-configured. Add an operator-approved SNS destination when an alert recipient is chosen.
+Application diagnostics stay in local log files and the systemd journal. Setup removes any
+previously installed CloudWatch agent and disables ClickHouse crash reporting before installation.
+The stack has no telemetry IAM policy, log groups or alarms; WAF request sampling, WAF metrics
+and EC2 detailed monitoring are disabled. AWS still generates its built-in service metrics for
+EC2, EBS and the load balancer; these are part of the hosting services, not application senders.
 
 At 03:15 UTC daily, systemd timers create PostgreSQL custom dumps and ClickHouse native backups,
-upload them to encrypted, versioned S3, and publish a success metric. Logical backups expire after
+upload them to encrypted, versioned S3. Failures remain visible in the local service status and
+journal. Logical backups expire after
 30 days; previous object versions after 7 days. EBS snapshots run daily at 03:30 UTC and retain
 7 snapshots. Secrets and encrypted data volumes are retained when a stack is removed.
 
@@ -101,6 +102,15 @@ upload them to encrypted, versioned S3, and publish a success metric. Logical ba
 restores it to an isolated probe database, checks its contents and removes that probe. Run it
 through SSM after copying it from the release source. It does not overwrite the live database.
 Both PostgreSQL and ClickHouse restore probes passed on 2026-09-06.
+
+For the telemetry-removal deployment, apply the stack update and deploy with `--setup` so both
+hosts lose their existing forwarders and backup scripts are replaced. Remove obsolete
+`SPACE_STATION_TELEMETRY*`, `SPACE_STATION_FRONTEND_ANALYTICS_KEY` and
+`SPACE_STATION_FRONTEND_EVENTS_KEY` entries from the API runtime secret; configuration excludes
+them from the runtime environment. Previously collected CloudWatch log groups remain retained
+under their existing 30-day retention; no new data is sent to them. Historical application
+records are preserved. Check `systemctl status space-station-backup.timer` and the local journal
+when operating backups, as there are no longer capacity, backup or recovery alarms.
 
 For disaster recovery, provision native replacement hosts with the same software versions,
 attach retained volumes or download the selected logical backups, restore PostgreSQL with

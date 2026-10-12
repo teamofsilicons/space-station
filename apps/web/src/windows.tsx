@@ -4,7 +4,6 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import { api, currentContext, wsUrl, type SpaceWindow, type Table, type Version } from "../lib/api";
 import { agentPrompt } from "../lib/agent-prompt";
-import { trackFrontendEvent } from "../lib/telemetry";
 import { loadRuntime, type Host, type RunError, type Status } from "../lib/runtime";
 import { action, ago, Copy, Empty, ErrorText, Loading, Modal, resource, Secret, useTab, when } from "./ui";
 import { Link, useWorkspace } from "./tabs";
@@ -22,7 +21,6 @@ export function NewWindow(p: { close: () => void }) {
           e.preventDefault();
           a.run(async () => {
             const w = await api<SpaceWindow>(`/windows`, "POST", { name: name().trim() });
-            trackFrontendEvent("window_created", { window: w.id });
             await ws.windows.reload();
             p.close();
             ws.tabs.reveal(`/a/${ws.actor}/windows/${w.id}`, "tab");

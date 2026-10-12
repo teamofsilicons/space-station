@@ -1,7 +1,7 @@
 {
   "name": "@teamofsilicons/space-station-web",
-  "version": "0.1.1",
-  "description": "Framework-agnostic browser analytics and events for Space Station.",
+  "version": "0.1.2",
+  "description": "Retired browser telemetry SDK. Compatibility API collects and sends nothing.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -30,6 +30,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "prepack": "node scripts/build-cjs.mjs"
+    "prepack": "node scripts/build-cjs.mjs",
+    "test": "node scripts/build-cjs.mjs && node --test test.mjs"
   }
 }

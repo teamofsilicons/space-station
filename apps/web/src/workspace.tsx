@@ -4,7 +4,6 @@ import { createEffect, createSignal, For, on, onCleanup, Show, type Component } 
 import { api, type DevError, type Me, type SpaceWindow, type Table, type SavedContext } from "../lib/api";
 import type { RunError } from "../lib/runtime";
 import * as T from "../lib/tabs";
-import { trackFrontendEvent } from "../lib/telemetry";
 import { LoginButtons } from "./login";
 import { createTabs, Link, Panes, TabStrip, useWorkspace, WorkspaceContext, type Toast, type Workspace as W } from "./tabs";
 import { closeMenu, count, Loading, MenuHost, Modal, openMenu, resource, when, type MenuItem } from "./ui";
@@ -231,7 +230,6 @@ function Sidebar(p: { collapsed: boolean; toggle: () => void; dev: boolean }) {
         label: "Sign out",
         icon: "logout",
         run: async () => {
-          trackFrontendEvent("sign_out");
           try {
             await api("/auth/logout", "POST");
             location.assign("/");

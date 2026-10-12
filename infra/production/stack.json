@@ -119,8 +119,7 @@
           ]
         },
         "ManagedPolicyArns": [
-          "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
-          "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+          "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
         ],
         "Policies": [
           {
@@ -197,8 +196,7 @@
           ]
         },
         "ManagedPolicyArns": [
-          "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
-          "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+          "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
         ],
         "Policies": [
           {
@@ -384,8 +382,8 @@
           "Allow": {}
         },
         "VisibilityConfig": {
-          "CloudWatchMetricsEnabled": true,
-          "SampledRequestsEnabled": true,
+          "CloudWatchMetricsEnabled": false,
+          "SampledRequestsEnabled": false,
           "MetricName": "SpaceStationGateway"
         },
         "Rules": [
@@ -402,8 +400,8 @@
               }
             },
             "VisibilityConfig": {
-              "CloudWatchMetricsEnabled": true,
-              "SampledRequestsEnabled": true,
+              "CloudWatchMetricsEnabled": false,
+              "SampledRequestsEnabled": false,
               "MetricName": "SpaceStationRateLimit"
             }
           },
@@ -420,8 +418,8 @@
               }
             },
             "VisibilityConfig": {
-              "CloudWatchMetricsEnabled": true,
-              "SampledRequestsEnabled": true,
+              "CloudWatchMetricsEnabled": false,
+              "SampledRequestsEnabled": false,
               "MetricName": "SpaceStationIpReputation"
             }
           },
@@ -470,8 +468,8 @@
               }
             },
             "VisibilityConfig": {
-              "CloudWatchMetricsEnabled": true,
-              "SampledRequestsEnabled": true,
+              "CloudWatchMetricsEnabled": false,
+              "SampledRequestsEnabled": false,
               "MetricName": "SpaceStationCommon"
             }
           }
@@ -583,7 +581,7 @@
           "HttpEndpoint": "enabled",
           "HttpPutResponseHopLimit": 1
         },
-        "Monitoring": true,
+        "Monitoring": false,
         "BlockDeviceMappings": [
           {
             "DeviceName": "/dev/sda1",
@@ -620,32 +618,6 @@
       "DeletionPolicy": "Retain",
       "UpdateReplacePolicy": "Retain"
     },
-    "ApiRecovery": {
-      "Type": "AWS::CloudWatch::Alarm",
-      "Properties": {
-        "AlarmDescription": "Recover Space Station instance on EC2 system impairment",
-        "Namespace": "AWS/EC2",
-        "MetricName": "StatusCheckFailed_System",
-        "Dimensions": [
-          {
-            "Name": "InstanceId",
-            "Value": {
-              "Ref": "ApiInstance"
-            }
-          }
-        ],
-        "Statistic": "Minimum",
-        "Period": 60,
-        "EvaluationPeriods": 2,
-        "Threshold": 1,
-        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
-        "AlarmActions": [
-          {
-            "Fn::Sub": "arn:aws:automate:${AWS::Region}:ec2:recover"
-          }
-        ]
-      }
-    },
     "ClickhouseInstance": {
       "Type": "AWS::EC2::Instance",
       "Properties": {
@@ -669,7 +641,7 @@
           "HttpEndpoint": "enabled",
           "HttpPutResponseHopLimit": 1
         },
-        "Monitoring": true,
+        "Monitoring": false,
         "BlockDeviceMappings": [
           {
             "DeviceName": "/dev/sda1",
@@ -705,32 +677,6 @@
       },
       "DeletionPolicy": "Retain",
       "UpdateReplacePolicy": "Retain"
-    },
-    "ClickhouseRecovery": {
-      "Type": "AWS::CloudWatch::Alarm",
-      "Properties": {
-        "AlarmDescription": "Recover Space Station instance on EC2 system impairment",
-        "Namespace": "AWS/EC2",
-        "MetricName": "StatusCheckFailed_System",
-        "Dimensions": [
-          {
-            "Name": "InstanceId",
-            "Value": {
-              "Ref": "ClickhouseInstance"
-            }
-          }
-        ],
-        "Statistic": "Minimum",
-        "Period": 60,
-        "EvaluationPeriods": 2,
-        "Threshold": 1,
-        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
-        "AlarmActions": [
-          {
-            "Fn::Sub": "arn:aws:automate:${AWS::Region}:ec2:recover"
-          }
-        ]
-      }
     },
     "GatewayTargetGroup": {
       "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
@@ -834,186 +780,6 @@
             }
           ]
         }
-      }
-    },
-    "ApiLogs": {
-      "Type": "AWS::Logs::LogGroup",
-      "Properties": {
-        "LogGroupName": "/space-station/production/api",
-        "RetentionInDays": 30
-      },
-      "DeletionPolicy": "Retain",
-      "UpdateReplacePolicy": "Retain"
-    },
-    "ApiMemoryAlarm": {
-      "Type": "AWS::CloudWatch::Alarm",
-      "Properties": {
-        "AlarmDescription": "Space Station api memory capacity",
-        "Namespace": "SpaceStation",
-        "MetricName": "mem_used_percent",
-        "Dimensions": [
-          {
-            "Name": "InstanceId",
-            "Value": {
-              "Ref": "ApiInstance"
-            }
-          }
-        ],
-        "Statistic": "Average",
-        "Period": 300,
-        "EvaluationPeriods": 3,
-        "Threshold": 90,
-        "ComparisonOperator": "GreaterThanThreshold",
-        "TreatMissingData": "missing"
-      }
-    },
-    "ApiDiskAlarm": {
-      "Type": "AWS::CloudWatch::Alarm",
-      "Properties": {
-        "AlarmDescription": "Space Station api disk capacity",
-        "Namespace": "SpaceStation",
-        "MetricName": "disk_used_percent",
-        "Dimensions": [
-          {
-            "Name": "InstanceId",
-            "Value": {
-              "Ref": "ApiInstance"
-            }
-          }
-        ],
-        "Statistic": "Average",
-        "Period": 300,
-        "EvaluationPeriods": 3,
-        "Threshold": 80,
-        "ComparisonOperator": "GreaterThanThreshold",
-        "TreatMissingData": "missing"
-      }
-    },
-    "ApiBackupAlarm": {
-      "Type": "AWS::CloudWatch::Alarm",
-      "Properties": {
-        "AlarmDescription": "Space Station daily logical backup failed or missing",
-        "Namespace": "SpaceStation",
-        "MetricName": "BackupSuccess",
-        "Dimensions": [
-          {
-            "Name": "Role",
-            "Value": "api"
-          }
-        ],
-        "Statistic": "Minimum",
-        "Period": 86400,
-        "EvaluationPeriods": 1,
-        "Threshold": 1,
-        "ComparisonOperator": "LessThanThreshold",
-        "TreatMissingData": "breaching"
-      }
-    },
-    "ClickhouseLogs": {
-      "Type": "AWS::Logs::LogGroup",
-      "Properties": {
-        "LogGroupName": "/space-station/production/clickhouse",
-        "RetentionInDays": 30
-      },
-      "DeletionPolicy": "Retain",
-      "UpdateReplacePolicy": "Retain"
-    },
-    "ClickhouseMemoryAlarm": {
-      "Type": "AWS::CloudWatch::Alarm",
-      "Properties": {
-        "AlarmDescription": "Space Station clickhouse memory capacity",
-        "Namespace": "SpaceStation",
-        "MetricName": "mem_used_percent",
-        "Dimensions": [
-          {
-            "Name": "InstanceId",
-            "Value": {
-              "Ref": "ClickhouseInstance"
-            }
-          }
-        ],
-        "Statistic": "Average",
-        "Period": 300,
-        "EvaluationPeriods": 3,
-        "Threshold": 90,
-        "ComparisonOperator": "GreaterThanThreshold",
-        "TreatMissingData": "missing"
-      }
-    },
-    "ClickhouseDiskAlarm": {
-      "Type": "AWS::CloudWatch::Alarm",
-      "Properties": {
-        "AlarmDescription": "Space Station clickhouse disk capacity",
-        "Namespace": "SpaceStation",
-        "MetricName": "disk_used_percent",
-        "Dimensions": [
-          {
-            "Name": "InstanceId",
-            "Value": {
-              "Ref": "ClickhouseInstance"
-            }
-          }
-        ],
-        "Statistic": "Average",
-        "Period": 300,
-        "EvaluationPeriods": 3,
-        "Threshold": 80,
-        "ComparisonOperator": "GreaterThanThreshold",
-        "TreatMissingData": "missing"
-      }
-    },
-    "ClickhouseBackupAlarm": {
-      "Type": "AWS::CloudWatch::Alarm",
-      "Properties": {
-        "AlarmDescription": "Space Station daily logical backup failed or missing",
-        "Namespace": "SpaceStation",
-        "MetricName": "BackupSuccess",
-        "Dimensions": [
-          {
-            "Name": "Role",
-            "Value": "clickhouse"
-          }
-        ],
-        "Statistic": "Minimum",
-        "Period": 86400,
-        "EvaluationPeriods": 1,
-        "Threshold": 1,
-        "ComparisonOperator": "LessThanThreshold",
-        "TreatMissingData": "breaching"
-      }
-    },
-    "ApiHealthAlarm": {
-      "Type": "AWS::CloudWatch::Alarm",
-      "Properties": {
-        "AlarmDescription": "Space Station API or dependency readiness is failing",
-        "Namespace": "AWS/ApplicationELB",
-        "MetricName": "UnHealthyHostCount",
-        "Dimensions": [
-          {
-            "Name": "TargetGroup",
-            "Value": {
-              "Fn::GetAtt": [
-                "GatewayTargetGroup",
-                "TargetGroupFullName"
-              ]
-            }
-          },
-          {
-            "Name": "LoadBalancer",
-            "Value": {
-              "Fn::GetAtt": [
-                "Gateway",
-                "LoadBalancerFullName"
-              ]
-            }
-          }
-        ],
-        "Statistic": "Maximum",
-        "Period": 60,
-        "EvaluationPeriods": 3,
-        "Threshold": 1,
-        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
-        "TreatMissingData": "missing"
       }
     }
   },

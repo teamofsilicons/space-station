@@ -53,8 +53,7 @@ created them. The owner keeps control of their own data. Historical access array
 compatibility metadata and do not grant access to another account.
 
 Keep access tokens in development `.env` files and API keys in server-side secret storage.
-The browser never receives telemetry table keys. Published processor and renderer code is
-checked for credential-shaped text. Table keys can ingest records but cannot query or manage data.
+Published processor and renderer code is checked for credential-shaped text. Table keys can ingest records but cannot query or manage data.
 
 See [CLI](/docs/cli), [HTTP API](/docs/api), and
 [Silicon Developer](https://developers.teamofsilicons.com) for the full integration details.

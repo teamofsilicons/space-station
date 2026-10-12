@@ -11,7 +11,7 @@ def write(path,text,mode=0o644):
  p=pathlib.Path(path);p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text);p.chmod(mode)
 def run(*args,**kw):return subprocess.run(args,check=True,**kw)
 if role=='api':
- write('/etc/space-station/runtime.env',''.join(k+'='+v+'\n' for k,v in env.items() if not k.startswith('_')),0o600)
+ write('/etc/space-station/runtime.env',''.join(k+'='+v+'\n' for k,v in env.items() if not k.startswith(('_', 'SPACE_STATION_TELEMETRY', 'SPACE_STATION_FRONTEND_'))),0o600)
  password=env['_POSTGRES_PASSWORD']
  # The generated passwords are hex; never interpolate arbitrary input into SQL.
  if not password or any(c not in '0123456789abcdef' for c in password):

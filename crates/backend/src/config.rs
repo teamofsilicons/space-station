@@ -4,11 +4,9 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use url::Url;
-
-const DEFAULT_TELEMETRY_URL: &str = "http://127.0.0.1:8080";
 
 #[derive(Clone)]
 pub struct Config {
@@ -35,14 +33,6 @@ pub struct Config {
     /// The secret before the last rotation, accepted while Silicon Accounts drains deliveries signed with it.
     pub accounts_webhook_secret_previous: Option<String>,
     pub allow_private_webhooks: bool,
-    /// Ordinary `tos.spacestation` table key for backend self-telemetry. Missing disables it.
-    pub telemetry_key: Option<String>,
-    /// Optional browser-facing tables. These are written through the same-origin frontend
-    /// collector; the keys never leave the backend.
-    pub frontend_analytics_key: Option<String>,
-    pub frontend_events_key: Option<String>,
-    pub telemetry_home: PathBuf,
-    pub telemetry_url: String,
 }
 
 impl Config {
@@ -103,36 +93,6 @@ impl Config {
             optional("SILICON_ACCOUNTS_URL").unwrap_or_else(|| "https://accounts.teamofsilicons.com".into());
         let accounts_auth_url = optional("SILICON_ACCOUNTS_AUTH_URL")
             .unwrap_or_else(|| format!("{}/authorize", accounts_url.trim_end_matches('/')));
-        let telemetry_key = if var("SPACE_STATION_TELEMETRY")
-            .is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "off" | "no"))
-        {
-            None
-        } else {
-            optional("SPACE_STATION_TELEMETRY_KEY")
-        };
-        let frontend_analytics_key = if var("SPACE_STATION_TELEMETRY")
-            .is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "off" | "no"))
-        {
-            None
-        } else {
-            optional("SPACE_STATION_FRONTEND_ANALYTICS_KEY")
-        };
-        let frontend_events_key = if var("SPACE_STATION_TELEMETRY")
-            .is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "off" | "no"))
-        {
-            None
-        } else {
-            optional("SPACE_STATION_FRONTEND_EVENTS_KEY")
-        };
-        let telemetry_home = optional("SILICON_HOME")
-            .map(PathBuf::from)
-            .map(|home| home.join(".space-station"))
-            .or_else(|| optional("SPACE_STATION_HOME").map(PathBuf::from))
-            .or_else(|| optional("HOME").map(|home| PathBuf::from(home).join(".space-station")))
-            .unwrap_or_else(|| PathBuf::from(".space-station"));
-        let telemetry_url = optional("SPACE_STATION_TELEMETRY_URL")
-            .or_else(|| optional("SPACE_STATION_URL"))
-            .unwrap_or_else(|| DEFAULT_TELEMETRY_URL.to_owned());
         Ok(Config {
             bind: SocketAddr::from(([0, 0, 0, 0], port)),
             origin: origin.origin().ascii_serialization(),
@@ -150,11 +110,6 @@ impl Config {
             accounts_webhook_secret_previous,
             allow_private_webhooks: var("SS_ALLOW_PRIVATE_WEBHOOKS")
                 .is_some_and(|v| !matches!(v.as_str(), "" | "0" | "false")),
-            telemetry_key,
-            frontend_analytics_key,
-            frontend_events_key,
-            telemetry_home,
-            telemetry_url,
         })
     }
 }

@@ -1,3 +1,4 @@
+/** Compatibility types for the retired SDK. No data is collected or sent. */
 export type FlushResult = { sent: number; failed: number; dropped: number; queued: number };
 export type SpaceStationWebOptions = {
   analyticsTable?: string;
@@ -19,6 +20,8 @@ export type IngestBatch = {
   batch_id: string;
   records: Array<{ key: string; metadata: { record_id: string; table_id: string; event_ts_ms: number }; record: { type: string; data: unknown; metadata: Record<string, unknown> } }>;
 };
+/** All options are ignored; the returned client always stays disabled. */
 export function createSpaceStationWeb(options?: SpaceStationWebOptions): SpaceStationWeb;
+/** Ignores input and returns an empty batch with a blank batch_id. */
 export function toIngestBatch(input: { table: string; key: string; events: Array<{ id?: string; type: string; data: unknown; metadata?: Record<string, unknown> }>; batchId?: string }): IngestBatch;
 export default createSpaceStationWeb;

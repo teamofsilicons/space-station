@@ -5,7 +5,6 @@ import { SiliconBadge, SiliconButton, SiliconInput } from './silicon-ui';
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 import { api, TABLE_ID, type Overview, type Table } from "../lib/api";
 import { loadRecordPage, openSnapshot, type Snapshot, type TableRecord } from "../lib/table-records";
-import { trackFrontendEvent } from "../lib/telemetry";
 import { action, ago, count, Empty, ErrorText, Loading, Modal, openMenu, resource, Secret, Segmented, useTab, when } from "./ui";
 import { Link, useWorkspace } from "./tabs";
 import { Icon } from "./icons";
@@ -30,7 +29,6 @@ export function NewTable(p: { close: () => void; rotated?: { table: string; key:
                 if (!TABLE_ID.test(id())) throw Error("Use 1–50 lowercase letters and digits.");
                 const table = id();
                 const { key } = await api<{ key: string }>(`/tables`, "POST", { id: table });
-                trackFrontendEvent("table_created", { table });
                 setMade({ table, key });
                 ws.tables.reload();
               });
@@ -93,7 +91,7 @@ export function Tables() {
       { label: "Open in split view", icon: "split", run: () => ws.tabs.open(`/a/${ws.actor}/tables/${t.id}`, "split") },
       "-",
       ...(retired()
-        ? [{ label: "Restore", icon: "reload", run: () => a.run(async () => { await api(`/tables/${t.id}/unretire`, "POST"); trackFrontendEvent("table_restored", { table: t.id }); await reload(); }) }]
+        ? [{ label: "Restore", icon: "reload", run: () => a.run(async () => { await api(`/tables/${t.id}/unretire`, "POST"); await reload(); }) }]
         : [
             {
               label: "Rotate key",
@@ -108,7 +106,7 @@ export function Tables() {
               danger: true,
               run: () =>
                 confirm(`Retire ${t.id}? Its key will stop accepting new records, while existing records remain queryable.`) &&
-                a.run(async () => { await api(`/tables/${t.id}/retire`, "POST"); trackFrontendEvent("table_retired", { table: t.id }); await reload(); }),
+                a.run(async () => { await api(`/tables/${t.id}/retire`, "POST"); await reload(); }),
             },
           ]),
     ]);

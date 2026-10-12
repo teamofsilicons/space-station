@@ -24,7 +24,7 @@ Every table has the same columns:
 | `record_id` | UUID | from the client library |
 | `event_ts_ms` | Int64 | when the app recorded it; the sort order |
 | `registered_ts_ms` | Int64 | when the server registered it |
-| `metadata` | JSON | what the library stamped: `system`, `cpu_pct`, `ram_pct`, … |
+| `metadata` | JSON | record identity and event timestamp: `record_id`, `table_id`, `event_ts_ms` |
 | `record` | JSON | what the app sent |
 
 ## Casting JSON paths
@@ -35,7 +35,7 @@ dynamic type. Cast it to use it:
 ```sql
 SELECT record.id::String AS id, record.amount::Float64 AS amount
 FROM orders
-WHERE record.amount::Float64 > 5 AND metadata.cpu_pct::Float64 < 80
+WHERE record.amount::Float64 > 5
 ORDER BY event_ts_ms DESC
 LIMIT 50
 ```

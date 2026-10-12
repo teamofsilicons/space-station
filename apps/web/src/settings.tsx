@@ -1,8 +1,6 @@
-// Settings: your access token, webhooks, API keys, and this browser's preferences (appearance and
-// frontend telemetry).
+// Settings: your access token, webhooks, API keys, and this browser's appearance.
 import { createSignal, For, Show } from "solid-js";
 import { api, type ApiKey, type Webhook } from "../lib/api";
-import { frontendTelemetryEnabled, setFrontendTelemetryEnabled, trackFrontendEvent } from "../lib/telemetry";
 import { action, ago, ErrorText, Loading, resource, Secret, Segmented } from "./ui";
 import { useWorkspace } from "./tabs";
 import { AccessToken } from "./windows";
@@ -23,7 +21,6 @@ function Row(p: { title: string; hint: string; children: any }) {
 
 export function Settings() {
   const ws = useWorkspace();
-  const [telemetry, setTelemetry] = createSignal(frontendTelemetryEnabled());
   return (
     <div class="page-body">
       <header class="page-head">
@@ -39,21 +36,6 @@ export function Settings() {
       <Keys />
       <Row title="Appearance" hint="Follows your system unless you choose. Kept in this browser.">
         <Segmented<Theme> label="Theme" value={theme()} options={["system", "light", "dark"]} names={{ system: "System", light: "Light", dark: "Dark" }} onChange={setTheme} />
-      </Row>
-      <Row title="Frontend telemetry" hint="Optional analytics that help diagnose the Space Station interface.">
-        <label class="check">
-          <input
-            type="checkbox"
-            checked={telemetry()}
-            onChange={(e) => {
-              const enabled = e.currentTarget.checked;
-              setTelemetry(enabled);
-              setFrontendTelemetryEnabled(enabled);
-              trackFrontendEvent("frontend_telemetry_setting_changed", { enabled });
-            }}
-          />
-          Allow frontend analytics
-        </label>
       </Row>
     </div>
   );

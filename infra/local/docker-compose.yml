@@ -11,7 +11,9 @@ services:
       CLICKHOUSE_PASSWORD: dev
       CLICKHOUSE_DB: space_station
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
-    volumes: ["clickhouse:/var/lib/clickhouse"]
+    volumes:
+      - "clickhouse:/var/lib/clickhouse"
+      - "../production/clickhouse-no-telemetry.xml:/etc/clickhouse-server/config.d/no-telemetry.xml:ro"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8123/ping"]
       interval: 5s

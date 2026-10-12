@@ -17,18 +17,13 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::Serialize;
 use serde_json::json;
-use std::time::Instant;
 use tokio::sync::watch;
-use uuid::Uuid;
 
 use crate::accounts;
 use crate::config::Config;
 use crate::sql::GuardError;
 use crate::store::{ChError, Lease, Store};
-use crate::telemetry::Telemetry;
-use crate::{
-    access, dev_errors, frontend, ingest, live, notifications, query, tables, tokens, triggers, webhooks, windows,
-};
+use crate::{access, dev_errors, ingest, live, notifications, query, tables, tokens, triggers, webhooks, windows};
 
 #[derive(Clone)]
 pub struct AppState(pub Arc<Inner>);
@@ -44,8 +39,6 @@ pub struct Inner {
     pub hub: live::Hub,
     pub keys: ingest::Keys,
     pub visible: access::Cache,
-    pub telemetry: Option<Telemetry>,
-    pub frontend: frontend::Collector,
 }
 
 impl Deref for AppState {
@@ -67,31 +60,20 @@ pub fn router(state: AppState) -> Router {
         .merge(webhooks::routes())
         .merge(windows::routes())
         .merge(dev_errors::routes())
-        .merge(frontend::routes())
         .merge(ingest::routes())
         .merge(live::routes())
         .merge(notifications::routes());
     Router::new()
         .nest("/api", api)
         .fallback(async || ApiError::not_found("route"))
-        .layer(middleware::from_fn_with_state(state.clone(), observe))
+        .layer(middleware::from_fn(no_store))
         .with_state(state)
 }
 
-/// Records only safe request facts. Health and ingest are excluded: health is polled frequently,
-/// and recording ingest outcomes through the same path would recurse into telemetry.
-async fn observe(State(state): State<AppState>, req: Request<axum::body::Body>, next: Next) -> Response {
-    let path = req.uri().path().to_owned();
-    let skip = matches!(path.as_str(), "/api/health" | "/api/ws/ingest" | "/api/ingest" | "/api/web/telemetry")
-        || path == "/api/accounts/webhook";
-    let method = req.method().to_string();
-    let trace_id = Uuid::new_v4();
-    let started = Instant::now();
+/// Keep account data and credentials out of browser and proxy caches.
+async fn no_store(req: Request<axum::body::Body>, next: Next) -> Response {
     let mut response = next.run(req).await;
     response.headers_mut().insert(axum::http::header::CACHE_CONTROL, axum::http::HeaderValue::from_static("no-store"));
-    if !skip && let Some(telemetry) = &state.telemetry {
-        telemetry.request(trace_id, &method, &path, response.status().as_u16(), started);
-    }
     response
 }
 

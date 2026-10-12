@@ -21,34 +21,12 @@ pub struct Entry {
     pub record: Value,
 }
 
-/// What the library stamps on every record. Everything after `event_ts_ms` is sampled by the
-/// daemon at send time and is `None` when it could not be measured.
+/// The identifiers and timestamp needed to route and deduplicate a record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Metadata {
     pub record_id: Uuid,
     pub table_id: String,
     pub event_ts_ms: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub system: Option<System>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cpu_pct: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gpu_pct: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ram_pct: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub disk_free_mb: Option<u64>,
-}
-
-/// Cached once per machine.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct System {
-    pub hostname: String,
-    pub os: String,
-    pub arch: String,
-    pub cpu: String,
-    pub cores: u32,
-    pub ram_mb: u64,
 }
 
 /// `← {"batch_id", "status": "ok"}` or `{"batch_id", "status": "rejected", "rejected": [...]}`.
@@ -104,4 +82,32 @@ pub enum Code {
     Invalid,
     /// The whole frame was over `BATCH_MAX`.
     BatchTooLarge,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Entry;
+    use serde_json::json;
+
+    #[test]
+    fn legacy_host_metadata_is_not_forwarded_but_explicit_record_data_is_preserved() {
+        let metadata = json!({
+            "record_id": "00000000-0000-0000-0000-000000000001",
+            "table_id": "orders",
+            "event_ts_ms": 1,
+        });
+        let record = json!({"order": 42, "system": "explicit caller data"});
+        let mut legacy = json!({"key": "table-orders-test", "metadata": metadata, "record": record});
+        legacy["metadata"]["system"] = json!({"hostname": "private-host", "os": "private-os"});
+        legacy["metadata"]["cpu_pct"] = json!(12.5);
+        legacy["metadata"]["gpu_pct"] = json!(8.0);
+        legacy["metadata"]["ram_pct"] = json!(41.0);
+        legacy["metadata"]["disk_free_mb"] = json!(120000);
+
+        let entry: Entry = serde_json::from_value(legacy).unwrap();
+        let forwarded = serde_json::to_value(entry).unwrap();
+
+        assert_eq!(forwarded["metadata"], metadata);
+        assert_eq!(forwarded["record"], record);
+    }
 }

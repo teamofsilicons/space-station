@@ -87,24 +87,6 @@ tables ls                                       every table you may see, with it
        overview [--window 5h]                   1m 5m 15m 1h 5h 1d 7d 30d
 ```
 
-The `si:tos` account owns Space Station's own telemetry table like any other table. Provision
-it once with the normal command, store the one-time key in the deployment secret store, and send
-events through the same `record`/daemon path:
-
-```sh
-spacestation tables create spacestation > spacestation.table-key
-chmod 600 spacestation.table-key
-```
-
-Telemetry records should be self-contained and include at least `source`, `step`, `progress`,
-`event`, and a context object. The daemon adds the normal record and system metadata; no separate
-telemetry transport or privileged table path exists.
-
-The Space Station frontend uses two additional `si:tos` tables: `spacestationfrontendanalytics` for
-sampled automatic browser analytics and `spacestationfrontendevents` for explicit product events.
-The browser never receives their table keys; its authenticated session posts batches to the
-frontend collector. Install the reusable package with `npm i @teamofsilicons/space-station-web`.
-
 ```
 windows ls | get <id>                           a summary: id, name, current version and its author
         create <name>            name under 20 characters

@@ -10,7 +10,6 @@ pub mod accounts;
 pub mod config;
 pub mod crypto;
 pub mod dev_errors;
-pub mod frontend;
 pub mod http;
 pub mod ingest;
 pub mod live;
@@ -19,7 +18,6 @@ pub mod query;
 pub mod sql;
 pub mod store;
 pub mod tables;
-pub mod telemetry;
 pub mod tokens;
 pub mod triggers;
 pub mod webhooks;
@@ -33,13 +31,11 @@ use tokio::task::JoinHandle;
 
 use crate::config::Config;
 use crate::http::{AppState, Inner};
-use crate::telemetry::Telemetry;
 
 pub struct App {
     pub addr: SocketAddr,
     pub task: JoinHandle<()>,
     stop: watch::Sender<bool>,
-    telemetry: Option<Telemetry>,
 }
 
 impl App {
@@ -47,8 +43,6 @@ impl App {
     pub async fn start(cfg: Config) -> Result<App, Box<dyn std::error::Error + Send + Sync>> {
         let store = store::Store::connect(&cfg).await?;
         let accounts = accounts::Client::connect(&cfg).await?;
-        let telemetry = telemetry::Telemetry::from_config(&cfg)?;
-        let frontend = frontend::Collector::from_config(&cfg);
         let (stop_tx, stop) = watch::channel(false);
         let lease = store::Lease::start(store.redis.clone());
         let state = AppState(Arc::new(Inner {
@@ -61,8 +55,6 @@ impl App {
             hub: Default::default(),
             keys: Default::default(),
             visible: Default::default(),
-            telemetry: telemetry.clone(),
-            frontend,
         }));
         let listener = listen(state.cfg.bind).await?;
         let addr = listener.local_addr()?;
@@ -82,17 +74,11 @@ impl App {
             lease.release().await;
         });
         tracing::info!("space station listening on {addr}");
-        if let Some(t) = &telemetry {
-            t.record("backend", "lifecycle", "started", serde_json::json!({"addr": addr.to_string()}));
-        }
-        Ok(App { addr, task, stop: stop_tx, telemetry })
+        Ok(App { addr, task, stop: stop_tx })
     }
 
     /// Stop accepting, close the sockets, let the in-flight flush land, release the lease.
     pub async fn stop(self) {
-        if let Some(t) = &self.telemetry {
-            t.record("backend", "lifecycle", "stopping", serde_json::json!({}));
-        }
         self.stop.send_replace(true);
         let _ = self.task.await;
     }

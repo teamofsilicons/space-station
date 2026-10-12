@@ -130,16 +130,7 @@ impl SpaceClient {
         }
         shared::sanitize::record(&mut record).map_err(|e| Error::SizeExceeded { bytes: e.bytes })?;
         let event_ts_ms = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
-        let metadata = Metadata {
-            record_id: Uuid::new_v4(),
-            table_id: self.table_id.clone(),
-            event_ts_ms,
-            system: None,
-            cpu_pct: None,
-            gpu_pct: None,
-            ram_pct: None,
-            disk_free_mb: None,
-        };
+        let metadata = Metadata { record_id: Uuid::new_v4(), table_id: self.table_id.clone(), event_ts_ms };
         let mut line =
             serde_json::to_string(&Entry { key: self.key.clone(), metadata, record }).map_err(io::Error::from)?;
         line.push('\n');

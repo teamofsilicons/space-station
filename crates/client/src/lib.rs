@@ -42,7 +42,6 @@ pub mod daemon;
 pub mod local;
 mod record;
 mod spool;
-pub mod telemetry;
 mod types;
 mod windows;
 
@@ -51,7 +50,6 @@ pub use space_station_shared as shared;
 pub use api::Space;
 pub use auth::{Auth, exchange, login};
 pub use record::{Builder, SpaceClient};
-pub use telemetry::Telemetry;
 pub use types::{
     AccessToken, ApiKey, Bounds, DaemonStatus, Def, DevError, Event, Identity, Key, Kind, Notification, Overview,
     Restrict, Rows, StateMetadata, Table, TestRun, TopTable, Trigger, Version, Webhook, Window, WindowState,

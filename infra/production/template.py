@@ -25,7 +25,7 @@ for name in ["ApiRuntime", "ClickhouseRuntime"]:
 for name, secret in [("Api", "ApiRuntime"), ("Clickhouse", "ClickhouseRuntime")]:
     add(name + "Role", "AWS::IAM::Role", {
         "AssumeRolePolicyDocument": {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Principal": {"Service": "ec2.amazonaws.com"}, "Action": "sts:AssumeRole"}]},
-        "ManagedPolicyArns": ["arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore", "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"],
+        "ManagedPolicyArns": ["arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"],
         "Policies": [{"PolicyName": "OwnRuntimeAndBackups", "PolicyDocument": {"Version": "2012-10-17", "Statement": [
             {"Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject"], "Resource": sub("${Artifacts.Arn}/*")},
             {"Effect": "Allow", "Action": "s3:ListBucket", "Resource": get("Artifacts", "Arn")},
@@ -50,13 +50,13 @@ add("GatewayHttp", "AWS::ElasticLoadBalancingV2::Listener", {
     "LoadBalancerArn":ref("Gateway"), "Port":80, "Protocol":"HTTP",
     "DefaultActions":[{"Type":"redirect","RedirectConfig":{"Protocol":"HTTPS","Port":"443","StatusCode":"HTTP_301"}}],
 })
-metric=lambda name:{"CloudWatchMetricsEnabled":True,"SampledRequestsEnabled":True,"MetricName":"SpaceStation"+name}
+visibility=lambda name:{"CloudWatchMetricsEnabled":False,"SampledRequestsEnabled":False,"MetricName":"SpaceStation"+name}
 add("GatewayFirewall", "AWS::WAFv2::WebACL", {
-    "Name":"space-station-production", "Scope":"REGIONAL", "DefaultAction":{"Allow":{}}, "VisibilityConfig":metric("Gateway"),
+    "Name":"space-station-production", "Scope":"REGIONAL", "DefaultAction":{"Allow":{}}, "VisibilityConfig":visibility("Gateway"),
     "Rules":[
-        {"Name":"rate-limit", "Priority":0, "Action":{"Block":{}}, "Statement":{"RateBasedStatement":{"Limit":100000,"AggregateKeyType":"IP"}},"VisibilityConfig":metric("RateLimit")},
-        {"Name":"ip-reputation", "Priority":1, "OverrideAction":{"None":{}}, "Statement":{"ManagedRuleGroupStatement":{"VendorName":"AWS","Name":"AWSManagedRulesAmazonIpReputationList"}},"VisibilityConfig":metric("IpReputation")},
-        {"Name":"common", "Priority":2, "OverrideAction":{"None":{}}, "Statement":{"ManagedRuleGroupStatement":{"VendorName":"AWS","Name":"AWSManagedRulesCommonRuleSet","RuleActionOverrides":[{"Name":name,"ActionToUse":{"Count":{}}} for name in ["SizeRestrictions_BODY","EC2MetaDataSSRF_BODY","GenericLFI_BODY","GenericRFI_BODY","CrossSiteScripting_BODY"]]}}, "VisibilityConfig":metric("Common")},
+        {"Name":"rate-limit", "Priority":0, "Action":{"Block":{}}, "Statement":{"RateBasedStatement":{"Limit":100000,"AggregateKeyType":"IP"}},"VisibilityConfig":visibility("RateLimit")},
+        {"Name":"ip-reputation", "Priority":1, "OverrideAction":{"None":{}}, "Statement":{"ManagedRuleGroupStatement":{"VendorName":"AWS","Name":"AWSManagedRulesAmazonIpReputationList"}},"VisibilityConfig":visibility("IpReputation")},
+        {"Name":"common", "Priority":2, "OverrideAction":{"None":{}}, "Statement":{"ManagedRuleGroupStatement":{"VendorName":"AWS","Name":"AWSManagedRulesCommonRuleSet","RuleActionOverrides":[{"Name":name,"ActionToUse":{"Count":{}}} for name in ["SizeRestrictions_BODY","EC2MetaDataSSRF_BODY","GenericLFI_BODY","GenericRFI_BODY","CrossSiteScripting_BODY"]]}}, "VisibilityConfig":visibility("Common")},
     ], "Tags":tags,
 })
 add("GatewayFirewallAssociation", "AWS::WAFv2::WebACLAssociation", {"ResourceArn":ref("Gateway"),"WebACLArn":get("GatewayFirewall","Arn")})
@@ -93,17 +93,11 @@ for name, size in [("Api", 64), ("Clickhouse", 128)]:
         "ImageId": ref("AmiId"), "InstanceType": "t4g.large", "SubnetId": ref("SubnetId"),
         "SecurityGroupIds": [ref(name + "SecurityGroup")], "IamInstanceProfile": ref(name + "Profile"),
         "MetadataOptions": {"HttpTokens": "required", "HttpEndpoint": "enabled", "HttpPutResponseHopLimit": 1},
-        "Monitoring": True,
+        "Monitoring": False,
         "BlockDeviceMappings": [{"DeviceName": "/dev/sda1", "Ebs": {"VolumeSize": size, "VolumeType": "gp3", "Encrypted": True, "DeleteOnTermination": False}}],
         "Tags": tags + [{"Key": "Name", "Value": "space-station-production-" + name.lower()}, {"Key": "Backup", "Value": "space-station"}],
         "UserData": {"Fn::Base64": bootstrap},
     }, True)
-    add(name + "Recovery", "AWS::CloudWatch::Alarm", {
-        "AlarmDescription": "Recover Space Station instance on EC2 system impairment", "Namespace": "AWS/EC2",
-        "MetricName": "StatusCheckFailed_System", "Dimensions": [{"Name": "InstanceId", "Value": ref(name + "Instance")}],
-        "Statistic": "Minimum", "Period": 60, "EvaluationPeriods": 2, "Threshold": 1,
-        "ComparisonOperator": "GreaterThanOrEqualToThreshold", "AlarmActions": [sub("arn:aws:automate:${AWS::Region}:ec2:recover")],
-    })
 add("GatewayTargetGroup", "AWS::ElasticLoadBalancingV2::TargetGroup", {
     "Name": "space-station-native-api", "VpcId": ref("VpcId"), "Port": 8080, "Protocol": "HTTP", "TargetType": "instance",
     "Targets": [{"Id": ref("ApiInstance"), "Port": 8080}], "HealthCheckPath": "/api/health", "HealthCheckIntervalSeconds": 15,
@@ -118,28 +112,6 @@ add("DailySnapshots", "AWS::DLM::LifecyclePolicy", {
     "Description": "Daily Space Station snapshots retained seven days", "State": "ENABLED", "ExecutionRoleArn": get("SnapshotRole", "Arn"),
     "PolicyDetails": {"PolicyType": "EBS_SNAPSHOT_MANAGEMENT", "ResourceTypes": ["INSTANCE"], "TargetTags": [{"Key": "Backup", "Value": "space-station"}],
         "Schedules": [{"Name": "Daily", "CreateRule": {"Interval": 24, "IntervalUnit": "HOURS", "Times": ["03:30"]}, "RetainRule": {"Count": 7}, "CopyTags": True}]},
-})
-for role, instance in [("api", "ApiInstance"), ("clickhouse", "ClickhouseInstance")]:
-    add(role.title()+"Logs", "AWS::Logs::LogGroup", {"LogGroupName": "/space-station/production/"+role, "RetentionInDays": 30}, True)
-    for metric, threshold, label in [("mem_used_percent", 90, "Memory"), ("disk_used_percent", 80, "Disk")]:
-        add(role.title()+label+"Alarm", "AWS::CloudWatch::Alarm", {
-            "AlarmDescription": "Space Station "+role+" "+label.lower()+" capacity",
-            "Namespace": "SpaceStation", "MetricName": metric, "Dimensions": [{"Name": "InstanceId", "Value": ref(instance)}],
-            "Statistic": "Average", "Period": 300, "EvaluationPeriods": 3, "Threshold": threshold,
-            "ComparisonOperator": "GreaterThanThreshold", "TreatMissingData": "missing",
-        })
-    add(role.title()+"BackupAlarm", "AWS::CloudWatch::Alarm", {
-        "AlarmDescription": "Space Station daily logical backup failed or missing",
-        "Namespace": "SpaceStation", "MetricName": "BackupSuccess", "Dimensions": [{"Name": "Role", "Value": role}],
-        "Statistic": "Minimum", "Period": 86400, "EvaluationPeriods": 1, "Threshold": 1,
-        "ComparisonOperator": "LessThanThreshold", "TreatMissingData": "breaching",
-    })
-add("ApiHealthAlarm", "AWS::CloudWatch::Alarm", {
-    "AlarmDescription": "Space Station API or dependency readiness is failing",
-    "Namespace": "AWS/ApplicationELB", "MetricName": "UnHealthyHostCount",
-    "Dimensions": [{"Name": "TargetGroup", "Value": get("GatewayTargetGroup", "TargetGroupFullName")}, {"Name": "LoadBalancer", "Value": get("Gateway", "LoadBalancerFullName")}],
-    "Statistic": "Maximum", "Period": 60, "EvaluationPeriods": 3, "Threshold": 1,
-    "ComparisonOperator": "GreaterThanOrEqualToThreshold", "TreatMissingData": "missing",
 })
 template = {"AWSTemplateFormatVersion": "2010-09-09", "Description": "Space Station: native Rust API, local PostgreSQL/Redis, separate native ClickHouse, private networking.",
     "Parameters": {k: {"Type": "String"} for k in ["VpcId", "SubnetId", "CertificateArn", "AmiId"]},

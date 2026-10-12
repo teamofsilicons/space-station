@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use space_station_shared::limits::{BATCH_MAX, DEDUP_TTL_SECS, RECORD_WIRE_MAX};
 use space_station_shared::secrets::sha256_hex;
-use space_station_shared::wire::{Ack, Code, Rejection};
+use space_station_shared::wire::{Ack, Code, Metadata, Rejection};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -163,7 +163,7 @@ struct Staged<'a> {
     table: &'a str,
     record_id: Uuid,
     event_ts_ms: i64,
-    metadata: &'a RawValue,
+    metadata: Metadata,
     record: &'a RawValue,
 }
 
@@ -211,7 +211,7 @@ async fn handle(state: &AppState, text: &str) -> Result<Ack, Fault> {
             table: &table,
             record_id: meta.record_id,
             event_ts_ms: meta.event_ts_ms,
-            metadata: entry.metadata,
+            metadata: Metadata { record_id: meta.record_id, table_id: table.clone(), event_ts_ms: meta.event_ts_ms },
             record: entry.record,
         };
         let row = serde_json::to_string(&row).map_err(|_| Fault::Malformed)?;

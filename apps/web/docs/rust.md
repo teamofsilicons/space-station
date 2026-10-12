@@ -7,10 +7,12 @@ product.
 
 ```toml
 [dependencies]
-space-station = "0.4"
+space-station = "0.5"
 ```
 
-Version 0.4 is published on [crates.io](https://crates.io/crates/space-station). MSRV 1.89.
+The package is published on [crates.io](https://crates.io/crates/space-station). MSRV 1.89.
+Version 0.5 removes automatic telemetry and machine metadata collection; update older installations
+to use this behavior.
 
 It is synchronous throughout — every call is one request and one answer — and it never opens a
 browser. Supported platforms are macOS, Linux, and Windows 10 1803 or newer, using native local

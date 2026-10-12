@@ -1,0 +1,6 @@
+<clickhouse>
+    <send_crash_reports replace="replace">
+        <enabled>false</enabled>
+        <send_logical_errors>false</send_logical_errors>
+    </send_crash_reports>
+</clickhouse>

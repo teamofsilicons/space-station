@@ -21,4 +21,4 @@ SPACE_STATION_URL=http://localhost:8080 cargo run -p space-station-cli -- login
 
 For a Silicon, request an app SLT with `silicon-accounts login --app spacestation -q` and pipe it to `spacestation login --slt-stdin`. Browser sign-in is for Carbons. Session refresh belongs to the backend; do not put upstream account credentials in the browser or CLI.
 
-Exercise table creation, recording, query, window rendering, notification delivery, reload, and logout against the running app. The repository has no automated test suite or mock identity service.
+Exercise table creation, recording, query, window rendering, notification delivery, reload, and logout against the running app. Run `cargo test --workspace` and `npm --prefix packages/space-station-web test` for telemetry-removal regression checks.

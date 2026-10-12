@@ -5,7 +5,7 @@ anything; local AWS credentials are never copied."""
 import argparse,hashlib,json,os,pathlib,subprocess,secrets,tarfile,time
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--initialize", action="store_true", help="Initialize a new production installation (implies --setup); refuses existing secrets")
-parser.add_argument("--setup", action="store_true", help="Also converge both hosts' native services: packages, configuration, systemd, backups, CloudWatch")
+parser.add_argument("--setup", action="store_true", help="Also converge both hosts' native services: packages, configuration, systemd, backups, local logs")
 parser.add_argument("--binary", type=pathlib.Path, help="Ship this aarch64 Linux executable instead of building one")
 parser.add_argument("--rollback", action="store_true", help="Put the API host's previous executable back and restart it")
 args=parser.parse_args()

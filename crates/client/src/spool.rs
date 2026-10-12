@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use space_station_shared::limits::SPOOL_TRUNCATE_BYTES;
-use space_station_shared::wire::{Code, Entry, Metadata};
+use space_station_shared::wire::{Code, Entry};
 use uuid::Uuid;
 
 use crate::Error;
@@ -115,9 +115,9 @@ impl Spool {
         Ok(seq)
     }
 
-    /// The oldest unacked lines, any key, as one frame of at most `max` bytes; `stamp` fills each
-    /// entry's sampled metadata before it is measured. `None` when nothing is waiting.
-    pub fn batch(&mut self, max: usize, mut stamp: impl FnMut(&mut Metadata)) -> io::Result<Option<Batch>> {
+    /// The oldest unacked lines, any key, as one frame of at most `max` bytes.
+    /// `None` when nothing is waiting.
+    pub fn batch(&mut self, max: usize) -> io::Result<Option<Batch>> {
         let id = Uuid::new_v4();
         let mut b = Batch {
             id,
@@ -136,12 +136,11 @@ impl Spool {
             if n == 0 || !line.ends_with('\n') {
                 break;
             }
-            let Ok(Line { seq, mut entry }) = serde_json::from_str::<Line<Entry>>(&line) else {
+            let Ok(Line { seq, entry }) = serde_json::from_str::<Line<Entry>>(&line) else {
                 self.skipped += 1;
                 b.end += n as u64;
                 continue;
             };
-            stamp(&mut entry.metadata);
             let text = serde_json::to_string(&entry)?;
             let separator = usize::from(b.count > 0);
             if b.frame.len() + separator + text.len() + 2 > max {

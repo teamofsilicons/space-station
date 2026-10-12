@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 # Converges one host's native services — packages, configuration, systemd units, backups and
-# CloudWatch — from an unpacked release. Run as root through SSM. No toolchain is installed and
+# local logs — from an unpacked release. Run as root through SSM. No toolchain is installed and
 # nothing is compiled: the backend arrives prebuilt and install-backend.sh puts it in place.
 # No secret values in commands.
 ROLE=${1:?api or clickhouse}
@@ -21,6 +21,7 @@ if [ "$ROLE" = api ]; then
   python3 "$here/configure-native.py" api
   systemctl daemon-reload
 else
+  install -D -m 0644 "$here/clickhouse-no-telemetry.xml" /etc/clickhouse-server/config.d/no-telemetry.xml
   curl -fsSL https://packages.clickhouse.com/rpm/lts/repodata/repomd.xml.key | gpg --dearmor --yes -o /usr/share/keyrings/clickhouse-keyring.gpg
   echo 'deb [signed-by=/usr/share/keyrings/clickhouse-keyring.gpg arch=arm64] https://packages.clickhouse.com/deb lts main' > /etc/apt/sources.list.d/clickhouse.list
   apt-get update

@@ -56,12 +56,10 @@ workspace) would otherwise bind with `EINVAL`, which the daemon reports naming t
 length and the limit; with the fallback such a home costs nothing but the socket's location, the
 spool and lock stay inside it, and two homes never share a daemon because the hash differs.
 
-Metadata stamped by the library:
+Transport metadata stamped by the library (no machine or resource usage is collected):
 
 ```json
-{"record_id": uuid, "table_id": "orders", "event_ts_ms": 1725000000000,
- "system": {"hostname","os","arch","cpu","cores","ram_mb"},      // cached once
- "cpu_pct": 12.5, "gpu_pct": null, "ram_pct": 41.0, "disk_free_mb": 120000}
+{"record_id": uuid, "table_id": "orders", "event_ts_ms": 1725000000000}
 ```
 
 Sanitising (`shared::sanitize`): each string value > 32 KB is cut in the middle to

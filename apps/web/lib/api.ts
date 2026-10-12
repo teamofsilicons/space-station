@@ -2,7 +2,6 @@
 // as `ApiError`. Also the response shapes the pages rely on and the two hooks every page uses.
 
 import type { NotificationDef } from "./notification-def";
-import { trackFrontendEvent } from "./telemetry";
 
 export class ApiError extends Error {
   constructor(
@@ -49,9 +48,6 @@ export async function api<T = void>(
           (T & Envelope) | undefined);
   if (context !== accountContext) throw contextChanged();
   if (res.status === 401 && path !== "/me") signedOut.dispatchEvent(new Event("signedout"));
-  if (method !== "GET" && !path.endsWith("/query") && !path.startsWith("/web/telemetry")) {
-    trackFrontendEvent("api_mutation", { method, path, status: res.status });
-  }
   if (res.ok) {
     if (path === "/me" && (data as Me | undefined)?.context_id) establishContext((data as unknown as Me).context_id);
     return data as T;

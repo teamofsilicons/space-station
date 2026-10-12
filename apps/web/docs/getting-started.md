@@ -18,8 +18,7 @@ Install the CLI and its background daemon on macOS or Linux:
 silicon-apps install spacestation
 ```
 
-Open a new terminal, then follow the commands below. For a web project, start with
-[Browser analytics and events](/docs/web). For local development,
+Open a new terminal, then follow the commands below. For local development,
 see [the development guide](https://github.com/teamofsilicons/space-station/blob/main/docs/DEVELOPING.md).
 
 ## 1. Create a table
@@ -76,7 +75,7 @@ For continuous recording from your application, use the published Rust package:
 
 ```toml
 [dependencies]
-space-station = "0.4"
+space-station = "0.5"
 ```
 
 ```sh
@@ -146,16 +145,14 @@ instead, so only its location changes and two homes still never share a daemon.
 ```json
 {
   "metadata": {
-    "record_id": "8b1e…", "table_id": "orders", "event_ts_ms": 1725000000000,
-    "system": { "hostname": "…", "os": "…", "arch": "…", "cpu": "…", "cores": 8, "ram_mb": 16384 },
-    "cpu_pct": 12.5, "gpu_pct": null, "ram_pct": 41.0, "disk_free_mb": 120000
+    "record_id": "8b1e…", "table_id": "orders", "event_ts_ms": 1725000000000
   },
   "record": { "id": "o-42", "customer": "ada", "amount": 12.5 }
 }
 ```
 
-The library adds `metadata` (`system` is cached once per machine; the gauges are sampled at send
-time and `null` when they cannot be measured). When a batch lands, the server adds two columns:
+The library adds only the record ID, table ID, and event timestamp to `metadata`. It does not
+collect host, device, or resource-usage information. When a batch lands, the server adds two columns:
 `cursor` — per table, starting at 1, assigned once and never reused — and `registered_ts_ms`.
 Rows are stored in `event_ts_ms` order. The Tables overview (`spacestation tables overview
 --window 5h`) measures "event → registered lag" as `registered_ts_ms - event_ts_ms` over the last

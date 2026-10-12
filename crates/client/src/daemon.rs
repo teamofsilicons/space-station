@@ -1,6 +1,6 @@
 //! The machine's one ingest daemon: accepts lines from any number of `SpaceClient`s over a unix
 //! socket, spools them, and ships the oldest unacked lines as one in-flight batch over a
-//! WebSocket, stamping the sampled metadata on the way out. Whoever holds `<home>/daemon.lock` is
+//! WebSocket. Whoever holds `<home>/daemon.lock` is
 //! the daemon; a `SpaceClient` runs this in-process when nobody does, and then its `flush` waits
 //! on the same spool for the server's acks. The socket is `<home>/daemon.sock` when that fits a
 //! socket address, else a short path under the temp dir ([`socket_path`]); the spool and the lock
@@ -14,7 +14,6 @@ use std::os::unix::net::UnixListener;
 #[cfg(unix)]
 pub(crate) use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use std::{fmt, thread};
@@ -25,8 +24,7 @@ pub(crate) use uds_windows::UnixStream;
 
 use space_station_shared::limits::BATCH_MAX;
 use space_station_shared::secrets::sha256_hex;
-use space_station_shared::wire::{Ack, Code, Entry, Metadata, System};
-use tungstenite::client::IntoClientRequest;
+use space_station_shared::wire::{Ack, Code, Entry};
 use tungstenite::{Bytes, Message, WebSocket, stream::MaybeTlsStream};
 
 use crate::spool::{Batch, Spool};
@@ -222,14 +220,13 @@ type Ws = WebSocket<MaybeTlsStream<TcpStream>>;
 /// Connect, ship until the socket fails, reconnect with backoff 1 s → 30 s. Forever.
 fn ship(shared: &Shared, config: &Config, on_error: &Hook, log: &Log) {
     let url = ws_url(&config.url);
-    let mut sampler = Sampler::new(&config.home);
     let mut backoff = Duration::from_secs(1);
     loop {
         let error = match connect_ws(&url) {
             Ok(mut ws) => {
                 log(format_args!("connected to {url}"));
                 backoff = Duration::from_secs(1);
-                session(&mut ws, shared, &mut sampler, on_error, log)
+                session(&mut ws, shared, on_error, log)
             }
             Err(e) => e,
         };
@@ -267,25 +264,19 @@ fn connect_ws(url: &str) -> Result<Ws, Error> {
     tcp.set_read_timeout(Some(ACK_TIMEOUT))?;
     tcp.set_write_timeout(Some(ACK_TIMEOUT))?;
     let socket = tcp.try_clone()?;
-    let mut request = url.into_client_request().map_err(|e| Error::Ws(e.to_string()))?;
-    request.headers_mut().insert(
-        tungstenite::http::header::USER_AGENT,
-        concat!("space-station/", env!("CARGO_PKG_VERSION")).parse().expect("a package version is ASCII"),
-    );
-    let (ws, _) = tungstenite::client_tls(request, tcp).map_err(|e| Error::Ws(e.to_string()))?;
+    let (ws, _) = tungstenite::client_tls(url, tcp).map_err(|e| Error::Ws(e.to_string()))?;
     socket.set_read_timeout(Some(POLL))?;
     Ok(ws)
 }
 
 /// One connection: one batch in flight, acked within 30 s; a ping every 20 s whose pong must
 /// arrive before the next one. Returns the error that ended it.
-fn session(ws: &mut Ws, shared: &Shared, sampler: &mut Sampler, on_error: &Hook, log: &Log) -> Error {
+fn session(ws: &mut Ws, shared: &Shared, on_error: &Hook, log: &Log) -> Error {
     let mut in_flight: Option<(Batch, Instant)> = None;
     let (mut last_ping, mut awaiting_pong) = (Instant::now(), false);
     loop {
         if in_flight.is_none() && lock(&shared.spool).pending() {
-            sampler.refresh();
-            match lock(&shared.spool).batch(BATCH_MAX, |m| sampler.stamp(m)) {
+            match lock(&shared.spool).batch(BATCH_MAX) {
                 Err(e) => return Error::Io(e),
                 Ok(None) => {}
                 Ok(Some(mut batch)) => {
@@ -356,98 +347,4 @@ fn settle(batch: &Batch, ack: Ack, shared: &Shared, on_error: &Hook, log: &Log) 
     }
     log(format_args!("ack {}: {} accepted, {rejected} rejected", batch.id, batch.count.saturating_sub(rejected)));
     shared.ack(batch)
-}
-
-/// Metadata sampled at send time: the machine once, cpu/ram/disk/gpu at most once a second.
-struct Sampler {
-    sys: sysinfo::System,
-    disks: sysinfo::Disks,
-    /// Index in `disks` of the mount holding the home directory.
-    disk: Option<usize>,
-    nvidia: bool,
-    system: System,
-    sampled: Instant,
-    cpu_pct: Option<f32>,
-    gpu_pct: Option<f32>,
-    ram_pct: Option<f32>,
-    disk_free_mb: Option<u64>,
-}
-
-impl Sampler {
-    /// Reads the machine and takes the first sample, which costs one `MINIMUM_CPU_UPDATE_INTERVAL`
-    /// because CPU usage is a delta between two refreshes.
-    fn new(home: &Path) -> Sampler {
-        let mut sys = sysinfo::System::new();
-        sys.refresh_cpu_all();
-        sys.refresh_memory();
-        let disks = sysinfo::Disks::new_with_refreshed_list();
-        let home = home.canonicalize().unwrap_or_default();
-        let disk = disks
-            .list()
-            .iter()
-            .enumerate()
-            // Windows canonical paths carry a verbatim prefix; normalize the mounts too.
-            .filter(|(_, d)| d.mount_point().canonicalize().is_ok_and(|mount| home.starts_with(mount)))
-            .max_by_key(|(_, d)| d.mount_point().as_os_str().len())
-            .map(|(i, _)| i);
-        let system = System {
-            hostname: sysinfo::System::host_name().unwrap_or_default(),
-            os: sysinfo::System::long_os_version().unwrap_or_default(),
-            arch: sysinfo::System::cpu_arch(),
-            cpu: sys.cpus().first().map(|c| c.brand().trim().to_string()).unwrap_or_default(),
-            cores: sysinfo::System::physical_core_count().unwrap_or(sys.cpus().len()) as u32,
-            ram_mb: sys.total_memory() / (1024 * 1024),
-        };
-        let nvidia = Command::new("nvidia-smi").arg("--version").output().is_ok();
-        let mut sampler = Sampler {
-            sys,
-            disks,
-            disk,
-            nvidia,
-            system,
-            sampled: Instant::now(),
-            cpu_pct: None,
-            gpu_pct: None,
-            ram_pct: None,
-            disk_free_mb: None,
-        };
-        thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
-        sampler.sample();
-        sampler
-    }
-
-    /// Take a fresh sample when the last one is over a second old.
-    fn refresh(&mut self) {
-        if self.sampled.elapsed() >= Duration::from_secs(1) {
-            self.sample();
-        }
-    }
-
-    fn stamp(&self, m: &mut Metadata) {
-        m.system = Some(self.system.clone());
-        (m.cpu_pct, m.gpu_pct, m.ram_pct, m.disk_free_mb) =
-            (self.cpu_pct, self.gpu_pct, self.ram_pct, self.disk_free_mb);
-    }
-
-    fn sample(&mut self) {
-        self.sampled = Instant::now();
-        self.sys.refresh_cpu_usage();
-        self.sys.refresh_memory();
-        self.cpu_pct = Some(self.sys.global_cpu_usage());
-        let total = self.sys.total_memory();
-        self.ram_pct = (total > 0).then(|| self.sys.used_memory() as f32 / total as f32 * 100.0);
-        if let Some(disk) = self.disk.map(|i| &mut self.disks.list_mut()[i]) {
-            disk.refresh_specifics(sysinfo::DiskRefreshKind::nothing().with_storage());
-            self.disk_free_mb = Some(disk.available_space() / (1024 * 1024));
-        }
-        if self.nvidia {
-            let output = Command::new("nvidia-smi")
-                .args(["--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"])
-                .output();
-            let gpus: Vec<f32> = output
-                .map(|o| String::from_utf8_lossy(&o.stdout).lines().filter_map(|l| l.trim().parse().ok()).collect())
-                .unwrap_or_default();
-            self.gpu_pct = (!gpus.is_empty()).then(|| gpus.iter().sum::<f32>() / gpus.len() as f32);
-        }
-    }
 }
