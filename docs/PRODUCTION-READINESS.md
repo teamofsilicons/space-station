@@ -10,7 +10,11 @@ The frontend is SolidJS, TypeScript and Vite using the Silicon UI foundations an
 
 The 0.5.1 release removes CLI/backend reporting, the browser collector endpoint, and automatic host/resource metadata. Browser SDK 0.1.2 is an inert compatibility release. Explicit application records retain their payload plus routing and deduplication metadata. Production setup removes CloudWatch forwarders and backup metrics and disables ClickHouse crash reporting; infrastructure disables optional WAF/EC2 telemetry. Daily backups and local diagnostic logs remain.
 
-Privacy regression tests, workspace tests, Rust formatting, the frontend build/typecheck, and infrastructure configuration checks pass. Production deployment and release verification are recorded below after publication.
+Privacy regression tests, workspace tests, Rust formatting, the frontend build/typecheck, and infrastructure configuration checks pass. Live recording and query checks confirm both native CLI records and legacy HTTP batches retain only routing identifiers and timestamps, while explicit payloads survive. The native client uses a constant User-Agent without version or machine information because the gateway requires that HTTP header.
+
+On 2026-10-12 the production frontend and telemetry-free backend were deployed; the retired collector returns HTTP 404. The three internal telemetry tables were retired and their keys revoked; runtime and GitHub telemetry credentials were removed. Both host forwarding agents are uninstalled, ClickHouse crash/logical-error reporting is disabled, backup timers remain active, and the API is healthy. Vercel Web Analytics, Speed Insights and optional Observability are disabled, with no drains configured. AWS basic service metrics remain provider-managed.
+
+Browser SDK 0.1.2 is published on npm; prior emitting versions are deprecated. Signed native downloads are distributed through GitHub and the website. Public browser navigation/reload checks passed with no errors; the deployed JavaScript matches the tested build and contains none of the removed telemetry code. Full browser network tracing was unavailable through the browser tools.
 
 ## Accounts migration
 
