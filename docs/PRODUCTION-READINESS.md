@@ -14,7 +14,7 @@ Privacy regression tests, workspace tests, Rust formatting, the frontend build/t
 
 On 2026-10-12 the production frontend and telemetry-free backend were deployed; the retired collector returns HTTP 404. The three internal telemetry tables were retired and their keys revoked; runtime and GitHub telemetry credentials were removed. Both host forwarding agents are uninstalled, ClickHouse crash/logical-error reporting is disabled, backup timers remain active, and the API is healthy. Vercel Web Analytics, Speed Insights and optional Observability are disabled, with no drains configured. AWS basic service metrics remain provider-managed.
 
-Browser SDK 0.1.2 is published on npm; prior emitting versions are deprecated. Signed native downloads are distributed through GitHub and the website. Public browser navigation/reload checks passed with no errors; the deployed JavaScript matches the tested build and contains none of the removed telemetry code. Full browser network tracing was unavailable through the browser tools.
+Rust shared/client/CLI 0.5.1 and browser SDK 0.1.2 are published. Prior emitting npm versions are deprecated; broken client/CLI 0.5.0 crates are yanked. Silicon Apps serves production 0.5.1 for both Linux targets, and signed native downloads for all six targets are live on GitHub and the website. All website archive checksums match the release manifest; the downloaded native CLI passed the live recording/privacy test. The active local CLI is also 0.5.1. Public browser navigation/reload checks passed with no errors; the deployed JavaScript matches the tested build and contains none of the removed telemetry code. Full browser network tracing was unavailable through the browser tools.
 
 ## Accounts migration
 
