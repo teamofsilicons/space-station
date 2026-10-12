@@ -4,7 +4,7 @@ Live application: https://spacestation.teamofsilicons.com
 API: https://backend.spacestation.teamofsilicons.com
 Publisher: `si:tos`; Silicon Apps ID: `spacestation`.
 
-The frontend is SolidJS, TypeScript and Vite using the Silicon UI foundations and controls, hosted on Vercel. The backend is a native Rust executable on a private EC2 instance with PostgreSQL and Redis. ClickHouse runs on a second private EC2 instance. The stack is `space-station-production` in `us-east-1`.
+The frontend is Next.js (React, TypeScript) built from Silicon UI components, hosted on Vercel. The backend is a native Rust executable on a private EC2 instance with PostgreSQL and Redis. ClickHouse runs on a second private EC2 instance. The stack is `space-station-production` in `us-east-1`.
 
 ## Telemetry removal — 0.5.1
 

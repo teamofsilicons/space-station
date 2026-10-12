@@ -121,7 +121,7 @@ def start(skip_build):
     env.update(SS_KEY=keyfile.read_text().strip(), DATABASE_URL=admin.replace("/postgres", "/space_station_local"),
                REDIS_URL="redis://localhost:6379/6", CARGO_TARGET_DIR=str(TARGET),
                SS_BACKEND_URL="http://localhost:8080", SS_ORIGIN="http://localhost:3000")
-    env.pop("VITE_WS_URL", None)
+    env.pop("NEXT_PUBLIC_WS_URL", None)
     if not skip_build:
         subprocess.run(["cargo", "build", "-p", "space-station-backend", "-p", "space-station-cli",
                         "--bins"], cwd=ROOT, env=env, check=True)
@@ -143,7 +143,7 @@ def start(skip_build):
     try:
         backend = spawn("backend", [str(TARGET / "debug/space-station-backend")])
         wait_http("http://localhost:8080/api/health", backend)
-        web = spawn("web", ["npm", "run", "dev", "--", "--host", "localhost", "--port", "3000"], ROOT / "apps/web")
+        web = spawn("web", ["npm", "run", "dev", "--", "--hostname", "localhost"], ROOT / "apps/web")
         wait_http("http://localhost:3000", web)
     except BaseException:
         stop()

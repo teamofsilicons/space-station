@@ -28,6 +28,6 @@ The browser event package supports framework-independent analytics and explicit 
 
 ## Implementation principles
 
-Use Rust for the backend, CLI, and main library; SolidJS for the frontend; PostgreSQL, ClickHouse, and Redis for storage. Prefer synchronous APIs for straightforward client work and asynchronous event-driven code for the server. Keep code small, preserve trust-boundary validation and error handling, and validate the real flows before publishing. There is no automated test suite.
+Use Rust for the backend, CLI, and main library; Next.js with Silicon UI's React components for the frontend; PostgreSQL, ClickHouse, and Redis for storage. Prefer synchronous APIs for straightforward client work and asynchronous event-driven code for the server. Keep code small, preserve trust-boundary validation and error handling, and validate the real flows before publishing. There is no automated test suite.
 
 Deploy the native backend on AWS and frontend on Vercel. Publish libraries and native packages. Credentials never enter source control or frontend bundles.

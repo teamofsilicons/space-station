@@ -1,5 +1,3 @@
-/* Isolation keeps the rounded clip on the media while the card lifts on its own layer (Safari drops it otherwise).
-   Motion drives the lift and the quick look morph, so transform never gets a CSS transition here. */
 .card { position: relative; min-width: 0; overflow: hidden; isolation: isolate; border: 1px solid var(--border); border-radius: var(--radius-container); corner-shape: var(--corner-shape); background: var(--surface); color: var(--foreground); transition: border-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-standard) var(--ease-standard); }
 /* A pointed-at card floats a little, so the shadow arrives with the lift. Touch and pen never lift. */
 .card[data-hover] { border-color: var(--border-strong); box-shadow: var(--shadow-raised); }

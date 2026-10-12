@@ -1,32 +1,38 @@
+"use client";
 // Settings: your access token, webhooks, API keys, and this browser's appearance.
-import { createSignal, For, Show } from "solid-js";
+import { useState, type ReactNode } from "react";
+import { Badge } from "@/components/silicon-ui/badge/badge";
+import { Button } from "@/components/silicon-ui/button/button";
+import { Checkbox } from "@/components/silicon-ui/checkbox/checkbox";
+import { Input } from "@/components/silicon-ui/input/input";
 import { api, type ApiKey, type Webhook } from "../lib/api";
-import { action, ago, ErrorText, Loading, resource, Secret, Segmented } from "./ui";
+import { ago, ErrorText, Loading, Secret, Segmented, useAction, useResource } from "./ui";
 import { useWorkspace } from "./tabs";
 import { AccessToken } from "./windows";
 import { Icon } from "./icons";
-import { theme, setTheme, type Theme } from "./theme";
+import { setTheme, useTheme, type Theme } from "./theme";
 
-function Row(p: { title: string; hint: string; children: any }) {
+function Row(p: { title: string; hint: string; children: ReactNode }) {
   return (
-    <section class="setting">
-      <div class="setting-label">
+    <section className="setting">
+      <div className="setting-label">
         <h2>{p.title}</h2>
-        <p class="muted">{p.hint}</p>
+        <p className="muted">{p.hint}</p>
       </div>
-      <div class="setting-body">{p.children}</div>
+      <div className="setting-body">{p.children}</div>
     </section>
   );
 }
 
 export function Settings() {
   const ws = useWorkspace();
+  const theme = useTheme();
   return (
-    <div class="page-body">
-      <header class="page-head">
+    <div className="page-body">
+      <header className="page-head">
         <div>
           <h1>Settings</h1>
-          <p class="muted">Signed in as {ws.me.id}.</p>
+          <p className="muted">Signed in as {ws.me.id}.</p>
         </div>
       </header>
       <Row title="Access token" hint="Mission control runs your queries with it while you develop a window or a notification. Tied to your account; keep it in .env, never in code.">
@@ -35,158 +41,157 @@ export function Settings() {
       <Webhooks />
       <Keys />
       <Row title="Appearance" hint="Follows your system unless you choose. Kept in this browser.">
-        <Segmented<Theme> label="Theme" value={theme()} options={["system", "light", "dark"]} names={{ system: "System", light: "Light", dark: "Dark" }} onChange={setTheme} />
+        <Segmented<Theme> label="Theme" value={theme} options={["system", "light", "dark"]} names={{ system: "System", light: "Light", dark: "Dark" }} onChange={setTheme} />
       </Row>
     </div>
   );
 }
 
 function Webhooks() {
-  const rows = resource(() => api<Webhook[]>("/webhooks")),
-    a = action();
-  const [url, setUrl] = createSignal(""),
-    [made, setMade] = createSignal<{ id: string; secret: string }>();
+  const rows = useResource(() => api<Webhook[]>("/webhooks"));
+  const a = useAction();
+  const [url, setUrl] = useState("");
+  const [made, setMade] = useState<{ id: string; secret: string }>();
   return (
     <Row title="Webhooks" hint="Signed notification deliveries to your HTTPS endpoint. Name one as webhook:<id> in a notification's recipients.">
-      <Show when={rows.data()} fallback={<Loading error={rows.data.error} />}>
-        {(items) => (
-          <div class="items">
-            <Show when={!items().length}>
-              <p class="empty-line">No webhooks yet.</p>
-            </Show>
-            <For each={items()}>
-              {(h) => (
-                <div class="item">
-                  <Icon name="link" />
-                  <div class="grow">
-                    <code>{h.id}</code>
-                    <small class="muted">{h.url}</small>
-                  </div>
-                  <small class="muted">@{h.created_by} · {ago(h.created_at)}</small>
-                  <button
-                    class="icon danger"
-                    aria-label={`Delete webhook ${h.id}`}
-                    disabled={a.busy()}
-                    onClick={() => {
-                      if (confirm("Delete this webhook? Deliveries to it will stop."))
-                        a.run(async () => {
-                          await api("/webhooks/" + h.id, "DELETE");
-                          await rows.reload();
-                        });
-                    }}
-                  >
-                    <Icon name="trash" />
-                  </button>
-                </div>
-              )}
-            </For>
-          </div>
-        )}
-      </Show>
-      <Show when={made()}>
-        {(m) => (
-          <div class="callout">
-            <span>Signing secret for <code>{m().id}</code></span>
-            <Secret value={m().secret} once />
-          </div>
-        )}
-      </Show>
+      {!rows.data ? (
+        <Loading error={rows.error} />
+      ) : (
+        <div className="items">
+          {!rows.data.length && <p className="empty-line">No webhooks yet.</p>}
+          {rows.data.map((h) => (
+            <div key={h.id} className="item">
+              <Icon name="link" />
+              <div className="grow">
+                <code>{h.id}</code>
+                <small className="muted">{h.url}</small>
+              </div>
+              <small className="muted">
+                @{h.created_by} · {ago(h.created_at)}
+              </small>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="icon danger"
+                aria-label={`Delete webhook ${h.id}`}
+                disabled={a.busy}
+                onClick={() => {
+                  if (confirm("Delete this webhook? Deliveries to it will stop."))
+                    a.run(async () => {
+                      await api("/webhooks/" + h.id, "DELETE");
+                      await rows.reload();
+                    });
+                }}
+              >
+                <Icon name="trash" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      {made && (
+        <div className="callout">
+          <span>
+            Signing secret for <code>{made.id}</code>
+          </span>
+          <Secret value={made.secret} once />
+        </div>
+      )}
       <form
-        class="inline-form"
+        className="inline-form"
         onSubmit={(e) => {
           e.preventDefault();
           a.run(async () => {
-            setMade(await api("/webhooks", "POST", { url: url().trim() }));
+            setMade(await api<{ id: string; secret: string }>("/webhooks", "POST", { url: url.trim() }));
             setUrl("");
             await rows.reload();
           });
         }}
       >
-        <input type="url" required aria-label="Endpoint URL" placeholder="https://example.com/notifications" value={url()} onInput={(e) => setUrl(e.currentTarget.value)} />
-        <button disabled={a.busy()}>
+        <Input label="Endpoint URL" type="url" required placeholder="https://example.com/notifications" value={url} onChange={(e) => setUrl(e.currentTarget.value)} />
+        <Button type="submit" variant="secondary" disabled={a.busy}>
           <Icon name="plus" /> Add webhook
-        </button>
+        </Button>
       </form>
-      <ErrorText message={a.error()} />
+      <ErrorText message={a.error} />
     </Row>
   );
 }
 
 function Keys() {
-  const rows = resource(() => api<ApiKey[]>("/api-keys")),
-    a = action();
-  const [scopes, setScopes] = createSignal(["tables"]),
-    [made, setMade] = createSignal<{ id: string; key: string }>();
+  const rows = useResource(() => api<ApiKey[]>("/api-keys"));
+  const a = useAction();
+  const [scopes, setScopes] = useState(["tables"]);
+  const [made, setMade] = useState<{ id: string; key: string }>();
   return (
     <Row title="API keys" hint="Read tables and run queries, or read notifications, as your signed-in carbon or silicon.">
-      <Show when={rows.data()} fallback={<Loading error={rows.data.error} />}>
-        {(items) => (
-          <div class="items">
-            <Show when={!items().length}>
-              <p class="empty-line">No API keys yet.</p>
-            </Show>
-            <For each={items()}>
-              {(k) => (
-                <div class="item">
-                  <Icon name="key" />
-                  <div class="grow">
-                    <code>{k.id}</code>
-                    <small class="muted">Last used {k.last_used_at ? ago(k.last_used_at) : "never"} · @{k.created_by}</small>
-                  </div>
-                  <span class="chips">
-                    <For each={k.scopes}>{(s) => <span class="chip tag">{s}</span>}</For>
-                  </span>
-                  <button
-                    class="icon danger"
-                    aria-label={`Delete API key ${k.id}`}
-                    disabled={a.busy()}
-                    onClick={() => {
-                      if (confirm("Delete this API key? Requests with it will fail."))
-                        a.run(async () => {
-                          await api("/api-keys/" + k.id, "DELETE");
-                          await rows.reload();
-                        });
-                    }}
-                  >
-                    <Icon name="trash" />
-                  </button>
-                </div>
-              )}
-            </For>
-          </div>
-        )}
-      </Show>
-      <Show when={made()}>
-        {(m) => (
-          <div class="callout">
-            <span>Key <code>{m().id}</code></span>
-            <Secret value={m().key} once />
-          </div>
-        )}
-      </Show>
+      {!rows.data ? (
+        <Loading error={rows.error} />
+      ) : (
+        <div className="items">
+          {!rows.data.length && <p className="empty-line">No API keys yet.</p>}
+          {rows.data.map((k) => (
+            <div key={k.id} className="item">
+              <Icon name="key" />
+              <div className="grow">
+                <code>{k.id}</code>
+                <small className="muted">
+                  Last used {k.last_used_at ? ago(k.last_used_at) : "never"} · @{k.created_by}
+                </small>
+              </div>
+              <span className="chips">
+                {k.scopes.map((s) => (
+                  <Badge key={s} tone="info" size="sm">
+                    {s}
+                  </Badge>
+                ))}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="icon danger"
+                aria-label={`Delete API key ${k.id}`}
+                disabled={a.busy}
+                onClick={() => {
+                  if (confirm("Delete this API key? Requests with it will fail."))
+                    a.run(async () => {
+                      await api("/api-keys/" + k.id, "DELETE");
+                      await rows.reload();
+                    });
+                }}
+              >
+                <Icon name="trash" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      {made && (
+        <div className="callout">
+          <span>
+            Key <code>{made.id}</code>
+          </span>
+          <Secret value={made.key} once />
+        </div>
+      )}
       <form
-        class="inline-form"
+        className="inline-form"
         onSubmit={(e) => {
           e.preventDefault();
           a.run(async () => {
-            setMade(await api("/api-keys", "POST", { scopes: scopes() }));
+            setMade(await api<{ id: string; key: string }>("/api-keys", "POST", { scopes }));
             await rows.reload();
           });
         }}
       >
-        <For each={["tables", "notifications"]}>
-          {(s) => (
-            <label class="check">
-              <input type="checkbox" checked={scopes().includes(s)} onChange={() => setScopes((old) => (old.includes(s) ? old.filter((x) => x !== s) : [...old, s]))} />
-              {s}
-            </label>
-          )}
-        </For>
-        <button disabled={a.busy() || !scopes().length}>
+        {["tables", "notifications"].map((s) => (
+          <Checkbox key={s} label={s} checked={scopes.includes(s)} onCheckedChange={() => setScopes((old) => (old.includes(s) ? old.filter((x) => x !== s) : [...old, s]))} />
+        ))}
+        <Button type="submit" variant="secondary" disabled={a.busy || !scopes.length}>
           <Icon name="plus" /> Create key
-        </button>
+        </Button>
       </form>
-      <ErrorText message={a.error()} />
+      <ErrorText message={a.error} />
     </Row>
   );
 }

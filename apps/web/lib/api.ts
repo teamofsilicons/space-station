@@ -62,7 +62,7 @@ export async function api<T = void>(
 
 export function wsUrl(override?: string) {
   const base =
-    override || import.meta.env?.VITE_WS_URL ||
+    override || process.env.NEXT_PUBLIC_WS_URL ||
     (location.hostname === "localhost"
       ? "ws://localhost:8080/api/ws"
       : "wss://backend.spacestation.teamofsilicons.com/api/ws");

@@ -1,6 +1,6 @@
 # Native production deployment
 
-Frontend: https://spacestation.teamofsilicons.com (SolidJS + Vite, Vercel).
+Frontend: https://spacestation.teamofsilicons.com (Next.js, Vercel).
 API: https://backend.spacestation.teamofsilicons.com (Rust executable under systemd).
 
 The `space-station-production` CloudFormation stack is in AWS `us-east-1`.
@@ -79,8 +79,8 @@ Do not put secrets in those scripts or print the runtime environment.
 
 For the frontend, run `npm --prefix apps/web run build`. Vercel uses `apps/web` as the project
 root. Upload only frontend source, public assets and project configuration: do not upload the
-repository's `.local`, environment files, Cargo targets or credentials. `vercel.json` proxies
-`/api/*` and the Accounts webhook endpoint, and serves the SPA for application routes.
+repository's `.local`, environment files, Cargo targets or credentials. `next.config.ts` proxies
+`/api/*` (the Accounts webhook endpoint included) and sets the response headers; every non-public route serves the station.
 The browser connects directly to the API's WSS endpoint. Session and login cookies are Secure,
 HttpOnly and scoped to `spacestation.teamofsilicons.com`, so both application hosts share them.
 

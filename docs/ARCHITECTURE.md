@@ -1,6 +1,6 @@
 # Space Station architecture
 
-The Rust package is the primary interface. The CLI delegates operations to it; the SolidJS frontend presents the same account-owned resources. The native backend uses Axum, PostgreSQL for configuration, ClickHouse for records, and Redis for staging and delivery coordination.
+The Rust package is the primary interface. The CLI delegates operations to it; the Next.js frontend presents the same account-owned resources. The native backend uses Axum, PostgreSQL for configuration, ClickHouse for records, and Redis for staging and delivery coordination.
 
 ## Identity and ownership
 
@@ -406,7 +406,7 @@ The SQL guard rewrites only permitted table references and the ClickHouse row po
 
 ## Frontend and runtime
 
-The frontend uses Silicon UI component styles adapted to SolidJS. The workspace has Tables, Space Windows, Notifications, and Settings. Account context changes invalidate cached resource state. Only terminal session errors return the user to sign-in; network and server errors remain retryable.
+The frontend is a Next.js app built from Silicon UI's React components (installed with the shadcn CLI into `apps/web/src/components/silicon-ui`). Public docs and inspirations are rendered at build; every other route is the workspace, which runs in the browser. The workspace has Tables, Space Windows, Notifications, and Settings. Account context changes invalidate cached resource state. Only terminal session errors return the user to sign-in; network and server errors remain retryable.
 
 Processor code runs without browser cookies or credentials. Renderer iframes receive SiliconJSON and typed tools through the runtime bridge. The same `mission-control.js` source is bundled into the Rust client and used by the JavaScript development server; synchronize it with `scripts/sync-runtime.sh`.
 

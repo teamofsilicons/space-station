@@ -49,7 +49,7 @@ The Rust library exposes every operation. The CLI is a shell over it; the browse
 - `crates/client`: account API, recorder, daemon, and embedded Space Window runtime.
 - `crates/cli`: native `spacestation` command and private local sessions.
 - `crates/backend`: Axum API, Accounts integration, SQL guard, ingestion, live views, and notifications.
-- `apps/web`: SolidJS frontend using [Silicon UI](https://ui.teamofsilicons.com) and public docs.
+- `apps/web`: Next.js (React) frontend built from [Silicon UI](https://ui.teamofsilicons.com) components, and public docs.
 - `packages/`: JavaScript runtime and retired browser SDK compatibility package.
 - `infra/production`: native AWS deployment; `infra/apps`: Silicon Apps publishing.
 

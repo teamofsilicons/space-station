@@ -1,4 +1,3 @@
-/* No row gap: grid tracks clamp a negative margin at zero, so a closed message row would still pay the gap. Each row carries its own space instead. */
 .field { display: grid; min-width: 0; }
 .label { margin-bottom: var(--space-related); color: var(--foreground); font-size: var(--text-sm); font-weight: 500; line-height: var(--leading-body); }
 /* Focus answers with the border colour alone (no rings or halos); the field itself never changes size. */

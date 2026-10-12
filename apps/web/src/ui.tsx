@@ -1,38 +1,57 @@
-import { SiliconButton, SiliconInput } from './silicon-ui';
-// The small pieces every page shares: a polled resource that rests while its tab is hidden, a busy
-// action, errors and loading lines, copy and one-time secrets, dialogs, menus, and
-// the tab a page lives in (`useTab`), which is how a page navigates, names itself and signals.
-import {
-  createContext,
-  createEffect,
-  createResource,
-  createSignal,
-  For,
-  on,
-  onCleanup,
-  Show,
-  useContext,
-  type Accessor,
-  type JSX,
-  type Signal,
-} from "solid-js";
-import { createStore, reconcile, unwrap } from "solid-js/store";
+"use client";
+// The small pieces every page shares: a store any component can follow, a polled resource that rests
+// while its tab is hidden, a busy action, errors and loading lines, copy and one-time secrets,
+// dialogs, menus, and the tab a page lives in (`useTab`), which is how a page navigates, names
+// itself and signals. The surfaces are Silicon UI's.
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
+import { Alert } from "@/components/silicon-ui/alert/alert";
+import { Button } from "@/components/silicon-ui/button/button";
+import { CopyButton } from "@/components/silicon-ui/copy-button/copy-button";
+import { Dialog, DialogContent } from "@/components/silicon-ui/dialog/dialog";
+import { DropdownMenuAt, type DropdownItem } from "@/components/silicon-ui/dropdown-menu/dropdown-menu";
+import { EmptyState } from "@/components/silicon-ui/empty-state/empty-state";
+import SegmentedControl from "@/components/silicon-ui/segmented-control/segmented-control";
 import type { How, Route } from "../lib/tabs";
 import { Icon } from "./icons";
+
+// ─── A store: a value, and whoever follows it re-renders when it changes ──────────────────────────
+
+export type Store<T> = { get: () => T; set: (next: T | ((old: T) => T)) => void; subscribe: (fn: () => void) => () => void };
+export function store<T>(value: T): Store<T> {
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    set: (next) => {
+      const v = typeof next === "function" ? (next as (old: T) => T)(value) : next;
+      if (Object.is(v, value)) return;
+      value = v;
+      listeners.forEach((fn) => fn());
+    },
+    subscribe: (fn) => (listeners.add(fn), () => void listeners.delete(fn)),
+  };
+}
+export const useStore = <T,>(s: Store<T>) => useSyncExternalStore(s.subscribe, s.get, s.get);
+
+// ─── The tab a page lives in ──────────────────────────────────────────────────────────────────────
 
 /** A tab as its page sees it. `mark` sets what the strip shows beside the title. */
 export type TabApi = {
   id: string;
-  route: Accessor<Route>;
-  visible: Accessor<boolean>;
+  route: Route;
+  visible: boolean;
   go: (path: string) => void;
   open: (path: string, how?: How) => void;
   title: (title: string) => void;
   mark: (m: Mark) => void;
 };
 export type Mark = { live?: "ok" | "stale" | "error"; activity?: boolean };
-export const TabContext = createContext<TabApi>();
+export const TabContext = createContext<TabApi | undefined>(undefined);
 export const useTab = () => useContext(TabContext)!;
+/** Names the tab this page is in. */
+export function useTitle(title: string | undefined) {
+  const tab = useContext(TabContext);
+  useEffect(() => void (title && tab?.title(title)), [tab, title]);
+}
 
 export const when = (s: string | null) => (s ? new Date(s).toLocaleString() : "never");
 /** "just now", "5m ago", "3h ago", "2d ago", then the date. */
@@ -48,256 +67,170 @@ export function ago(s: string | number | null) {
 }
 export const count = (n: number) => (n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e4 ? Math.round(n / 1e3) + "k" : n.toLocaleString());
 
-/**
- * Where a resource keeps its value: a list is reconciled by `id`, so a poll updates rows in place
- * and never rebuilds one (or closes what it has open); anything else is replaced whole, unwrapped.
- */
-function kept<T>(init: T | undefined): Signal<T | undefined> {
-  const [store, set] = createStore<{ v: T | undefined }>({ v: init });
-  return [
-    () => (Array.isArray(store.v) ? store.v : unwrap(store.v)),
-    (v: unknown) => {
-      const next = typeof v === "function" ? v(unwrap(store.v)) : v;
-      if (Array.isArray(next)) set("v", reconcile(next) as never);
-      else set("v", () => next as T);
-      return next;
-    },
-  ] as Signal<T | undefined>;
-}
+// ─── Loading and acting ───────────────────────────────────────────────────────────────────────────
+
+export type Resource<T> = { data: T | undefined; error: Error | undefined; reload: () => Promise<void> };
 
 /**
- * Loads once, again when `source` changes, and every `every` ms while its tab is on screen. A poll
- * that fails keeps the last value rather than throwing into whatever reads it.
+ * Loads once, again when `deps` change (showing the last value meanwhile), and every `every` ms while its
+ * tab is on screen (and when it comes back on screen). A reload that fails keeps the last value rather
+ * than showing an error; a load for new `deps` that fails shows it.
  */
-export function resource<T>(load: () => Promise<T>, every?: number, source?: Accessor<unknown>) {
-  const [data, { refetch }] = createResource<T, unknown>(
-    source || (() => true),
-    async (_, info) => {
-      try {
-        return await load();
-      } catch (e) {
-        if (info.refetching && info.value !== undefined) return info.value as T;
-        throw e;
-      }
-    },
-    { storage: kept },
-  );
-  const tab = useContext(TabContext);
-  if (every) {
-    const timer = setInterval(() => tab?.visible() === false || refetch(), every);
-    onCleanup(() => clearInterval(timer));
-    if (tab) createEffect(on(tab.visible, (v) => v && refetch(), { defer: true }));
-  }
-  return { data, reload: refetch };
+export function useResource<T>(load: () => Promise<T>, every?: number, deps: readonly unknown[] = []): Resource<T> {
+  const [state, setState] = useState<{ data?: T; error?: Error }>({});
+  const latest = useRef(load);
+  latest.current = load;
+  const seq = useRef(0);
+  const had = useRef(false);
+  const fetch = useCallback(async (fresh: boolean) => {
+    const n = ++seq.current;
+    if (fresh) had.current = false;
+    try {
+      const data = await latest.current();
+      if (n !== seq.current) return;
+      had.current = true;
+      setState({ data });
+    } catch (e) {
+      if (n !== seq.current) return;
+      const error = e instanceof Error ? e : new Error(String(e));
+      setState((old) => (had.current ? old : { error }));
+    }
+  }, []);
+  const reload = useCallback(() => fetch(false), [fetch]);
+  useEffect(() => void fetch(true), deps); // eslint-disable-line react-hooks/exhaustive-deps
+  const visible = useContext(TabContext)?.visible !== false;
+  const shown = useRef(visible);
+  useEffect(() => {
+    if (every && visible && !shown.current) reload();
+    shown.current = visible;
+    if (!every || !visible) return;
+    const timer = setInterval(reload, every);
+    return () => clearInterval(timer);
+  }, [every, visible, reload]);
+  return useMemo(() => ({ data: state.data, error: state.error, reload }), [state, reload]);
 }
 
-export function action() {
-  const [busy, setBusy] = createSignal(false),
-    [error, setError] = createSignal("");
-  return {
-    busy,
-    error,
-    run: async (fn: () => Promise<unknown>) => {
-      if (busy()) return;
-      setBusy(true);
-      setError("");
-      try {
-        await fn();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setBusy(false);
-      }
-    },
-  };
+export function useAction() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const running = useRef(false);
+  const run = useCallback(async (fn: () => Promise<unknown>) => {
+    if (running.current) return;
+    running.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      await fn();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+  }, []);
+  return { busy, error, run };
 }
 
-export function ErrorText(p: { message?: string }) {
+export function ErrorText(p: { message?: string; title?: string }) {
+  if (!p.message) return null;
   return (
-    <Show when={p.message}>
-      <p class="error" role="alert">
-        {p.message}
-      </p>
-    </Show>
+    <Alert tone="danger" title={p.title || "Something went wrong"} style={{ whiteSpace: "pre-wrap" }}>
+      {p.message}
+    </Alert>
   );
 }
 
 export function Loading(p: { error?: Error }) {
+  if (p.error) return <ErrorText message={p.error.message} />;
   return (
-    <p class={p.error ? "error" : "loading"} role={p.error ? "alert" : "status"}>
-      {p.error?.message || "Loading…"}
+    <p className="loading" role="status">
+      Loading…
     </p>
   );
 }
 
+// ─── Copy and secrets ─────────────────────────────────────────────────────────────────────────────
+
 export function Copy(p: { text: string; label?: string }) {
-  const [done, setDone] = createSignal<"" | "ok" | "fail">("");
-  return (
-    <SiliconButton
-      type="button"
-      class="ghost small"
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(p.text);
-          setDone("ok");
-        } catch {
-          setDone("fail");
-        }
-        setTimeout(() => setDone(""), 1600);
-      }}
-    >
-      <Icon name={done() === "ok" ? "check" : "copy"} />
-      {done() === "ok" ? "Copied" : done() === "fail" ? "Select the text" : p.label || "Copy"}
-    </SiliconButton>
-  );
+  return <CopyButton value={p.text} label={p.label || "Copy"} variant="plain" />;
 }
 
 export function Secret(p: { value: string; once?: boolean }) {
-  const [visible, setVisible] = createSignal(!!p.once);
+  const [visible, setVisible] = useState(!!p.once);
   return (
-    <div class="secret">
-      <code>{visible() ? p.value : "•".repeat(28)}</code>
-      <div class="secret-actions">
-        <SiliconButton type="button" class="ghost small" onClick={() => setVisible(!visible())}>
-          {visible() ? "Hide" : "Reveal"}
-        </SiliconButton>
+    <div className="secret">
+      <code>{visible ? p.value : "•".repeat(28)}</code>
+      <div className="secret-actions">
+        <Button type="button" variant="ghost" size="sm" onClick={() => setVisible(!visible)}>
+          {visible ? "Hide" : "Reveal"}
+        </Button>
         <Copy text={p.value} />
       </div>
-      <Show when={p.once}>
-        <small class="warn">Save this now. It is shown only once.</small>
-      </Show>
+      {p.once && <small className="warn">Save this now. It is shown only once.</small>}
     </div>
   );
 }
 
+// ─── Dialogs, choices, empty states ───────────────────────────────────────────────────────────────
+
 /** A modal dialog. In a tab that leaves the screen it steps aside, and comes back with the tab. */
-export function Modal(p: { title: string; close: () => void; children: JSX.Element; wide?: boolean }) {
-  let dialog!: HTMLDialogElement;
+export function Modal(p: { title: string; description?: string; close: () => void; children: ReactNode; wide?: boolean }) {
   const tab = useContext(TabContext);
-  const shown = () => !tab || tab.visible();
-  createEffect(() => (shown() ? !dialog.open && dialog.showModal() : dialog.open && dialog.close()));
   return (
-    <dialog ref={dialog} class={p.wide ? "wide" : ""} onClose={() => shown() && p.close()} onCancel={p.close}>
-      <div class="dialog-head">
-        <h2>{p.title}</h2>
-        <SiliconButton type="button" class="icon" aria-label="Close dialog" onClick={p.close}>
-          <Icon name="x" />
-        </SiliconButton>
-      </div>
-      {p.children}
-    </dialog>
+    <Dialog open={!tab || tab.visible} onOpenChange={(open) => !open && p.close()}>
+      <DialogContent
+        title={p.title}
+        description={p.description}
+        className={p.wide ? "wide" : undefined}
+        // Like a native modal: Escape or the close button, never a stray click outside (a key shown once must survive one).
+        onPointerDownOutside={(e) => e.preventDefault()}
+        // A dialog with a field opens on that field, not on its close button.
+        onOpenAutoFocus={(e) => {
+          const field = (e.currentTarget as HTMLElement).querySelector<HTMLElement>("input:not([type=hidden]):not(:disabled), textarea:not(:disabled), select:not(:disabled)");
+          if (field) (e.preventDefault(), field.focus());
+        }}
+      >
+        {p.children}
+      </DialogContent>
+    </Dialog>
   );
 }
 
 /** A segmented control: one choice of a few, always visible. */
 export function Segmented<T extends string>(p: { value: T; options: readonly T[]; label: string; onChange: (v: T) => void; names?: Partial<Record<T, string>> }) {
-  return (
-    <div class="segmented" role="radiogroup" aria-label={p.label} onKeyDown={event => {
-      const delta = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
-      if (!delta && event.key !== 'Home' && event.key !== 'End') return;
-      event.preventDefault();
-      const next = event.key === 'Home' ? 0 : event.key === 'End' ? p.options.length - 1 : (p.options.indexOf(p.value) + delta + p.options.length) % p.options.length;
-      if (!p.options[next]) return;
-      p.onChange(p.options[next]);
-      event.currentTarget.querySelectorAll<HTMLButtonElement>('button')[next]?.focus();
-    }}>
-      <For each={p.options}>
-        {(o) => (
-          <SiliconButton type="button" role="radio" tabIndex={o === p.value ? 0 : -1} aria-checked={o === p.value} classList={{ on: o === p.value }} onClick={() => p.onChange(o)}>
-            {p.names?.[o] ?? o}
-          </SiliconButton>
-        )}
-      </For>
-    </div>
-  );
+  return <SegmentedControl label={p.label} value={p.value} onValueChange={(v) => p.onChange(v as T)} options={p.options.map((o) => ({ value: o, label: p.names?.[o] ?? o }))} />;
 }
 
-// ─── Menus: one at a time, anywhere, closed by any click outside, Escape or a blur ────────────────
+export function Empty(p: { icon: string; title: string; description: string; action?: ReactNode }) {
+  return <EmptyState icon={<Icon name={p.icon} size={22} />} title={p.title} description={p.description} action={p.action} />;
+}
 
-export type MenuItem = { label: string; icon?: string; keys?: string; run: () => void; danger?: boolean; disabled?: boolean } | "-";
-const [menu, setMenu] = createSignal<{ x: number; y: number; items: MenuItem[] }>();
-export const closeMenu = () => setMenu(undefined);
+// ─── Menus: one at a time, anywhere, at the pointer or under what was clicked ─────────────────────
 
-/** Opens a menu at the pointer, or under the element that was clicked. */
-export function openMenu(e: MouseEvent, items: MenuItem[], anchor = e.currentTarget as HTMLElement) {
+export type MenuItem = { label: string; icon?: string; run: () => void; danger?: boolean; disabled?: boolean } | "-";
+const menu = store<{ at: { x: number; y: number }; items: MenuItem[]; n: number } | null>(null);
+let opened = 0;
+export const closeMenu = () => menu.set(null);
+
+/** Opens a menu at the pointer for a right click, else under the element that was clicked. */
+export function openMenu(e: ReactMouseEvent | MouseEvent, items: MenuItem[], anchor = e.currentTarget as HTMLElement) {
   e.preventDefault();
   e.stopPropagation();
   const r = e.type === "contextmenu" ? null : anchor.getBoundingClientRect();
-  setMenu({ x: r ? r.left : e.clientX, y: r ? r.bottom + 4 : e.clientY, items });
+  menu.set({ at: r ? { x: r.left, y: r.bottom } : { x: e.clientX, y: e.clientY }, items, n: ++opened });
 }
 
 export function MenuHost() {
-  let el: HTMLDivElement | undefined;
-  const outside = (e: Event) => el && !el.contains(e.target as Node) && closeMenu();
-  const key = (e: KeyboardEvent) => e.key === "Escape" && closeMenu();
-  addEventListener("pointerdown", outside, true);
-  addEventListener("keydown", key);
-  addEventListener("blur", closeMenu);
-  onCleanup(() => {
-    removeEventListener("pointerdown", outside, true);
-    removeEventListener("keydown", key);
-    removeEventListener("blur", closeMenu);
+  const m = useStore(menu);
+  // A click into an iframe (a live window) reaches no listener here; the window's blur does.
+  useEffect(() => (addEventListener("blur", closeMenu), () => removeEventListener("blur", closeMenu)), []);
+  // A closing menu keeps its items while it fades out.
+  const last = useRef(m);
+  if (m) last.current = m;
+  const items: DropdownItem[] = [];
+  (last.current?.items || []).forEach((item, i, all) => {
+    if (item === "-") return;
+    items.push({ label: item.label, icon: <Icon name={item.icon || "blank"} />, onSelect: item.run, destructive: item.danger, disabled: item.disabled, separatorBefore: all[i - 1] === "-" });
   });
-  return (
-    <Show when={menu()}>
-      {(m) => (
-        <div
-          ref={(node) => {
-            el = node;
-            // Keep the menu on screen: flip left or up when it would spill over an edge.
-            queueMicrotask(() => {
-              node.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
-              const r = node.getBoundingClientRect();
-              if (r.right > innerWidth - 8) node.style.left = Math.max(8, innerWidth - r.width - 8) + "px";
-              if (r.bottom > innerHeight - 8) node.style.top = Math.max(8, m().y - r.height) + "px";
-            });
-          }}
-          class="menu"
-          role="menu"
-          style={{ left: m().x + "px", top: m().y + "px" }}
-          onKeyDown={(e) => {
-            if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-            e.preventDefault();
-            const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
-            const i = items.indexOf(document.activeElement as HTMLButtonElement);
-            items[(i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
-          }}
-        >
-          <For each={m().items}>
-            {(item) =>
-              item === "-" ? (
-                <hr />
-              ) : (
-                <SiliconButton
-                  role="menuitem"
-                  classList={{ danger: item.danger }}
-                  disabled={item.disabled}
-                  onClick={() => {
-                    closeMenu();
-                    item.run();
-                  }}
-                >
-                  <Icon name={item.icon || "blank"} />
-                  <span>{item.label}</span>
-                  <Show when={item.keys}>
-                    <kbd>{item.keys}</kbd>
-                  </Show>
-                </SiliconButton>
-              )
-            }
-          </For>
-        </div>
-      )}
-    </Show>
-  );
-}
-
-export function Empty(p: { icon: string; title: string; children?: JSX.Element }) {
-  return (
-    <div class="empty">
-      <span class="empty-icon"><Icon name={p.icon} size={22} /></span>
-      <strong>{p.title}</strong>
-      {p.children}
-    </div>
-  );
+  return <DropdownMenuAt key={last.current?.n} at={m?.at ?? null} items={items} onClose={closeMenu} />;
 }

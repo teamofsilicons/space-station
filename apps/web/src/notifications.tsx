@@ -1,23 +1,28 @@
+"use client";
 // Notifications: each definition with its triggers, pause/enable, subscribe, a test run and its
 // events; and the JSON editor that checks a definition before the backend does.
-import { createSignal, For, Show } from "solid-js";
+import { useState } from "react";
+import { Badge } from "@/components/silicon-ui/badge/badge";
+import { Button } from "@/components/silicon-ui/button/button";
+import { Switch } from "@/components/silicon-ui/switch/switch";
+import { Textarea } from "@/components/silicon-ui/textarea/textarea";
 import { api, type Notification, type NotificationEvent, type TestResult } from "../lib/api";
 import { parseDefinition, testSummary } from "../lib/notification-def";
-import { action, ago, Empty, ErrorText, Loading, Modal, resource, when } from "./ui";
-import { useWorkspace } from "./tabs";
+import { ago, Empty, ErrorText, Loading, Modal, useAction, useResource, when } from "./ui";
+import { useLists, useWorkspace } from "./tabs";
 import { Icon } from "./icons";
-import { SiliconCard } from "./silicon-ui";
 
 export function Notifications() {
   const ws = useWorkspace();
-  const rows = resource(() => api<Notification[]>("/notifications"), 15000);
-  const [editing, setEditing] = createSignal<{ id?: string; text: string }>();
+  const { tables } = useLists();
+  const rows = useResource(() => api<Notification[]>("/notifications"), 15000);
+  const [editing, setEditing] = useState<{ id?: string; text: string }>();
   const editable = (n: Notification) => {
     const { access: _legacyAccess, ...definition } = n.def as Notification["def"] & { access?: string[] };
     return JSON.stringify({ ...definition, enabled: n.enabled, recipients: n.recipients }, null, 2);
   };
   const template = () => {
-    const table = ws.tables.data()?.[0]?.id || "orders",
+    const table = tables.data?.[0]?.id || "orders",
       actor = ws.me.id;
     return JSON.stringify(
       {
@@ -35,203 +40,203 @@ export function Notifications() {
     );
   };
   return (
-    <div class="page-body">
-      <header class="page-head">
+    <div className="page-body">
+      <header className="page-head">
         <div>
           <h1>Notifications</h1>
-          <p class="muted">Watch incoming records or run on a schedule. Results go to subscribers and webhooks.</p>
+          <p className="muted">Watch incoming records or run on a schedule. Results go to subscribers and webhooks.</p>
         </div>
-        <button class="primary" onClick={() => setEditing({ text: template() })}>
+        <Button onClick={() => setEditing({ text: template() })}>
           <Icon name="plus" /> New notification
-        </button>
+        </Button>
       </header>
-      <Show when={rows.data()} fallback={<Loading error={rows.data.error} />}>
-        {(items) => (
-          <Show
-            when={items().length}
-            fallback={
-              <div class="hero-empty">
-                <Empty icon="bell" title="No notifications yet">
-                  <p>A notification runs SQL when a table receives a record, or on a cron schedule, and delivers each new row once per cooldown.</p>
-                  <button class="primary large" onClick={() => setEditing({ text: template() })}>
-                    <Icon name="plus" /> Create a notification
-                  </button>
-                </Empty>
-              </div>
+      {!rows.data ? (
+        <Loading error={rows.error} />
+      ) : !rows.data.length ? (
+        <div className="hero-empty">
+          <Empty
+            icon="bell"
+            title="No notifications yet"
+            description="A notification runs SQL when a table receives a record, or on a cron schedule, and delivers each new row once per cooldown."
+            action={
+              <Button size="lg" onClick={() => setEditing({ text: template() })}>
+                <Icon name="plus" /> Create a notification
+              </Button>
             }
-          >
-            <div class="stack">
-              <For each={items()}>
-                {(n) => (
-                  <NotificationCard
-                    n={n}
-                    actor={ws.me.id}
-                    reload={rows.reload}
-                    edit={() => setEditing({ id: n.id, text: editable(n) })}
-                  />
-                )}
-              </For>
-            </div>
-          </Show>
-        )}
-      </Show>
-      <Show when={editing()} keyed>
-        {(edit) => (
-          <NotificationEditor
-            initial={edit.text}
-            id={edit.id}
-            close={() => setEditing(undefined)}
-            saved={() => {
-              setEditing(undefined);
-              rows.reload();
-            }}
           />
-        )}
-      </Show>
+        </div>
+      ) : (
+        <div className="stack">
+          {rows.data.map((n) => (
+            <NotificationCard key={n.id} n={n} actor={ws.me.id} reload={rows.reload} edit={() => setEditing({ id: n.id, text: editable(n) })} />
+          ))}
+        </div>
+      )}
+      {editing && (
+        <NotificationEditor
+          initial={editing.text}
+          id={editing.id}
+          close={() => setEditing(undefined)}
+          saved={() => {
+            setEditing(undefined);
+            rows.reload();
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function NotificationCard(p: { n: Notification; actor: string; reload: () => unknown; edit: () => void }) {
-  const a = action(),
-    [events, setEvents] = createSignal<NotificationEvent[]>(),
-    [result, setResult] = createSignal("");
-  const path = () => "/notifications/" + p.n.id;
-  const subscribed = () => p.n.recipients.includes("@" + p.actor);
+function NotificationCard(p: { n: Notification; actor: string; reload: () => Promise<void>; edit: () => void }) {
+  const a = useAction();
+  const [events, setEvents] = useState<NotificationEvent[]>();
+  const [result, setResult] = useState("");
+  const path = "/notifications/" + p.n.id;
+  const subscribed = p.n.recipients.includes("@" + p.actor);
   return (
-    <SiliconCard class="panel notification" classList={{ paused: !p.n.enabled }}>
-      <div class="n-head">
-        <span class="title-icon"><Icon name="bell" /></span>
-        <div class="grow">
+    <section className={`panel notification${p.n.enabled ? "" : " paused"}`}>
+      <div className="n-head">
+        <span className="title-icon">
+          <Icon name="bell" />
+        </span>
+        <div className="grow">
           <h2>{p.n.def.name}</h2>
-          <Show when={p.n.def.description}>
-            <p class="muted">{p.n.def.description}</p>
-          </Show>
+          {p.n.def.description && <p className="muted">{p.n.def.description}</p>}
         </div>
-        <button
-          class="switch"
-          role="switch"
-          aria-checked={p.n.enabled}
+        <Switch
+          checked={p.n.enabled}
+          label={p.n.enabled ? "On" : "Paused"}
           title={p.n.enabled ? "Pause" : "Enable"}
-          disabled={a.busy()}
+          disabled={a.busy}
+          onCheckedChange={() =>
+            a.run(async () => {
+              await api(path, "PUT", { def: { ...p.n.def, enabled: !p.n.enabled }, recipients: p.n.recipients });
+              await p.reload();
+            })
+          }
+        />
+      </div>
+      <div className="n-facts">
+        {p.n.def.triggers.map((t, i) => (
+          <Badge key={i} size="sm" className="mono" icon={<Icon name={"schedule" in t ? "clock" : "table"} />}>
+            {"schedule" in t ? t.schedule : t.table + (t.where ? ` where ${t.where}` : "")}
+          </Badge>
+        ))}
+        <span className="muted">
+          delay {p.n.def.delay || "2s"} · cooldown {p.n.def.cooldown || "10m"}
+        </span>
+        <span className="muted">
+          {p.n.recipients.length} recipient{p.n.recipients.length === 1 ? "" : "s"}
+        </span>
+        <span className="muted" title={when(p.n.created_at)}>
+          @{p.n.created_by} · {ago(p.n.created_at)}
+        </span>
+      </div>
+      <div className="n-actions">
+        <Button
+          variant="secondary"
+          size="sm"
+          className={subscribed ? "on" : undefined}
+          disabled={a.busy}
           onClick={() =>
             a.run(async () => {
-              await api(path(), "PUT", { def: { ...p.n.def, enabled: !p.n.enabled }, recipients: p.n.recipients });
+              await api(path + "/subscribe", subscribed ? "DELETE" : "POST");
               await p.reload();
             })
           }
         >
-          <i />
-          {p.n.enabled ? "On" : "Paused"}
-        </button>
-      </div>
-      <div class="n-facts">
-        <For each={p.n.def.triggers}>
-          {(t) => (
-            <span class="chip mono">
-              <Icon name={"schedule" in t ? "clock" : "table"} />
-              {"schedule" in t ? t.schedule : t.table + (t.where ? ` where ${t.where}` : "")}
-            </span>
-          )}
-        </For>
-        <span class="muted">delay {p.n.def.delay || "2s"} · cooldown {p.n.def.cooldown || "10m"}</span>
-        <span class="muted">{p.n.recipients.length} recipient{p.n.recipients.length === 1 ? "" : "s"}</span>
-        <span class="muted" title={when(p.n.created_at)}>@{p.n.created_by} · {ago(p.n.created_at)}</span>
-      </div>
-      <div class="n-actions">
-        <button
-          class="small"
-          classList={{ on: subscribed() }}
-          disabled={a.busy()}
-          onClick={() =>
-            a.run(async () => {
-              await api(path() + "/subscribe", subscribed() ? "DELETE" : "POST");
-              await p.reload();
-            })
-          }
-        >
-          <Icon name={subscribed() ? "check" : "bell"} /> {subscribed() ? "Subscribed" : "Subscribe"}
-        </button>
-        <button class="small" disabled={a.busy()} onClick={() => a.run(async () => setResult(testSummary(await api<TestResult>(path() + "/test", "POST"))))}>
+          <Icon name={subscribed ? "check" : "bell"} /> {subscribed ? "Subscribed" : "Subscribe"}
+        </Button>
+        <Button variant="secondary" size="sm" disabled={a.busy} onClick={() => a.run(async () => setResult(testSummary(await api<TestResult>(path + "/test", "POST"))))}>
           <Icon name="play" /> Test
-        </button>
-        <button
-          class="small"
-          classList={{ on: !!events() }}
-          disabled={a.busy()}
-          onClick={() => (events() ? setEvents(undefined) : a.run(async () => setEvents(await api<NotificationEvent[]>(path() + "/events"))))}
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          className={events ? "on" : undefined}
+          disabled={a.busy}
+          onClick={() => (events ? setEvents(undefined) : a.run(async () => setEvents(await api<NotificationEvent[]>(path + "/events"))))}
         >
           <Icon name="list" /> Events
-        </button>
-        <button class="small" disabled={a.busy()} onClick={p.edit}>
+        </Button>
+        <Button variant="secondary" size="sm" disabled={a.busy} onClick={p.edit}>
           <Icon name="pencil" /> Edit
-        </button>
+        </Button>
       </div>
-      <ErrorText message={a.error()} />
-      <Show when={result()}>
-        <div class="n-result">
-          <div class="row">
-            <span class="kicker">Test run</span>
-            <span class="grow" />
-            <button class="icon" aria-label="Close test result" onClick={() => setResult("")}><Icon name="x" /></button>
+      <ErrorText message={a.error} />
+      {result && (
+        <div className="n-result">
+          <div className="row">
+            <span className="kicker">Test run</span>
+            <span className="grow" />
+            <Button variant="ghost" size="sm" className="icon" aria-label="Close test result" onClick={() => setResult("")}>
+              <Icon name="x" />
+            </Button>
           </div>
-          <pre>{result()}</pre>
+          <pre>{result}</pre>
         </div>
-      </Show>
-      <Show when={events()}>
-        {(items) => (
-          <Show when={items().length} fallback={<p class="empty-line">No events yet.</p>}>
-            <ol class="timeline">
-              <For each={items()}>
-                {(e) => (
-                  <li>
-                    <time title={when(e.created_at)}>{ago(e.created_at)}</time>
-                    <span>{e.text}</span>
-                    <code>{e.dedup_key}</code>
-                  </li>
-                )}
-              </For>
-            </ol>
-          </Show>
-        )}
-      </Show>
-    </SiliconCard>
+      )}
+      {events &&
+        (events.length ? (
+          <ol className="timeline">
+            {events.map((e) => (
+              <li key={e.id}>
+                <time title={when(e.created_at)}>{ago(e.created_at)}</time>
+                <span>{e.text}</span>
+                <code>{e.dedup_key}</code>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="empty-line">No events yet.</p>
+        ))}
+    </section>
   );
 }
 
 function NotificationEditor(p: { initial: string; id?: string; close: () => void; saved: () => void }) {
-  const [text, setText] = createSignal(p.initial),
-    a = action();
-  const check = () => parseDefinition(text()).errors;
+  const [text, setText] = useState(p.initial);
+  const a = useAction();
+  const problems = parseDefinition(text).errors;
   return (
     <Modal title={p.id ? "Edit notification" : "New notification"} close={p.close} wide>
       <form
         onSubmit={(e) => {
           e.preventDefault();
           a.run(async () => {
-            const parsed = parseDefinition(text());
+            const parsed = parseDefinition(text);
             if (!parsed.body) throw Error(parsed.errors.join("\n"));
             await api("/notifications" + (p.id ? "/" + p.id : ""), p.id ? "PUT" : "POST", parsed.body);
             p.saved();
           });
         }}
       >
-        <p class="hint">
+        <p className="hint">
           SQL must return <code>dedup_key</code>, <code>text</code> and <code>metadata</code>. Recipients are @c:handle, @si:handle or webhook:&lt;id&gt;.{" "}
           <a href="/docs/notifications" target="_blank">
             Documentation <Icon name="external" />
           </a>
         </p>
-        <textarea class="code" aria-label="Definition (JSON)" rows={20} spellcheck={false} value={text()} onInput={(e) => setText(e.currentTarget.value)} />
-        <Show when={check().length} fallback={<p class="valid"><Icon name="check" /> Valid definition</p>}>
-          <ul class="problems">
-            <For each={check()}>{(x) => <li>{x}</li>}</For>
+        <Textarea label="Definition (JSON)" className="code" rows={20} spellCheck={false} value={text} onChange={(e) => setText(e.currentTarget.value)} />
+        {problems.length ? (
+          <ul className="problems">
+            {problems.map((x, i) => (
+              <li key={i}>{x}</li>
+            ))}
           </ul>
-        </Show>
-        <ErrorText message={a.error()} />
-        <div class="dialog-foot">
-          <button type="button" onClick={p.close}>Cancel</button>
-          <button class="primary" disabled={a.busy()}>Save notification</button>
+        ) : (
+          <p className="valid">
+            <Icon name="check" /> Valid definition
+          </p>
+        )}
+        <ErrorText message={a.error} />
+        <div className="dialog-foot">
+          <Button type="button" variant="secondary" onClick={p.close}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={a.busy}>
+            Save notification
+          </Button>
         </div>
       </form>
     </Modal>
