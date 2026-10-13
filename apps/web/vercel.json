@@ -1,6 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
+  "env": { "NEXT_TELEMETRY_DISABLED": "1" },
+  "build": { "env": { "NEXT_TELEMETRY_DISABLED": "1" } },
   "installCommand": "npm ci",
   "buildCommand": "npm run build",
   "outputDirectory": ".next"

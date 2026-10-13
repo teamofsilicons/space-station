@@ -10,6 +10,8 @@ https://backend.spacestation.teamofsilicons.com.
 Run `npm install`, then `npm run dev` (port 3000). `SS_BACKEND_URL` selects the API
 (default `http://localhost:8080` in development, the production backend in a build). `npm run build`
 produces the production build; `npm run check-all` typechecks and builds.
+The npm commands disable Next.js telemetry before it starts. Vercel also disables it during builds and at runtime.
+The Vercel project's root directory must be `apps/web`, with the Next.js framework; `vercel.json` supplies the build settings.
 
 `next.config.ts` proxies `/api/*` to the backend and sets the response headers. Cookies are HttpOnly and Secure
 in production. `SS_COOKIE_DOMAIN=spacestation.teamofsilicons.com` on the backend shares

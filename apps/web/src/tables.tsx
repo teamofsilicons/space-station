@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Badge } from "@/components/silicon-ui/badge/badge";
 import { Button } from "@/components/silicon-ui/button/button";
 import { Input } from "@/components/silicon-ui/input/input";
+import { Select } from "@/components/silicon-ui/select/select";
 import { JsonViewer } from "@/components/silicon-ui/json-viewer/json-viewer";
 import { api, TABLE_ID, type Overview, type Table } from "../lib/api";
 import { loadRecordPage, openSnapshot, type Snapshot, type TableRecord } from "../lib/table-records";
@@ -407,20 +408,8 @@ export function TableView() {
             apply();
           }}
         >
-          <label className="inline">
-            Last
-            <input aria-label="Last N records" type="number" min="1" max="10000" step="1" value={draftLimit} onChange={(e) => setDraftLimit(e.currentTarget.value)} onBlur={() => draftLimit !== String(limit) && apply()} disabled={busy} />
-            records
-          </label>
-          <label className="inline">
-            <select aria-label="Records per page" value={size} disabled={busy} onChange={(e) => apply(Number(e.currentTarget.value))}>
-              {[25, 50, 100].map((n) => (
-                <option key={n} value={n}>
-                  {n} per page
-                </option>
-              ))}
-            </select>
-          </label>
+          <Input label="Last N records" type="number" min="1" max="10000" step="1" value={draftLimit} onChange={(e) => setDraftLimit(e.currentTarget.value)} onBlur={() => draftLimit !== String(limit) && apply()} disabled={busy} />
+          <Select label="Records per page" value={String(size)} disabled={busy} onValueChange={(value) => apply(Number(value))} options={[25, 50, 100].map((n) => ({ value: String(n), label: `${n} per page` }))} />
           <span className="muted grow newest">Newest first</span>
           <span className="pager" aria-label="Record pagination">
             <span className="muted">

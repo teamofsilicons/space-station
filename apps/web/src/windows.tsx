@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/silicon-ui/badge/badge";
 import { Button } from "@/components/silicon-ui/button/button";
 import { Input } from "@/components/silicon-ui/input/input";
+import { Select } from "@/components/silicon-ui/select/select";
 import { JsonViewer } from "@/components/silicon-ui/json-viewer/json-viewer";
 import { api, currentContext, wsUrl, type SpaceWindow, type Table, type Version } from "../lib/api";
 import { agentPrompt } from "../lib/agent-prompt";
@@ -253,29 +254,27 @@ function Workbench(p: { path: string; window: SpaceWindow; versions: Version[]; 
           </button>
         </div>
         {/* Picking a version loads it into the editors; the picker itself stays on its prompt. */}
-        <select
-          aria-label="Load a version"
+        <Select
+          label="Load a version"
+          placeholder="Load a version…"
           value=""
-          onChange={(e) => {
-            const v = p.versions.find((v) => v.id === e.currentTarget.value);
+          onValueChange={(value) => {
+            const v = p.versions.find((v) => v.id === value);
             if (v) {
               setProcessor(v.processor);
               setRenderer(v.renderer);
             }
           }}
-        >
-          <option value="">Load a version…</option>
-          {p.versions.map((v) => (
-            <option key={v.id} value={v.id}>
-              {`${v.name}${v.name === p.window.version?.name ? " (current)" : ""} · @${v.created_by} · ${ago(v.created_at)}`}
-            </option>
-          ))}
-        </select>
+          options={p.versions.map((v) => ({
+            value: v.id,
+            label: `${v.name}${v.name === p.window.version?.name ? " (current)" : ""} · @${v.created_by} · ${ago(v.created_at)}`,
+          }))}
+        />
       </div>
       <CodeEditor label="processor.js" value={processor} onInput={setProcessor} hidden={file !== "processor"} />
       <CodeEditor label="renderer.html" value={renderer} onInput={setRenderer} hidden={file !== "renderer"} />
       <div className="wb-foot">
-        <input required aria-label="New version name" value={name} onChange={(e) => setName(e.currentTarget.value)} placeholder="Version name, e.g. v2" />
+        <Input label="New version name" required value={name} onChange={(e) => setName(e.currentTarget.value)} placeholder="Version name, e.g. v2" />
         <Button type="submit" loading={a.busy}>
           Publish version
         </Button>
